@@ -88,3 +88,21 @@ def test_overview_rows_carry_coordinates(client, people):
     client.put(f"/api/properties/{pid}/location", headers=as_(people["a"]), json={"lon": 145.15, "lat": -37.82})
     row = next(r for r in client.get("/api/overview").json()["rows"] if r["id"] == pid)
     assert (row["lon"], row["lat"]) == (145.15, -37.82)
+
+
+def test_listing_photo_saved_once(client, people, tmp_path, monkeypatch):
+    from app.routes import driveway
+    monkeypatch.setenv("BLOB_DIR", str(tmp_path))
+    data = jpeg()
+    monkeypatch.setattr(driveway, "download_image", lambda url: (data, "image/jpeg"))
+    a = people["a"]
+    pid = house(client, a, 7)
+    body = {"url": "https://rimh2.domainstatic.com.au/abc/lead.jpg"}
+    r1 = client.post(f"/api/properties/{pid}/attachments/from-url", headers=as_(a), json=body)
+    r2 = client.post(f"/api/properties/{pid}/attachments/from-url", headers=as_(a), json=body)
+    assert r1.status_code == 201 and r2.json()["existing"] is True, r1.text
+    [photo] = client.get(f"/api/properties/{pid}").json()["attachments"]
+    assert photo["kind"] == "photo" and photo["caption"] == "From the listing" and photo["original_name"] == "lead.jpg"
+    assert client.get(f"/api/attachments/{photo['id']}/thumb").status_code == 200
+    # No listing link: a clear message rather than a failed fetch.
+    assert client.post(f"/api/properties/{pid}/listing-photo", headers=as_(a)).status_code == 422

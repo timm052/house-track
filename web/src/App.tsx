@@ -14,12 +14,16 @@ import PropertyList from "./pages/PropertyList";
 import QuickAdd from "./pages/QuickAdd";
 import Settings from "./pages/Settings";
 import Setup from "./pages/Setup";
+import Refresh from "./pages/Refresh";
 import { usePersons } from "./people";
 
 // The map pulls in MapLibre and the drawing tools; load it only when opened.
 const MapPage = lazy(() => import("./pages/MapPage"));
 const Overview = lazy(() => import("./pages/Overview"));
 const Trends = lazy(() => import("./pages/Trends"));
+
+// Lists, the house page and dashboards use the full width; forms and settings stay narrow.
+const WIDE = [/^\/$/, /^\/p\//, /^\/trends/, /^\/compare/];
 
 export default function App() {
   const location = useLocation();
@@ -76,6 +80,7 @@ export default function App() {
       </header>
       <main className="shell">
         <ErrorBoundary resetKey={location.pathname}>
+        <div className={WIDE.some((re) => re.test(location.pathname)) ? "" : "narrow"}>
         <Routes>
           <Route path="/" element={<PropertyList />} />
           <Route path="/add" element={<QuickAdd />} />
@@ -91,8 +96,10 @@ export default function App() {
           <Route path="/trends" element={<Suspense fallback={<p className="muted">Loading…</p>}><Trends /></Suspense>} />
           <Route path="/disagree" element={<Disagreements />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/refresh" element={<Refresh />} />
           <Route path="*" element={<p>Page not found.</p>} />
         </Routes>
+        </div>
         </ErrorBoundary>
       </main>
     </>

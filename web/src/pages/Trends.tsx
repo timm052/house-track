@@ -116,7 +116,7 @@ export default function Trends() {
             {suburbClass(slots, s) && <span className="suburb-swatch" />}{s}</button>)}
         </div>
         <div className="chips">
-          {PROPERTY_TYPES.map((t) => <button key={t} className={`chip ${types.includes(t) ? "on" : ""}`} onClick={() => toggle(types, setTypes, t)}>{t}</button>)}
+          {PROPERTY_TYPES.map((t) => <button key={t} className={`chip ${types.includes(t) ? "on" : ""}`} onClick={() => toggle(types, setTypes, t)}>{t[0].toUpperCase() + t.slice(1)}</button>)}
         </div>
         <div className="row small">
           <label className="check">Beds at least

@@ -6,12 +6,15 @@ from uuid import UUID
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from urllib.error import HTTPError, URLError
+from urllib.request import Request as UrlRequest, urlopen
 
 from .. import blobs
 from ..address import Address, display
 from ..db import tx
 from ..deps import Person, not_found, update_columns
+from ..schemas import ListingUpdateIn
 
 router = APIRouter(prefix="/api")
 
@@ -236,6 +239,102 @@ async def upload(property_id: UUID, person: Person,
              url or None, caption, facts.get("taken_at"), facts.get("lon"), facts.get("lon"), facts.get("lat")),
         ).fetchone()
     return {"id": row["id"]}
+
+
+# ─── the listing's main photo ────────────────────────────────────────
+MAX_IMAGE = 15 * 1024 * 1024
+
+
+class PhotoFromUrl(BaseModel):
+    url: str = Field(pattern=r"^https?://", max_length=2000)
+    caption: str | None = "From the listing"
+
+
+def download_image(url: str) -> tuple[bytes, str]:
+    from .decide import BROWSER_UA
+    try:
+        req = UrlRequest(url, headers={"User-Agent": BROWSER_UA, "Accept": "image/*"})
+        with urlopen(req, timeout=20) as r:
+            mime = (r.headers.get_content_type() or "").lower()
+            data = r.read(MAX_IMAGE + 1)
+    except (HTTPError, URLError, TimeoutError) as e:
+        raise HTTPException(502, f"Couldn't download the photo ({getattr(e, 'code', None) or 'no response'}).") from None
+    if not mime.startswith("image/"):
+        raise HTTPException(422, "That link isn't an image.")
+    if len(data) > MAX_IMAGE:
+        raise HTTPException(413, "That photo is over 15 MB.")
+    return data, mime
+
+
+def save_photo(property_id: UUID, person, url: str, caption: str | None) -> dict:
+    """Keep a copy (listings come down after the sale), once: the same photo twice is one attachment."""
+    data, mime = download_image(url)
+    sha = blobs.store(data)
+    blobs.image_facts(data, sha)  # also writes the thumbnail
+    name = url.split("?")[0].rstrip("/").rsplit("/", 1)[-1][:200] or "listing-photo"
+    with tx(person) as conn:
+        if conn.execute("SELECT 1 FROM property WHERE id = %s", (property_id,)).fetchone() is None:
+            raise not_found("Property")
+        same = conn.execute("SELECT id FROM attachment WHERE property_id = %s AND sha256 = %s", (property_id, sha)).fetchone()
+        if same:
+            return {"id": same["id"], "existing": True}
+        row = conn.execute(
+            # A stored file, so no url: an attachment is a file or a link, never both.
+            """INSERT INTO attachment (property_id, kind, sha256, mime_type, byte_size, original_name, caption)
+               VALUES (%s, 'photo', %s, %s, %s, %s, %s) RETURNING id""",
+            (property_id, sha, mime, len(data), name, caption)).fetchone()
+    return {"id": row["id"], "existing": False}
+
+
+def save_photos_later(property_id: UUID, person, urls: list[str]) -> None:
+    """A listing's photos take a while to download, so the house is saved first and these follow."""
+    import threading
+
+    def run() -> None:
+        for url in urls[:30]:
+            try:
+                save_photo(property_id, person, url, "From the listing")
+            except Exception:  # noqa: BLE001  one bad photo shouldn't stop the rest
+                pass
+    threading.Thread(target=run, name="listing-photos", daemon=True).start()
+
+
+@router.post("/properties/{property_id}/listing-update")
+def listing_update(property_id: UUID, body: ListingUpdateIn, person: Person) -> dict:
+    """A tracked house captured again with the bookmarklet: add what's new (guide, dates, inspections, agents,
+    Statement of Information, tags, photos). Safe to repeat."""
+    from .. import listing_apply
+    with tx(person) as conn:
+        if conn.execute("SELECT 1 FROM property WHERE id = %s", (property_id,)).fetchone() is None:
+            raise not_found("Property")
+        added = listing_apply.refresh(conn, property_id, body)
+    if body.photos:
+        save_photos_later(property_id, person, body.photos)
+    added["photos"] = len(body.photos)
+    return added
+
+
+@router.post("/properties/{property_id}/attachments/from-url", status_code=201)
+def photo_from_url(property_id: UUID, body: PhotoFromUrl, person: Person) -> dict:
+    return save_photo(property_id, person, body.url, body.caption)
+
+
+@router.post("/properties/{property_id}/listing-photo", status_code=201)
+def listing_photo(property_id: UUID, person: Person) -> dict:
+    """Read the house's listing link, find its main photo and keep a copy. Portals often block servers;
+    the bookmarklet on the listing page is the fallback."""
+    from .. import listing_parse
+    from .decide import fetch_page
+    with tx() as conn:
+        link = conn.execute("""SELECT l.url FROM campaign_link l JOIN campaign c ON c.id = l.campaign_id
+                               WHERE c.property_id = %s ORDER BY (c.outcome IS NULL) DESC, c.created_at DESC, l.created_at DESC LIMIT 1""",
+                            (property_id,)).fetchone()
+    if link is None:
+        raise HTTPException(422, "This house has no listing link yet.")
+    image = listing_parse.main_image(fetch_page(link["url"]))
+    if not image:
+        raise HTTPException(422, "Couldn't find a photo on the listing page.")
+    return save_photo(property_id, person, image, "From the listing")
 
 
 class AttachmentPatch(BaseModel):

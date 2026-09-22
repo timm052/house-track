@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import AddressSearch from "../AddressSearch";
 import { api, ApiError, PROPERTY_TYPES, type Address, type BuildStatus, type PropertyType, type SaleMethod } from "../api";
-import { fromLocalInput, LABEL, parseMoney } from "../format";
+import { fromLocalInput, LABEL, parseMoney, toLocalInput } from "../format";
+import { CaptureReview, defaultChoices, ExistingUpdate, extrasFor, listingNotes, type Capture, type Choices } from "../listing/Capture";
 
 const EMPTY: Address = { unit: "", street_number: "", street: "", suburb: "", postcode: "", plan_number: "", lot_number: "" };
 const blankToNull = (v: string | null) => (v && v.trim() ? v.trim() : null);
@@ -44,31 +45,58 @@ export default function QuickAdd() {
   const [importUrl, setImportUrl] = useState("");
   const [importMsg, setImportMsg] = useState<string | null>(null);
 
-  type Prefill = { url: string | null; address: string | null; beds: number | null; baths: number | null; car_spaces: number | null; land_m2: number | null;
-                   sale_method: SaleMethod | null; guide_low_aud: number | null; guide_high_aud: number | null };
-  async function applyPrefill(p: Prefill) {
+  // What the listing said (bookmarklet or pasted link), and which extras to keep.
+  const [capture, setCapture] = useState<Capture | null>(null);
+  const [choices, setChoices] = useState<Choices | null>(null);
+
+  async function applyPrefill(p: Capture) {
+    setCapture(p);
+    setChoices(defaultChoices(p));
+    if (p.existing_property_id) { setImportMsg(null); return; }
     const filled: string[] = [];
-    if (p.address) {
+    const parts = p.address_parts;
+    if (parts?.street && parts.suburb) {
+      const next = { ...EMPTY, unit: parts.unit ?? "", street_number: parts.street_number ?? "", street: parts.street,
+                     suburb: parts.suburb, postcode: parts.postcode ?? "" };
+      setAddr(next);
+      setGnafPid(await gnafMatch(next));
+      filled.push("address");
+    } else if (p.address) {
       try {
         const parsed = await api<Address>(`/api/address/parse?text=${encodeURIComponent(p.address)}`);
-        setAddr({ ...EMPTY, ...Object.fromEntries(Object.entries(parsed).map(([k, v]) => [k, v ?? ""])) } as Address);
-        setGnafPid(null);
+        const next = { ...EMPTY, ...Object.fromEntries(Object.entries(parsed).map(([k, v]) => [k, v ?? ""])) } as Address;
+        setAddr(next);
+        setGnafPid(await gnafMatch(next));
         filled.push("address");
       } catch { setPaste(p.address); }
     }
+    if (p.property_type) { setType(p.property_type); filled.push("type"); }
     if (p.beds != null) { setBeds(String(p.beds)); filled.push("beds"); }
     if (p.baths != null) { setBaths(String(p.baths)); filled.push("baths"); }
     if (p.car_spaces != null) { setCars(String(p.car_spaces)); filled.push("cars"); }
-    if (p.land_m2 != null) { setLand(String(p.land_m2)); filled.push("land area"); }
+    if (p.land_m2 != null) { setLand(String(p.land_m2)); filled.push("land"); }
+    if (p.building_m2 != null) { setBuilding(String(p.building_m2)); filled.push("building"); }
     if (p.sale_method) { setMethod(p.sale_method); filled.push("sale method"); }
+    const at = p.sale_method === "auction" ? p.auction_at : p.sale_method === "eoi" ? p.eoi_closes_at : null;
+    if (at) { setSaleAt(toLocalInput(at)); filled.push(p.sale_method === "auction" ? "auction date" : "EOI closing date"); }
     if (p.guide_low_aud) { setLow(String(p.guide_low_aud)); setHigh(String(p.guide_high_aud ?? p.guide_low_aud)); filled.push("price guide"); }
     if (p.url) setUrl(p.url);
     setImportMsg(filled.length ? `Filled in ${filled.join(", ")} from the listing. Check them before saving.` : "Couldn't find details on that page. Fill the form in.");
   }
+  /** The G-NAF record for an address, when there's an exact match, so the house is pinned straight away. */
+  async function gnafMatch(a: Address): Promise<string | null> {
+    try {
+      const q = [a.unit && `${a.unit}/`, a.street_number, a.street, a.suburb].filter(Boolean).join(" ").replace("/ ", "/");
+      const hits = await api<{ pid: string; unit: string | null; street_number: string | null; street: string; suburb: string }[]>(
+        `/api/address/search?q=${encodeURIComponent(q)}`);
+      const same = (x: string | null | undefined, y: string | null | undefined) => (x ?? "").trim().toLowerCase() === (y ?? "").trim().toLowerCase();
+      return hits.find((h) => same(h.street_number, a.street_number) && same(h.street, a.street) && same(h.suburb, a.suburb) && same(h.unit, a.unit))?.pid ?? null;
+    } catch { return null; }
+  }
   async function importLink() {
     setImportMsg("Reading the listing…");
     try {
-      await applyPrefill(await api<Prefill>("/api/listing/prefill", { method: "POST", body: { url: importUrl.trim() } }));
+      await applyPrefill(await api<Capture>("/api/listing/prefill", { method: "POST", body: { url: importUrl.trim() } }));
     } catch (e) {
       setImportMsg((e as Error).message);
       setUrl(importUrl.trim());
@@ -83,7 +111,12 @@ export default function QuickAdd() {
       (e.source as Window | null)?.postMessage("housetrack-got-it", e.origin);
       window.removeEventListener("message", onMessage);
       try {
-        await applyPrefill(await api<Prefill>("/api/listing/parse", { method: "POST", body: { url: e.data.url, html: e.data.html } }));
+        const d = e.data;
+        const str = (v: unknown) => (typeof v === "string" && v ? v : null);
+        setImportMsg("Reading the listing…");
+        await applyPrefill(await api<Capture>("/api/listing/parse", { method: "POST", body: {
+          url: d.url, html: str(d.html) ?? "", next_data: str(d.next_data), argonaut: str(d.argonaut), text: str(d.text),
+          image: str(d.image) && /^https?:\/\//.test(d.image) ? d.image : null } }));
       } catch (err) {
         setImportMsg((err as Error).message);
       }
@@ -136,20 +169,23 @@ export default function QuickAdd() {
           car_spaces: count(cars),
           land_m2: area(land),
           building_m2: area(building),
+          notes: capture && choices?.notes ? listingNotes(capture) : null,
+          listing: capture && choices && !capture.existing_property_id ? extrasFor(capture, choices) : null,
           campaign: method
             ? {
                 sale_method: method,
                 auction_at: method === "auction" ? fromLocalInput(saleAt) : null,
                 eoi_closes_at: method === "eoi" ? fromLocalInput(saleAt) : null,
                 url: blankToNull(url),
+                listed_on: capture?.listed_on ?? null,
                 guide_low_aud: lowAud,
                 guide_high_aud: highAud,
               }
             : null,
         },
       }),
-    onSuccess: ({ id }) => {
-      queryClient.invalidateQueries({ queryKey: ["overview"] });
+    onSuccess: async ({ id }) => {
+      for (const key of [["overview"], ["tags"]]) queryClient.invalidateQueries({ queryKey: key });
       navigate(`/p/${id}`);
     },
   });
@@ -158,10 +194,20 @@ export default function QuickAdd() {
   return (
     <div className="stack" style={{ marginTop: 12 }}>
       <h1>Add a house</h1>
+      <p className="muted small">Paste a listing link to fill most of this in, or type the address. Only the address is needed; the rest can wait.</p>
+
+      {capture?.existing_property_id && (
+        <>
+          <ExistingUpdate c={capture} />
+          <p className="small muted">Not the same house? <button className="link" onClick={() => applyPrefill({ ...capture, existing_property_id: null })}>Add it as a new house</button></p>
+        </>
+      )}
+      {!capture?.existing_property_id && <>
 
       <div className="card stack">
+        <h2>From a listing</h2>
         <label>
-          Import from a listing link
+          Listing link
           <div className="row" style={{ marginTop: 4 }}>
             <input className="grow" type="url" placeholder="https://www.domain.com.au/…" value={importUrl} onChange={(e) => setImportUrl(e.target.value)} />
             <button disabled={!/^https?:\/\//.test(importUrl)} onClick={importLink}>Import</button>
@@ -170,7 +216,10 @@ export default function QuickAdd() {
         {importMsg && <p className="small muted">{importMsg}</p>}
       </div>
 
+      {capture && choices && !capture.existing_property_id && <CaptureReview c={capture} ch={choices} set={setChoices} />}
+
       <div className="card stack">
+        <h2>Address</h2>
         <label>
           Find the address
           <AddressSearch onPick={(hit) => {
@@ -210,11 +259,12 @@ export default function QuickAdd() {
       </div>
 
       <div className="card stack">
+        <h2>The house</h2>
         <div className="grid2">
           <label>
             Type
             <select value={type} onChange={(e) => setType(e.target.value as PropertyType)}>
-              {PROPERTY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              {PROPERTY_TYPES.map((t) => <option key={t} value={t}>{t[0].toUpperCase() + t.slice(1)}</option>)}
             </select>
           </label>
           <label>
@@ -239,6 +289,7 @@ export default function QuickAdd() {
       </div>
 
       <div className="card stack">
+        <h2>The sale</h2>
         <label>
           Sale method
           <select value={method} onChange={(e) => setMethod(e.target.value as SaleMethod | "")}>
@@ -270,9 +321,13 @@ export default function QuickAdd() {
           {err.existingPropertyId && <Link to={`/p/${err.existingPropertyId}`}>Open it</Link>}
         </p>
       )}
-      <button className="primary" disabled={save.isPending || !!priceProblem} onClick={() => save.mutate()}>
-        Save
-      </button>
+      <div className="row" style={{ justifyContent: "flex-end" }}>
+        <Link to="/"><button>Cancel</button></Link>
+        <button className="primary" style={{ minWidth: 160 }} disabled={save.isPending || !!priceProblem} onClick={() => save.mutate()}>
+          {save.isPending ? "Saving…" : "Save house"}
+        </button>
+      </div>
+      </>}
     </div>
   );
 }

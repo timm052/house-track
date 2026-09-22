@@ -6,15 +6,16 @@ from uuid import UUID
 import psycopg
 from fastapi import APIRouter, HTTPException
 
-from .. import gnaf
+from .. import gnaf, listing_apply
 from ..address import Address, address_key, display, normalise, parse
 from ..db import tx
 from ..deps import OptionalPerson, Person, not_found, update_columns
 from ..schemas import AddressIn, OpinionIn, PriceGuideIn, PropertyIn, PropertyPatch, Status, StatusIn
 from .campaigns import insert_campaign, insert_link, insert_price_guide
-from .driveway import attachments_for, inspections_for
+from .driveway import attachments_for, inspections_for, save_photos_later
 from .geo import travel_for
 from .overlays import overlays_for
+
 
 router = APIRouter(prefix="/api")
 
@@ -138,6 +139,12 @@ def create_property(body: PropertyIn, person: Person) -> dict:
                     conn, campaign_id,
                     PriceGuideIn(source="advertised", low_aud=c.guide_low_aud, high_aud=c.guide_high_aud),
                 )
+        else:
+            campaign_id = None
+        if body.listing is not None:
+            listing_apply.apply(conn, property_id, campaign_id, body.listing)
+    if body.listing is not None and body.listing.photos:
+        save_photos_later(property_id, person, body.listing.photos)
     return {"id": property_id}
 
 

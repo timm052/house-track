@@ -1027,6 +1027,8 @@ The `gnaf` database, tiles and routing data are left out of backups because setu
 
 7. ✅ **Statewide data and analysis** (done 2026-09-22). All of Victoria, streamed per D20. Land and building area on quick add, cards and Overview. Overview dropdowns for fixed-choice fields, checked number, money and date entry, and a tags editor. Shared tags (`PUT /api/properties/{id}/tags`). Multi-select filters on the phone Houses tab, plus a filter on any column. A price and guide history on the house page, with first-guide, guide-change and last-change columns in Overview. A desktop **Trends** page with medians, sold-vs-guide, clearance, days on market, land and $/m², a monthly chart, a scatter, a histogram and a by-suburb table, filterable by suburb, type, beds, land and period.
 
+8. ✅ **Listing capture and weekly refresh** (done 2026-09-23). Domain blocks server fetches (403), so capture runs in your own browser. The **+ House Track** bookmarklet sends the page's data (Domain's `__NEXT_DATA__`, realestate.com.au's page data, JSON-LD, Open Graph tags and the visible text) to `api/app/listing_capture.py`. That fills in the whole quick-add form and offers the photos, agents, inspections, Statement of Information, map position and suggested tags. On a tracked listing it updates the house instead. The **⟳ Refresh from Domain** bookmarklet, run on any Domain page, loads each active house's listing 4 seconds apart (at most 40, least recently checked first) and applies new guides, dates, inspections and agents automatically; off-market listings are flagged, not changed. realestate.com.au is read generically and untested against live pages.
+
 ---
 
-**Signed off 2026-09-22** (decisions D1–D20). All milestones (1–7, including 2.5) are implemented; see README.md.
+**Signed off 2026-09-22** (decisions D1–D20). All milestones (1–8, including 2.5) are implemented; see README.md.

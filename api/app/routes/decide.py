@@ -7,7 +7,8 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from .. import listing_parse
+from .. import listing_capture, listing_parse
+from ..address import Address, display
 from ..db import tx
 from ..deps import Person, not_found
 
@@ -96,7 +97,11 @@ class PrefillIn(BaseModel):
 class CaptureIn(BaseModel):
     """What the bookmarklet sends: the page as the browser rendered it."""
     url: str = Field(pattern=r"^https?://")
-    html: str = Field(max_length=3_000_000)
+    html: str = Field(default="", max_length=3_000_000)
+    image: str | None = Field(default=None, pattern=r"^https?://", max_length=2000)  # the page's og:image, read in the browser
+    next_data: str | None = Field(default=None, max_length=4_000_000)  # Domain's __NEXT_DATA__
+    argonaut: str | None = Field(default=None, max_length=4_000_000)   # realestate.com.au's page data
+    text: str | None = Field(default=None, max_length=400_000)         # the visible text
 
 
 BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -107,15 +112,120 @@ BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHT
 def prefill(body: PrefillIn, _: Person) -> dict:
     """Fetch the listing from the server. Often blocked by the portals; the bookmarklet is the fallback."""
     try:
-        req = Request(body.url, headers={"User-Agent": BROWSER_UA, "Accept": "text/html", "Accept-Language": "en-AU"})
-        with urlopen(req, timeout=15) as r:
-            page = r.read(3_000_000).decode("utf-8", errors="replace")
-    except (HTTPError, URLError, TimeoutError) as e:
-        raise HTTPException(502, f"Couldn't read that page ({getattr(e, 'code', None) or 'no response'}). "
-                                 "Try the bookmarklet from Settings, or fill the form in.") from None
-    return listing_parse.parse(page, body.url)
+        page = fetch_page(body.url)
+    except HTTPException:
+        raise HTTPException(502, "Couldn't read that page. Try the bookmarklet from Settings, or fill the form in.") from None
+    return with_existing(listing_parse.parse(page, body.url))
 
 
 @router.post("/listing/parse")
 def parse_capture(body: CaptureIn, _: Person) -> dict:
-    return listing_parse.parse(body.html, body.url)
+    with tx() as conn:
+        known = [r["name"] for r in conn.execute("SELECT name FROM tag ORDER BY name").fetchall()]
+    out = listing_capture.extract(body.url, body.html, body.next_data, body.argonaut, body.text, body.image, known)
+    return with_existing(out)
+
+
+def with_existing(out: dict) -> dict:
+    """Already tracking this listing? Then the capture can add its photo to that house instead."""
+    with tx() as conn:
+        row = conn.execute("""SELECT c.property_id, p.unit, p.street_number, p.street, p.suburb, p.postcode, p.plan_number, p.lot_number
+                              FROM campaign_link l JOIN campaign c ON c.id = l.campaign_id JOIN property p ON p.id = c.property_id
+                              WHERE l.url = %s LIMIT 1""", (out.get("url"),)).fetchone()
+    out["existing_property_id"] = row and str(row.pop("property_id"))
+    out["existing_address"] = row and display(Address(**row))
+    return out
+
+
+def fetch_page(url: str) -> str:
+    try:
+        req = Request(url, headers={"User-Agent": BROWSER_UA, "Accept": "text/html", "Accept-Language": "en-AU"})
+        with urlopen(req, timeout=15) as r:
+            return r.read(3_000_000).decode("utf-8", errors="replace")
+    except (HTTPError, URLError, TimeoutError) as e:
+        raise HTTPException(502, f"The listing site wouldn't let House Track read the page ({getattr(e, 'code', None) or 'no response'}). "
+                                 "Open the listing and click the House Track bookmarklet (see Settings) to add its photo.") from None
+
+
+# ─── weekly refresh: the "Refresh from Domain" bookmarklet ───────────────
+# It runs in your own browser on domain.com.au, loads each tracked listing a few seconds apart, and hands the
+# page data to House Track's /refresh page, which posts each one here. Changes are applied automatically.
+OFF_MARKET = {"sold": "Sold", "underoffer": "Under offer", "under offer": "Under offer", "archived": "No longer listed",
+              "offmarket": "Off the market", "withdrawn": "Withdrawn", "leased": "No longer listed"}
+MAX_TARGETS = 40
+
+
+@router.get("/listing/targets")
+def refresh_targets() -> list[dict]:
+    """Active houses with a live campaign and a Domain link, least recently checked first."""
+    with tx() as conn:
+        rows = conn.execute(
+            """SELECT DISTINCT ON (p.id) p.id, l.url, l.last_checked_at, p.unit, p.street_number, p.street, p.suburb, p.postcode,
+                      p.plan_number, p.lot_number
+               FROM campaign_link l
+               JOIN campaign c ON c.id = l.campaign_id AND c.outcome IS NULL
+               JOIN property p ON p.id = c.property_id
+               JOIN property_status s ON s.property_id = p.id
+               WHERE l.portal = 'domain' AND s.status NOT IN ('rejected', 'lost', 'withdrawn', 'bought')
+               ORDER BY p.id, l.created_at DESC""").fetchall()
+    out = [{"id": str(r.pop("id")), "url": r.pop("url"), "last_checked_at": r.pop("last_checked_at"), "address": display(Address(**r))}
+           for r in rows]
+    out.sort(key=lambda t: (t["last_checked_at"] is not None, t["last_checked_at"] or ""))
+    return out[:MAX_TARGETS]
+
+
+class RefreshIn(BaseModel):
+    property_id: UUID
+    url: str = Field(pattern=r"^https?://")
+    status_code: int | None = None
+    next_data: str | None = Field(default=None, max_length=4_000_000)
+    image: str | None = Field(default=None, max_length=2000)
+
+
+def _money(n: int) -> str:
+    return f"${n / 1_000_000:.3f}".rstrip("0").rstrip(".") + "m" if n >= 1_000_000 else f"${round(n / 1000)}k"
+
+
+@router.post("/listing/refresh")
+def refresh_one(body: RefreshIn, person: Person) -> dict:
+    """One listing's page data, as loaded by the bookmarklet: apply what changed and say what it was."""
+    from .. import listing_apply
+    from ..listing import clean_url
+    from ..schemas import ListingUpdateIn
+    with tx(person) as conn:
+        conn.execute("UPDATE campaign_link SET last_checked_at = now() WHERE url = %s", (clean_url(body.url),))
+    if body.status_code in (404, 410):
+        return {"property_id": str(body.property_id), "changes": [], "flag": "The listing has been taken down."}
+    if not body.next_data:
+        return {"property_id": str(body.property_id), "changes": [],
+                "error": f"Couldn't read the listing (HTTP {body.status_code or '?'}). Try it again later, or open it and use + House Track."}
+    got = listing_capture.extract(body.url, "", body.next_data, image=body.image if (body.image or "").startswith("http") else None)
+    method = got.get("sale_method")
+    update = ListingUpdateIn(
+        guide_low_aud=got.get("guide_low_aud"), guide_high_aud=got.get("guide_high_aud"), sale_method=method,
+        auction_at=got.get("auction_at") if method == "auction" else None,
+        eoi_closes_at=got.get("eoi_closes_at") if method == "eoi" else None,
+        inspections=got.get("inspections") or [], agents=got.get("agents") or [], soi_url=got.get("soi_url"),
+    )
+    with tx(person) as conn:
+        added = listing_apply.refresh(conn, body.property_id, update)
+    changes = []
+    if added.get("guide") and update.guide_low_aud:
+        hi = update.guide_high_aud or update.guide_low_aud
+        changes.append(f"New price guide {_money(update.guide_low_aud)}" + (f"–{_money(hi)}" if hi != update.guide_low_aud else ""))
+    if added.get("method"):
+        changes.append({"auction": "Now selling by auction", "eoi": "Now selling by expressions of interest",
+                        "private_sale": "Now a private sale"}.get(added["method"], "Sale method changed"))
+    if added.get("date"):
+        changes.append("Auction date changed" if method == "auction" else "EOI closing date changed")
+    if added.get("inspections"):
+        n = added["inspections"]
+        changes.append(f"{n} new inspection {'time' if n == 1 else 'times'}")
+    if added.get("agents"):
+        changes.append(f"{added['agents']} new {'agent' if added['agents'] == 1 else 'agents'}")
+    if added.get("soi"):
+        changes.append("Statement of Information added")
+    status = (got.get("listing_status") or "").replace("_", "").lower()
+    flag = OFF_MARKET.get(status)
+    return {"property_id": str(body.property_id), "changes": changes, "price_text": got.get("price_text"),
+            "flag": f"{flag}: check the outcome and update the status." if flag else None}

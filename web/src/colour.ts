@@ -5,7 +5,7 @@
 //   tags     — the colour stored with each tag.
 // Colour is never the only signal: the suburb name, status label or value is always shown next to it.
 import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { api, type Status } from "./api";
 
 // ─── suburbs ────────────────────────────────────────────────────────────
@@ -91,3 +91,14 @@ export const tagStyle = (colours: Map<string, string>, name: string) => {
   const c = colours.get(name.toLowerCase());
   return c ? { background: `color-mix(in srgb, ${c} 16%, transparent)`, borderColor: `color-mix(in srgb, ${c} 55%, transparent)` } : undefined;
 };
+
+// ─── light / dark ───────────────────────────────────────────────────────
+// Components that pick colours in code (the grid's theme, the map's basemap) must follow the system setting
+// live, not just read it once, or switching modes leaves them on the old palette.
+const darkQuery = typeof window !== "undefined" ? window.matchMedia?.("(prefers-color-scheme: dark)") : undefined;
+export function useDarkMode(): boolean {
+  return useSyncExternalStore(
+    (onChange) => { darkQuery?.addEventListener("change", onChange); return () => darkQuery?.removeEventListener("change", onChange); },
+    () => darkQuery?.matches ?? false,
+  );
+}

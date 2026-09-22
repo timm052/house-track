@@ -115,6 +115,7 @@ export function Compare() {
   return (
     <div style={{ marginTop: 12 }}>
       <h1>Compare</h1>
+      <p className="small muted">Pick up to four houses. Rows where they differ are highlighted; open a house from its name.</p>
       <div className="row">
         {[0, 1, 2, 3].map((i) => (
           <select key={i} className="grow" value={ids[i] ?? ""} aria-label={`House ${i + 1}`}
@@ -124,8 +125,9 @@ export function Compare() {
           </select>
         ))}
       </div>
+      {rows.length === 0 && <div className="card empty">Choose a house above to start. You can also press Compare on any house page.</div>}
       {rows.length > 0 && (
-        <div className="compare-wrap">
+        <div className="compare-wrap card" style={{ padding: 8 }}>
           <table className="compare">
             <thead><tr><th />{rows.map((r) => <th key={r.id}><Link to={`/p/${r.id}`}>{String(r.address)}</Link></th>)}</tr></thead>
             <tbody>

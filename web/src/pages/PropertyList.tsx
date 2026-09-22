@@ -56,30 +56,41 @@ export default function PropertyList() {
   const flip = (k: "statuses" | "methods" | "myVerdicts" | "suburbs" | "tags", v: string) =>
     setQuick({ ...quick, [k]: quick[k].includes(v) ? quick[k].filter((x) => x !== v) : [...quick[k], v] });
   const filtering = Object.values(quick).some((v) => (Array.isArray(v) ? v.length : v)) || extra.length > 0;
+  // Everything but status lives under "More filters"; the badge counts what's switched on in there.
+  const moreCount = Number(quick.thisWeek) + Number(quick.hideExcluded) + quick.methods.length + quick.myVerdicts.length
+    + quick.suburbs.length + quick.tags.length + extra.length;
+  const [moreOpen, setMoreOpen] = useState(false);
   const byKey = new Map(cols.map((c) => [c.key, c]));
 
   return (
     <>
-      <div className="row" style={{ marginTop: 12 }}>
-        <input className="grow" type="search" placeholder="Search address, agent, notes" value={search} onChange={(e) => setSearch(e.target.value)} />
-        <Link to="/calendar"><button aria-label="Calendar" title="Calendar">📅</button></Link>
-        <Link to="/disagree"><button aria-label="Where we disagree" title="Where we disagree">⚖</button></Link>
-        <Link to="/trends"><button aria-label="Trends" title="Trends">📈</button></Link>
-        <Link to="/add"><button className="primary">+ Add</button></Link>
+      <div className="toolbar">
+        <input className="search" type="search" placeholder="Search address, agent, notes" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <Link to="/calendar"><button className="icon-btn" aria-label="Calendar" title="Calendar">📅<span className="label">Calendar</span></button></Link>
+        <Link to="/disagree"><button className="icon-btn" aria-label="Where we disagree" title="Where we disagree">⚖<span className="label">Disagreements</span></button></Link>
+        <Link to="/trends"><button className="icon-btn" aria-label="Trends" title="Trends">📈<span className="label">Trends</span></button></Link>
+        <Link to="/add"><button className="primary">+ Add house</button></Link>
       </div>
-      <div className="row" style={{ marginTop: 8 }}>
-        <select className="grow" value={view.id ?? ""} onChange={(e) => setViewId(e.target.value || null)} aria-label="View">
+      <div className="filter-bar">
+        <select value={view.id ?? ""} onChange={(e) => setViewId(e.target.value || null)} aria-label="View">
           {!views.data?.some((v) => v.is_default) && <option value="">Active houses</option>}
           {views.data?.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
         </select>
-        <select className="grow" value={sortKey} onChange={(e) => setSortKey(e.target.value)} aria-label="Sort">
+        <select value={sortKey} onChange={(e) => setSortKey(e.target.value)} aria-label="Sort">
           <option value="">Sort: view's order</option>
-          <option value="sale_at">Auction / EOI date</option>
-          <option value="guide_high">Guide price</option>
-          <option value="created_at">Newest first</option>
-          <option value="nearest_station_walk">Walk to station</option>
-          {favourites.map((f) => <option key={f.id} value={`drive:${f.id}`}>Drive to {f.name}</option>)}
+          <option value="sale_at">Sort: auction / EOI date</option>
+          <option value="guide_high">Sort: guide price</option>
+          <option value="created_at">Sort: newest first</option>
+          <option value="nearest_station_walk">Sort: walk to station</option>
+          {favourites.map((f) => <option key={f.id} value={`drive:${f.id}`}>Sort: drive to {f.name}</option>)}
         </select>
+        <button className={`chip ${moreOpen || moreCount ? "on" : ""}`} aria-expanded={moreOpen} onClick={() => setMoreOpen(!moreOpen)}>
+          More filters{moreCount > 0 && <span className="count-badge">{moreCount}</span>}
+        </button>
+        <span className="small muted grow" style={{ textAlign: "right" }}>
+          {rows.length === (data?.rows.length ?? 0) ? `${rows.length} houses` : `${rows.length} of ${data?.rows.length ?? 0} houses`}
+          {filtering && <> · <button className="link" onClick={() => { setQuick(NO_QUICK); setExtra([]); }}>Clear filters</button></>}
+        </span>
       </div>
       <div className="chips" aria-label="Status">
         {STATUSES.map((s) => (
@@ -87,48 +98,77 @@ export default function PropertyList() {
             <span className="status-dot" style={{ background: STATUS_COLOUR[s], marginRight: 6 }} />{LABEL.status[s]}</button>
         ))}
       </div>
-      <div className="chips" aria-label="Quick filters">
-        <button className={`chip ${quick.thisWeek ? "on" : ""}`} onClick={() => setQuick({ ...quick, thisWeek: !quick.thisWeek })}>This week</button>
-        {(["auction", "eoi", "private_sale"] as const).map((m) => (
-          <button key={m} className={`chip ${quick.methods.includes(m) ? "on" : ""}`} onClick={() => flip("methods", m)}>{LABEL.method[m]}</button>
-        ))}
-        {(["yes", "maybe", "no", "unset"] as const).map((v) => (
-          <button key={v} className={`chip ${quick.myVerdicts.includes(v) ? "on" : ""}`} onClick={() => flip("myVerdicts", v)}>
-            Me: {v === "unset" ? "no verdict" : LABEL.stance[v]}
-          </button>
-        ))}
-        <button className={`chip ${quick.hideExcluded ? "on" : ""}`} onClick={() => setQuick({ ...quick, hideExcluded: !quick.hideExcluded })}>Hide my excluded</button>
-        {suburbs.length > 1 && suburbs.map((s) => (
-          <button key={s} className={`chip ${suburbClass(slots, s)} ${quick.suburbs.includes(s) ? "on" : ""}`} onClick={() => flip("suburbs", s)}>
-            <span className="suburb-swatch" />{s}</button>
-        ))}
-        {tagNames.map((t) => (
-          <button key={t} className={`chip ${quick.tags.includes(t) ? "on" : ""}`} style={quick.tags.includes(t) ? undefined : tagStyle(tagColours, t)}
-            onClick={() => flip("tags", t)}>#{t}</button>
-        ))}
-      </div>
-      <div className="row small">
-        <select value={picking} onChange={(e) => setPicking(e.target.value)} aria-label="Filter on another field" style={{ width: "auto" }}>
-          <option value="">+ Filter on…</option>
-          {cols.filter((c) => !["address"].includes(c.key)).map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-        </select>
-        {extra.map((f, i) => (
-          <span key={i} className="pill">{describe(f, byKey.get(f.column))}{" "}
-            <button className="link" onClick={() => setExtra(extra.filter((_, j) => j !== i))} aria-label="Remove filter">✕</button></span>
-        ))}
-        {filtering && <button className="link" onClick={() => { setQuick(NO_QUICK); setExtra([]); }}>Clear filters</button>}
-      </div>
+      {moreOpen && (
+        <div className="card stack" style={{ marginTop: 8 }}>
+          <div>
+            <div className="section-title" style={{ marginTop: 0 }}>Sale</div>
+            <div className="chips">
+              <button className={`chip ${quick.thisWeek ? "on" : ""}`} onClick={() => setQuick({ ...quick, thisWeek: !quick.thisWeek })}>This week</button>
+              {(["auction", "eoi", "private_sale"] as const).map((m) => (
+                <button key={m} className={`chip ${quick.methods.includes(m) ? "on" : ""}`} onClick={() => flip("methods", m)}>{LABEL.method[m]}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="section-title">My verdict</div>
+            <div className="chips">
+              {(["yes", "maybe", "no", "unset"] as const).map((v) => (
+                <button key={v} className={`chip ${quick.myVerdicts.includes(v) ? "on" : ""}`} onClick={() => flip("myVerdicts", v)}>
+                  {v === "unset" ? "No verdict yet" : LABEL.stance[v]}
+                </button>
+              ))}
+              <button className={`chip ${quick.hideExcluded ? "on" : ""}`} onClick={() => setQuick({ ...quick, hideExcluded: !quick.hideExcluded })}>Hide my excluded</button>
+            </div>
+          </div>
+          {suburbs.length > 1 && (
+            <div>
+              <div className="section-title">Suburb</div>
+              <div className="chips">
+                {suburbs.map((s) => (
+                  <button key={s} className={`chip ${suburbClass(slots, s)} ${quick.suburbs.includes(s) ? "on" : ""}`} onClick={() => flip("suburbs", s)}>
+                    <span className="suburb-swatch" />{s}</button>
+                ))}
+              </div>
+            </div>
+          )}
+          {tagNames.length > 0 && (
+            <div>
+              <div className="section-title">Tags</div>
+              <div className="chips">
+                {tagNames.map((t) => (
+                  <button key={t} className={`chip ${quick.tags.includes(t) ? "on" : ""}`} style={quick.tags.includes(t) ? undefined : tagStyle(tagColours, t)}
+                    onClick={() => flip("tags", t)}>#{t}</button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="row small">
+            <select value={picking} onChange={(e) => setPicking(e.target.value)} aria-label="Filter on another field" style={{ width: "auto" }}>
+              <option value="">+ Filter on any field…</option>
+              {cols.filter((c) => !["address"].includes(c.key)).map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+            </select>
+            {extra.map((f, i) => (
+              <span key={i} className="pill">{describe(f, byKey.get(f.column))}{" "}
+                <button className="link" onClick={() => setExtra(extra.filter((_, j) => j !== i))} aria-label="Remove filter">✕</button></span>
+            ))}
+          </div>
+        </div>
+      )}
       {picking && byKey.get(picking) && (
         <FilterPopover col={byKey.get(picking)!} rows={data?.rows ?? []} at={{ x: 16, y: 160 }}
           existing={extra.find((f) => f.column === picking)}
           onApply={(fs) => { setExtra([...extra.filter((f) => f.column !== picking), ...fs]); setPicking(""); }}
           onClose={() => setPicking("")} />
       )}
-      <div className="small muted">{rows.length} of {data?.rows.length ?? 0} houses</div>
       {isPending && <p className="muted">Loading…</p>}
       {isError && <p className="error">Couldn't load houses.</p>}
       {data && data.rows.length === 0 && <div className="card"><p>No houses yet.</p><Link to="/add">Add the first one</Link></div>}
-      {rows.map((r) => <Card key={r.id} r={r} people={active} favourites={favourites} cols={cols} slots={slots} tagColours={tagColours} />)}
+      {data && data.rows.length > 0 && rows.length === 0 && (
+        <div className="card empty">No houses match these filters. <button className="link" onClick={() => { setQuick(NO_QUICK); setExtra([]); setSearch(""); }}>Clear filters</button></div>
+      )}
+      <div className="card-grid">
+        {rows.map((r) => <Card key={r.id} r={r} people={active} favourites={favourites} cols={cols} slots={slots} tagColours={tagColours} />)}
+      </div>
     </>
   );
 }
@@ -149,7 +189,7 @@ function Card({ r, people, favourites, cols, slots, tagColours }: {
     r.nearest_station && <><span className={`tone-${minutesTone(r.nearest_station_walk)}`}>{String(r.nearest_station_walk)} min</span> walk to {String(r.nearest_station)}</>,
     ...favourites.filter((f) => r[`drive:${f.id}`] != null).map((f) =>
       <><span className={`tone-${minutesTone(r[`drive:${f.id}`], "drive")}`}>{String(r[`drive:${f.id}`])} min</span> drive to {f.name}</>),
-    r.days_on_market != null && r.sale_method && `${r.days_on_market} days listed`,
+    r.days_on_market != null && r.sale_method && `${r.days_on_market} ${r.days_on_market === 1 ? "day" : "days"} listed`,
   ].filter(Boolean) as ReactNode[];
   const change = n("guide_change");
   const sale = r.outcome
@@ -169,21 +209,21 @@ function Card({ r, people, favourites, cols, slots, tagColours }: {
       <div className="muted small">{line2.map((part, i) => <Fragment key={i}>{i > 0 && " · "}{part}</Fragment>)}</div>
       <div className="row small" style={{ marginTop: 4 }}>
         <span className={`grow ${!r.outcome ? `tone-${soonTone(r.sale_at)}` : ""}`}>{sale}</span>
-        <strong>{moneyRange(n("guide_low"), n("guide_high"))}</strong>
+        <span className={n("guide_low") == null ? "muted" : "price"}>{moneyRange(n("guide_low"), n("guide_high"))}</span>
         {change != null && change !== 0 && <span className={`pill tone-${changeTone(change)}`}>guide {change > 0 ? "↑" : "↓"} {money(Math.abs(change))}</span>}
         {r.walk_away != null && <span className="pill">limit {money(n("walk_away"))}</span>}
       </div>
-      <div className="row small" style={{ marginTop: 4 }}>
-        {people.map((p) => {
+      <div className="row small" style={{ marginTop: 6 }}>
+        {people.some((p) => r[`v:${p.id}:post`] ?? r[`v:${p.id}:pre`]) ? people.map((p) => {
           const post = r[`v:${p.id}:post`] as string | undefined, pre = r[`v:${p.id}:pre`] as string | undefined;
           const v = post ?? pre;
-          return (
+          return v ? (
             <span key={p.id}>
-              <span className="dot" style={{ background: p.colour }} />{p.display_name}:{" "}
-              {v ? <span className={`pill ${v}`}>{post ? "Post" : "Pre"} {LABEL.stance[v as "yes"]}</span> : <span className="muted">—</span>}
+              <span className="dot" style={{ background: p.colour }} />{p.display_name}{" "}
+              <span className={`pill ${v}`} title={post ? "After inspecting" : "Before inspecting"}>{LABEL.stance[v as "yes"]}{!post && <span className="muted"> · pre</span>}</span>
             </span>
-          );
-        })}
+          ) : null;
+        }) : <span className="muted">No verdicts yet</span>}
       </div>
       {((r.tags as string[] | undefined) ?? []).length > 0 && (
         <div style={{ marginTop: 4 }}>{(r.tags as string[]).map((t) => <span key={t} className="tag" style={tagStyle(tagColours, t)}>#{t}</span>)}</div>

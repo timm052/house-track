@@ -88,8 +88,10 @@ export function Checklist({ campaignId }: { campaignId: string }) {
   const [label, setLabel] = useState("");
   const done = data.filter((i) => i.done_at).length;
   return (
-    <details className="section" open={data.length > 0 && done < data.length}>
-      <summary><strong>Due diligence</strong> {data.length > 0 && <span className="muted">{done}/{data.length}</span>}</summary>
+    <details className="section">
+      <summary><strong>Due diligence</strong> {data.length > 0 && <>
+        <span className="muted">{done} of {data.length} done</span>
+        <span className="progress" aria-hidden><span style={{ width: `${(done / data.length) * 100}%` }} /></span></>}</summary>
       {data.length === 0 && (
         <button onClick={() => api(`/api/campaigns/${campaignId}/checklist/defaults`, { method: "POST" }).then(refresh)}>Start the standard checklist</button>
       )}

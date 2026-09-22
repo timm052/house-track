@@ -135,39 +135,43 @@ def add_judgement(campaign_id: UUID, body: JudgementIn, person: Person) -> dict:
         ).fetchone()
 
 
+def attach_agent(conn: psycopg.Connection, campaign_id: UUID, body: AgentIn) -> UUID:
+    agency_id = None
+    if body.agency_name:
+        agency_id = conn.execute(
+            "INSERT INTO agency (name, office) VALUES (%s, %s)"
+            " ON CONFLICT (name, office) DO UPDATE SET name = EXCLUDED.name RETURNING id",
+            (body.agency_name.strip(), (body.office or "").strip() or None),
+        ).fetchone()["id"]
+    agent = conn.execute(
+        "SELECT id FROM agent WHERE lower(name) = lower(%s) AND agency_id IS NOT DISTINCT FROM %s",
+        (body.name.strip(), agency_id),
+    ).fetchone()
+    if agent is None:
+        agent = conn.execute(
+            "INSERT INTO agent (agency_id, name, mobile, email) VALUES (%s, %s, %s, %s) RETURNING id",
+            (agency_id, body.name.strip(), body.mobile, body.email),
+        ).fetchone()
+    elif body.mobile or body.email:
+        conn.execute(
+            "UPDATE agent SET mobile = coalesce(%s, mobile), email = coalesce(%s, email) WHERE id = %s",
+            (body.mobile, body.email, agent["id"]),
+        )
+    if body.is_lead:
+        conn.execute("UPDATE campaign_agent SET is_lead = false WHERE campaign_id = %s", (campaign_id,))
+    conn.execute(
+        "INSERT INTO campaign_agent (campaign_id, agent_id, is_lead) VALUES (%s, %s, %s)"
+        " ON CONFLICT (campaign_id, agent_id) DO UPDATE SET is_lead = EXCLUDED.is_lead",
+        (campaign_id, agent["id"], body.is_lead),
+    )
+    return agent["id"]
+
+
 @router.post("/campaigns/{campaign_id}/agents", status_code=201)
 def add_agent(campaign_id: UUID, body: AgentIn, person: Person) -> dict:
     with tx(person) as conn:
         campaign_property(conn, campaign_id)
-        agency_id = None
-        if body.agency_name:
-            agency_id = conn.execute(
-                "INSERT INTO agency (name, office) VALUES (%s, %s)"
-                " ON CONFLICT (name, office) DO UPDATE SET name = EXCLUDED.name RETURNING id",
-                (body.agency_name.strip(), (body.office or "").strip() or None),
-            ).fetchone()["id"]
-        agent = conn.execute(
-            "SELECT id FROM agent WHERE lower(name) = lower(%s) AND agency_id IS NOT DISTINCT FROM %s",
-            (body.name.strip(), agency_id),
-        ).fetchone()
-        if agent is None:
-            agent = conn.execute(
-                "INSERT INTO agent (agency_id, name, mobile, email) VALUES (%s, %s, %s, %s) RETURNING id",
-                (agency_id, body.name.strip(), body.mobile, body.email),
-            ).fetchone()
-        elif body.mobile or body.email:
-            conn.execute(
-                "UPDATE agent SET mobile = coalesce(%s, mobile), email = coalesce(%s, email) WHERE id = %s",
-                (body.mobile, body.email, agent["id"]),
-            )
-        if body.is_lead:
-            conn.execute("UPDATE campaign_agent SET is_lead = false WHERE campaign_id = %s", (campaign_id,))
-        conn.execute(
-            "INSERT INTO campaign_agent (campaign_id, agent_id, is_lead) VALUES (%s, %s, %s)"
-            " ON CONFLICT (campaign_id, agent_id) DO UPDATE SET is_lead = EXCLUDED.is_lead",
-            (campaign_id, agent["id"], body.is_lead),
-        )
-        return {"id": agent["id"]}
+        return {"id": attach_agent(conn, campaign_id, body)}
 
 
 @router.delete("/campaigns/{campaign_id}/agents/{agent_id}", status_code=204)

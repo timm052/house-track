@@ -55,3 +55,29 @@ def test_weighted_scores(client, people):
     # Archiving a criterion drops it from the totals.
     client.delete(f"/api/criteria/{light['id']}", headers=as_(a))
     assert [c["name"] for c in client.get("/api/criteria").json()].count("Natural light") == 0
+
+
+def test_listing_main_photo():
+    from app.listing_parse import main_image
+    og = '<meta property="og:image" content="https://rimh2.domainstatic.com.au/abc/1.jpg">'
+    assert parse(og + LISTING)["image_url"] == "https://rimh2.domainstatic.com.au/abc/1.jpg"
+    ld = '<script type="application/ld+json">{"@type": "Residence", "image": [{"@type": "ImageObject", "url": "https://img.example/a.jpg"}]}</script>'
+    assert main_image(ld) == "https://img.example/a.jpg"
+    assert parse(LISTING)["image_url"] is None
+
+
+def test_bookmarklet_passes_the_photo(client, people):
+    # The bookmarklet can pass the image it read from the page.
+    body = {"url": "https://www.domain.com.au/x-2019876543", "html": LISTING, "image": "https://img.example/b.jpg"}
+    r = client.post("/api/listing/parse", headers=as_(people["a"]), json=body)
+    assert r.status_code == 200 and r.json()["image_url"] == "https://img.example/b.jpg"
+
+
+def test_capture_of_a_tracked_listing_points_at_the_house(client, people):
+    a = as_(people["a"])
+    url = "https://www.domain.com.au/12-smith-street-box-hill-vic-3128-2019870001"
+    pid = client.post("/api/properties", headers=a, json={
+        "address": {"street_number": "212", "street": "Capture Street", "suburb": "Box Hill", "postcode": "3128"},
+        "campaign": {"sale_method": "auction", "url": url}}).json()["id"]
+    got = client.post("/api/listing/parse", headers=a, json={"url": url + "?utm_source=x", "html": LISTING}).json()
+    assert got["existing_property_id"] == pid and got["existing_address"].startswith("212 Capture Street")

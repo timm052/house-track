@@ -71,6 +71,31 @@ class QuickCampaignIn(CampaignIn):
     guide_high_aud: Aud | None = None
 
 
+class ListingInspection(BaseModel):
+    starts_at: datetime
+    ends_at: datetime | None = None
+
+
+class ListingExtras(BaseModel):
+    """What the bookmarklet read from the listing, as ticked on the quick-add form (PLAN.md D12)."""
+    lat: float | None = Field(default=None, ge=-45, le=-9)
+    lon: float | None = Field(default=None, ge=110, le=155)
+    agents: list["AgentIn"] = Field(default_factory=list, max_length=6)
+    inspections: list[ListingInspection] = Field(default_factory=list, max_length=12)
+    soi_url: Annotated[str, Field(pattern=r"^https?://", max_length=2000)] | None = None
+    tags: list[Annotated[str, Field(max_length=40)]] = Field(default_factory=list, max_length=20)
+    photos: list[Annotated[str, Field(pattern=r"^https?://", max_length=2000)]] = Field(default_factory=list, max_length=30)
+
+
+class ListingUpdateIn(ListingExtras):
+    """Refreshing a tracked house from its listing: the same extras plus the guide as it reads today."""
+    guide_low_aud: Aud | None = None
+    guide_high_aud: Aud | None = None
+    sale_method: SaleMethod | None = None  # listings do switch, e.g. auction to private sale
+    auction_at: datetime | None = None
+    eoi_closes_at: datetime | None = None
+
+
 class PropertyIn(BaseModel):
     address: AddressIn
     property_type: PropertyType = "house"
@@ -83,6 +108,7 @@ class PropertyIn(BaseModel):
     notes: str | None = None
     campaign: QuickCampaignIn | None = None
     gnaf_pid: str | None = None  # chosen from address autocomplete
+    listing: ListingExtras | None = None  # extras from a listing capture
 
 
 class PropertyPatch(BaseModel):
@@ -210,3 +236,7 @@ class PlacePatch(BaseModel):
     name: Annotated[str, Field(min_length=1, max_length=80)] | None = None
     location: PointIn | None = None
     person_id: UUID | None = None
+
+
+ListingExtras.model_rebuild()
+ListingUpdateIn.model_rebuild()

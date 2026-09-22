@@ -29,6 +29,9 @@ export default function Settings() {
 
   return (
     <div style={{ marginTop: 12 }}>
+      <h1>Settings</h1>
+      <p className="small muted">Shared by everyone in the household. <a href="#bookmarklets">Browser buttons</a></p>
+      <Bookmarklets />
       <div className="card stack">
         <h2>People</h2>
         {persons.data?.map((p) => (
@@ -63,7 +66,6 @@ export default function Settings() {
       <MoneySettings />
       <LayerSettings />
       <CriteriaSettings />
-      <Bookmarklet />
     </div>
   );
 }
@@ -141,25 +143,108 @@ function LayerSettings() {
   );
 }
 
-/** Listing capture for pages the server can't fetch (PLAN.md D12). Runs in your own browser on the
- *  listing page, opens House Track's Add page and hands it the page as you see it. Fragile by design. */
-function Bookmarklet() {
-  const origin = location.origin;
-  const code = `javascript:(()=>{const o=${JSON.stringify(origin)};const w=window.open(o+'/add?capture=1','housetrack');` +
-    `const d={type:'housetrack-capture',url:location.href,html:document.documentElement.outerHTML.slice(0,2900000)};` +
+// ─── browser buttons (bookmarklets) ───────────────────────────────────
+// Bump when the code changes, so people know to drag the buttons again.
+const BOOKMARKLETS_UPDATED = "23 Sept 2026 (v3)";
+
+/** + House Track: listing capture for pages the server can't fetch (PLAN.md D12). Runs in your own browser on the
+ *  listing page, opens House Track's Add page and hands it the page's own data (Domain's __NEXT_DATA__,
+ *  realestate.com.au's page data, the head's Open Graph tags, structured-data blocks and the visible text). */
+function captureCode(origin: string) {
+  return `javascript:(()=>{const o=${JSON.stringify(origin)};const w=window.open(o+'/add?capture=1','housetrack');if(!w){alert('Your browser blocked the House Track window. Allow pop-ups for this site, then click + House Track again.');return}` +
+    `const q=s=>document.querySelector(s),m=q('meta[property="og:image"]'),n=q('#__NEXT_DATA__');let a=null;` +
+    `try{a=window.ArgonautExchange?JSON.stringify(window.ArgonautExchange).slice(0,3900000):null}catch(e){}` +
+    `const ld=[...document.querySelectorAll('script[type="application/ld+json"]')].map(s=>s.outerHTML).join('');` +
+    `const d={type:'housetrack-capture',v:2,url:location.href,image:m&&m.content||null,next_data:n?n.textContent.slice(0,3900000):null,` +
+    `argonaut:a,html:(document.head.outerHTML+ld).slice(0,2900000),text:document.body.innerText.slice(0,390000)};` +
     `const t=setInterval(()=>{try{w.postMessage(d,o)}catch(e){}},400);` +
     `addEventListener('message',e=>{if(e.origin===o&&e.data==='housetrack-got-it')clearInterval(t)});setTimeout(()=>clearInterval(t),20000)})()`;
+}
+
+/** ⟳ Refresh from Domain (see pages/Refresh.tsx for the conversation it has with House Track). Clicked on any
+ *  domain.com.au page: opens /refresh, says hello so that page can check where it came from, then loads each listing
+ *  it's given from Domain, a few seconds apart, and passes the page data back. */
+function refreshCode(origin: string) {
+  return `javascript:(()=>{const o=${JSON.stringify(origin)};if(!/(^|\\.)domain\\.com\\.au$/.test(location.hostname)){alert('Open any page on domain.com.au first, then click Refresh from Domain.');return}` +
+    `const w=window.open(o+'/refresh?run=1','housetrack-refresh');if(!w){alert('Your browser blocked the House Track window. Allow pop-ups for domain.com.au, then click Refresh from Domain again.');return}let busy=false;` +
+    `const hi=setInterval(()=>{try{w.postMessage({type:'ht-hello'},o)}catch(x){}},500);setTimeout(()=>clearInterval(hi),30000);` +
+    `addEventListener('message',async e=>{if(e.origin!==o||!e.data||e.data.type!=='ht-targets'||busy)return;busy=true;clearInterval(hi);` +
+    `for(const t of e.data.targets){const r={type:'ht-page',id:t.id,url:t.url};` +
+    `try{const x=await fetch(t.url,{credentials:'include'});r.status=x.status;const h=await x.text();` +
+    `const m=h.match(/<script id="__NEXT_DATA__"[^>]*>([\\s\\S]*?)<\\/script>/);r.next_data=m?m[1]:null;` +
+    `const g=h.match(/property="og:image" content="([^"]+)"/);r.image=g?g[1]:null}catch(err){r.error=String(err)}` +
+    `w.postMessage(r,o);await new Promise(s=>setTimeout(s,e.data.gap||4000))}w.postMessage({type:'ht-done'},o)})})()`;
+}
+
+/** A bookmarklet: drag it to the bookmarks bar, or copy its code to make the bookmark by hand. */
+function BookmarkletButton({ code, label }: { code: string; label: string }) {
+  const [copied, setCopied] = useState<"yes" | "no" | null>(null);
+  const [hint, setHint] = useState(false);
+  async function copy() {
+    try { await navigator.clipboard.writeText(code); setCopied("yes"); } catch { setCopied("no"); }
+    setTimeout(() => setCopied(null), 2500);
+  }
   return (
-    <div className="card stack">
-      <h2>Add from a listing page</h2>
-      <p className="small muted">
-        Drag this button to your browser's bookmarks bar. On a Domain or realestate.com.au listing, click it: House Track opens with the
-        address, rooms and price guide filled in for you to check. It reads the page as you see it, so it can break when the sites change.
+    <div className="row">
+      {/* React blocks javascript: links in JSX, so the href is set directly. Clicking it here does nothing. */}
+      <a className="bookmarklet" title="Drag me to your bookmarks bar" draggable
+        ref={(el) => { el?.setAttribute("href", code); }} onClick={(e) => { e.preventDefault(); setHint(true); }}>{label}</a>
+      <button className="small-btn" onClick={copy}>{copied === "yes" ? "Copied ✓" : copied === "no" ? "Couldn't copy" : "Copy code"}</button>
+      {hint && <p className="small tone-warn" style={{ flexBasis: "100%", margin: 0 }}>
+        This button does nothing here. Drag it to your bookmarks bar, then click it there while you're on a
+        {label.includes("Refresh") ? " Domain page" : " Domain or realestate.com.au listing"}.</p>}
+    </div>
+  );
+}
+
+/** Used by the /refresh page's instructions too. */
+export function refreshBookmarklet() {
+  return <BookmarkletButton code={refreshCode(location.origin)} label="⟳ Refresh from Domain" />;
+}
+
+function Bookmarklets() {
+  const origin = location.origin;
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+  return (
+    <div className="card stack" id="bookmarklets">
+      <h2>Browser buttons</h2>
+      <p className="small" style={{ margin: 0 }}>
+        Two buttons for your browser's bookmarks bar, for adding and updating houses straight from Domain and realestate.com.au.
+        They work in Chrome, Edge, Firefox and Safari on a computer.
       </p>
-      {/* React blocks javascript: links in JSX, so the href is set directly. */}
-      <a className="button-like" ref={(el) => { el?.setAttribute("href", code); }} onClick={(e) => e.preventDefault()}>
-        + House Track
-      </a>
+      <ol className="small steps">
+        <li>Show the bookmarks bar: press <kbd>{mac ? "⌘" : "Ctrl"}</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd>.</li>
+        <li>Drag each button below onto the bookmarks bar.</li>
+      </ol>
+
+      <div className="bm-item">
+        <BookmarkletButton code={captureCode(origin)} label="+ House Track" />
+        <p className="small muted">
+          On a listing, click it to add the house: the address, rooms, land, sale method and date, and price guide are filled in, with
+          the photos, agents, inspection times, Statement of Information and suggested tags to tick. On a listing you already track, it
+          shows what's changed and updates the house.
+        </p>
+      </div>
+      <div className="bm-item">
+        <BookmarkletButton code={refreshCode(origin)} label="⟳ Refresh from Domain" />
+        <p className="small muted">
+          Once a week, open any Domain page and click it. It checks every active house's listing a few seconds apart and records new price
+          guides, dates, inspection times and agents. <Link to="/refresh">See what it will check</Link>
+        </p>
+      </div>
+
+      <details>
+        <summary className="small">Can't drag them? Add them by hand</summary>
+        <ol className="small steps">
+          <li>Click <strong>Copy code</strong> next to a button.</li>
+          <li>Right-click the bookmarks bar and choose <strong>Add page…</strong> (Chrome, Edge) or <strong>Add Bookmark…</strong> (Firefox).</li>
+          <li>Name it (for example “+ House Track”), paste the code into the <strong>URL</strong> box, and save.</li>
+        </ol>
+      </details>
+      <p className="small muted" style={{ margin: 0 }}>
+        Buttons last updated {BOOKMARKLETS_UPDATED}. If you added them before then, delete the old ones and drag these again.
+        They read the listing as your browser shows it, so they can break when the sites change.
+      </p>
     </div>
   );
 }

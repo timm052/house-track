@@ -59,6 +59,33 @@ def _count(text: str, words: str) -> int | None:
     return int(m[1]) if m else None
 
 
+def _image(node: Any) -> str | None:
+    """JSON-LD "image" can be a URL, a list of them, or ImageObject(s)."""
+    if isinstance(node, list):
+        return next((u for u in (_image(n) for n in node) if u), None)
+    if isinstance(node, dict):
+        return _image(node.get("url") or node.get("contentUrl"))
+    return node if isinstance(node, str) and node.startswith(("http://", "https://")) else None
+
+
+def main_image(page: str) -> str | None:
+    """The listing's lead photo: the share image portals set for social previews (Domain and realestate.com.au
+    both use the first listing photo), else the first image in the structured data."""
+    metas = {k.lower(): html.unescape(v) for k, v in _META.findall(page)}
+    for key in ("og:image:secure_url", "og:image", "twitter:image", "twitter:image:src"):
+        if metas.get(key, "").startswith(("http://", "https://")):
+            return metas[key]
+    for block in _JSONLD.findall(page):
+        try:
+            data = json.loads(block.strip())
+        except ValueError:
+            continue
+        for node in _walk(data):
+            if "image" in node and (found := _image(node["image"])):
+                return found
+    return None
+
+
 def parse(page: str, url: str | None = None) -> dict:
     """Returns suggested quick-add fields; any may be None."""
     out: dict[str, Any] = {"url": clean_url(url) if url else None}
@@ -105,6 +132,7 @@ def parse(page: str, url: str | None = None) -> dict:
     out["sale_method"] = method or ("private_sale" if lowered.count("$") else None)
     price_text = metas.get("og:description", "") + " " + text[:20000]
     out["guide_low_aud"], out["guide_high_aud"] = price_range(price_text)
+    out["image_url"] = main_image(page)
     if url:
         out["portal"] = recognise(clean_url(url))[0]
     return out

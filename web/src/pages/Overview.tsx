@@ -11,7 +11,7 @@ import { catalogue, display, editText, parseInput, type Column, type OverviewPla
 import { applyView, builtInDefault, describe, toCsv, useViews, type Sort, type View } from "../overview/views";
 import FilterPopover from "../overview/FilterPopover";
 import { usePeople } from "../people";
-import { CLOSED, STATUS_COLOUR, changeTone, minutesTone, soonTone, suburbClass, suburbSlots, tagStyle, useTagColours, type Tone } from "../colour";
+import { useDarkMode, CLOSED, STATUS_COLOUR, changeTone, minutesTone, soonTone, suburbClass, suburbSlots, tagStyle, useTagColours, type Tone } from "../colour";
 import type { Status } from "../api";
 
 type Overview = { rows: OverviewRow[]; places: OverviewPlace[] };
@@ -100,6 +100,7 @@ export default function Overview() {
   const cols = useMemo(() => { const c = catalogue(persons, data?.places ?? []); registerEditFormats(c); return c; }, [persons, data?.places]);
   const tags = useQuery({ queryKey: ["tags"], queryFn: () => api<{ name: string }[]>("/api/tags") });
   const tagColours = useTagColours();
+  const isDark = useDarkMode();
   useEffect(() => registerTags((tags.data ?? []).map((t) => t.name)), [tags.data]);
   const byKey = useMemo(() => new Map(cols.map((c) => [c.key, c])), [cols]);
 
@@ -435,7 +436,7 @@ export default function Overview() {
       <div className="overview-main" ref={mainRef}>
         <RevoGrid
           className="grid"
-          theme={window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "darkCompact" : "compact"}
+          theme={isDark ? "darkCompact" : "compact"}
           source={shown}
           columns={gridColumns}
           editors={editors}

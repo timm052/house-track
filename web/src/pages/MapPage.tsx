@@ -6,12 +6,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { TerraDraw, TerraDrawPolygonMode, TerraDrawSelectMode } from "terra-draw";
 import { TerraDrawMapLibreGLAdapter } from "terra-draw-maplibre-gl-adapter";
-import { api, type AreaKind, type MapArea, type MapData, type MapProperty } from "../api";
+import { STATUSES, api, type AreaKind, type MapArea, type MapData, type MapProperty } from "../api";
 import { LABEL, minutes } from "../format";
 import { basemapStyle } from "../map/basemap";
 import { colourFor, syncOverlays, type OverlayLayer } from "../map/overlays";
 import { usePeople } from "../people";
-import { STATUS_COLOUR, minutesTone } from "../colour";
+import { STATUS_COLOUR, minutesTone, useDarkMode } from "../colour";
 
 const MELBOURNE: [number, number] = [145.0, -37.81];
 type Filter = "all" | "mine" | "either";
@@ -31,6 +31,10 @@ export default function MapPage() {
   const { byId, me } = usePeople();
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  // Layer and source ids that belong to the basemap, so a light/dark switch can swap them and keep ours.
+  const baseIds = useRef<{ layers: Set<string>; sources: Set<string> }>({ layers: new Set(), sources: new Set() });
+  const isDark = useDarkMode();
+  const firstScheme = useRef(isDark);
   const drawRef = useRef<TerraDraw | null>(null);
   const fitted = useRef(false);
   const [ready, setReady] = useState(false);
@@ -73,6 +77,8 @@ export default function MapPage() {
       map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
       map.addControl(new maplibregl.GeolocateControl({ trackUserLocation: false }), "top-right");
       map.on("load", () => {
+        const base = map!.getStyle();
+        baseIds.current = { layers: new Set(base.layers.map((l) => l.id)), sources: new Set(Object.keys(base.sources)) };
         addLayers(map!);
         const draw = new TerraDraw({
           adapter: new TerraDrawMapLibreGLAdapter({ map: map! }),
@@ -236,6 +242,29 @@ export default function MapPage() {
   const unpinned = data?.unpinned ?? 0;
   const pinTarget = pinFor ? queryClient.getQueryData<{ address: string }>(["property", pinFor])?.address : null;
 
+  const statusesShown = [...new Set((data?.properties.features ?? []).map((f) => f.properties.status))]
+    .sort((a, b) => STATUSES.indexOf(a) - STATUSES.indexOf(b));
+  // Follow the system's light/dark setting live: swap the basemap, carry over our pins, areas and overlays.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || isDark === firstScheme.current) return;
+    firstScheme.current = isDark;
+    let cancelled = false;
+    basemapStyle(isDark).then(({ style }) => {
+      if (cancelled) return;
+      map.setStyle(style, {
+        transformStyle: (prev, next) => {
+          if (!prev) return next;
+          const ours = prev.layers.filter((l) => !baseIds.current.layers.has(l.id));
+          const oursSources = Object.fromEntries(Object.entries(prev.sources).filter(([id]) => !baseIds.current.sources.has(id)));
+          baseIds.current = { layers: new Set(next.layers.map((l) => l.id)), sources: new Set(Object.keys(next.sources)) };
+          return { ...next, sources: { ...next.sources, ...oursSources }, layers: [...next.layers, ...ours] };
+        },
+      });
+    });
+    return () => { cancelled = true; };
+  }, [isDark]);
+
   return (
     <div className="map-page">
       <div ref={container} className="map" />
@@ -251,6 +280,15 @@ export default function MapPage() {
           </div>
         )}
         {error && <div className="banner error" onClick={() => setError(null)}>{error}</div>}
+        {statusesShown.length > 0 && (
+          <details className="banner map-legend">
+            <summary>Key</summary>
+            {statusesShown.map((st) => (
+              <div key={st} className="small"><span className="status-dot" style={{ background: STATUS_COLOUR[st], marginRight: 6 }} />{LABEL.status[st]}</div>
+            ))}
+            <div className="small muted">Faded: rejected, lost, withdrawn or excluded</div>
+          </details>
+        )}
       </div>
 
       {!pinFor && !pickPlace && !drawKind && !editing && !newShape && (

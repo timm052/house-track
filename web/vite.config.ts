@@ -4,6 +4,8 @@ import { VitePWA } from "vite-plugin-pwa";
 
 // In development the API runs separately (uvicorn on :8000); Caddy does this proxying in the container.
 export default defineConfig({
+  // Busts the offline read cache on each deploy (see main.tsx).
+  define: { __BUILD_ID__: JSON.stringify(new Date().toISOString()) },
   plugins: [
     react(),
     // Installable phone app with an offline app shell (PLAN.md milestone 3, D6). Data reads come from the

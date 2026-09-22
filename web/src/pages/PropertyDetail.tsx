@@ -9,6 +9,7 @@ import {
 import { day, fromLocalInput, km, LABEL, minutes, money, moneyRange, parseMoney, rooms, saleWhen, toLocalInput, when } from "../format";
 import { newId, sendOrQueue } from "../outbox";
 import { usePeople } from "../people";
+import { STATUS_COLOUR, suburbClass, tagStyle, useSuburbSlots, useTagColours } from "../colour";
 import { Checklist, Comparables, CostAt, PriceHistory } from "./MoneyExtras";
 import { Files, Inspections } from "./PropertyExtras";
 import { ScoresCard } from "./Decide";
@@ -69,12 +70,17 @@ export default function PropertyDetail() {
 // ─── header & edit ────────────────────────────────────────────────────
 function Header({ p }: { p: Detail }) {
   const [editing, setEditing] = useState(false);
+  const slots = useSuburbSlots();
   return (
-    <div className="card">
+    <div className={`card tint ${suburbClass(slots, p.suburb)}`} style={{ borderLeft: "5px solid var(--sub-ink, var(--border))" }}>
       <div className="row">
         <h1 className="grow">{p.address}</h1>
         <Link to={`/compare?ids=${p.id}`} className="small">Compare</Link>
         <button className="link" onClick={() => setEditing(!editing)}>{editing ? "Close" : "Edit"}</button>
+      </div>
+      <div className="row small" style={{ marginBottom: 4 }}>
+        {p.suburb && <span><span className="suburb-swatch" /><span className="suburb-name">{p.suburb}</span></span>}
+        <span className="pill status-pill"><span className="status-dot" style={{ background: STATUS_COLOUR[p.status] }} />{LABEL.status[p.status]}</span>
       </div>
       <div className="muted">
         {[rooms(p), p.property_type, p.build_status !== "established" && p.build_status.replace(/_/g, " "),
@@ -82,7 +88,33 @@ function Header({ p }: { p: Detail }) {
       </div>
       {p.owners_corp_fees_aud_pa != null && <div className="small">Owners corp {money(p.owners_corp_fees_aud_pa)}/yr</div>}
       {p.notes && <p style={{ whiteSpace: "pre-wrap" }}>{p.notes}</p>}
+      <TagEditor p={p} />
       {editing && <EditProperty p={p} onDone={() => setEditing(false)} />}
+    </div>
+  );
+}
+
+function TagEditor({ p: detail }: { p: Detail }) {
+  const p = { ...detail, tags: detail.tags ?? [] };  // pages saved offline before tags existed have none
+  const queryClient = useQueryClient();
+  const all = useQuery({ queryKey: ["tags"], queryFn: () => api<{ name: string }[]>("/api/tags") });
+  const [text, setText] = useState("");
+  const colours = useTagColours();
+  const save = async (names: string[]) => {
+    await api(`/api/properties/${p.id}/tags`, { method: "PUT", body: { names } });
+    setText("");
+    for (const key of [["property", p.id], ["overview"], ["tags"]]) queryClient.invalidateQueries({ queryKey: key });
+  };
+  const suggestions = (all.data ?? []).map((t) => t.name).filter((n) => !p.tags.includes(n) && n.toLowerCase().includes(text.toLowerCase()));
+  return (
+    <div className="row" style={{ marginTop: 6 }}>
+      {p.tags.map((t) => (
+        <span key={t} className="tag" style={tagStyle(colours, t)}>#{t} <button className="link" aria-label={`Remove ${t}`} onClick={() => save(p.tags.filter((x) => x !== t))}>✕</button></span>
+      ))}
+      <input className="grow" list={`tags-${p.id}`} placeholder="Add a tag" value={text} style={{ maxWidth: 200, padding: "4px 8px" }}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter" && text.trim()) save([...p.tags, text.trim()]); }} />
+      <datalist id={`tags-${p.id}`}>{suggestions.map((n) => <option key={n} value={n} />)}</datalist>
     </div>
   );
 }
@@ -159,7 +191,7 @@ function StatusCard({ p }: { p: Detail }) {
   return (
     <div className="card">
       <label>
-        Status (shared)
+        <span><span className="status-dot" style={{ background: STATUS_COLOUR[p.status], marginRight: 6 }} />Status (shared)</span>
         <select
           value={p.status}
           onChange={(e) => write.mutate({ path: `/api/properties/${p.id}/status`, body: { status: e.target.value as Status } })}
@@ -402,16 +434,28 @@ function CampaignCard({ propertyId, c }: { propertyId: string; c: Campaign }) {
       </section>
 
       <section>
-        <h3>Price guide</h3>
-        <ul className="history small">
-          {c.price_guides.map((g) => (
-            <li key={g.id}>
-              <strong>{moneyRange(g.low_aud, g.high_aud)}</strong> · {LABEL.guideSource[g.source]} · {day(g.observed_at)}
-              {g.statement_suburb_median_aud && ` · suburb median ${money(g.statement_suburb_median_aud)}`}
-              {g.note && <div>{g.note}</div>}
-            </li>
-          ))}
-        </ul>
+        <h3>Price and guide history</h3>
+        <table className="history-table small">
+          <thead><tr><th>Seen</th><th>Price / guide</th><th>Change</th><th>Source</th><th>By</th></tr></thead>
+          <tbody>
+            {c.price_guides.map((g, i) => {
+              const prev = c.price_guides[i + 1];
+              const mid = (x: { low_aud: number; high_aud: number }) => (x.low_aud + x.high_aud) / 2;
+              const delta = prev ? Math.round(mid(g) - mid(prev)) : null;
+              return (
+                <tr key={g.id}>
+                  <td>{day(g.observed_at)}</td>
+                  <td><strong>{moneyRange(g.low_aud, g.high_aud)}</strong>{g.note && <div className="muted">{g.note}</div>}
+                    {g.statement_suburb_median_aud && <div className="muted">suburb median {money(g.statement_suburb_median_aud)}</div>}</td>
+                  <td className={delta == null ? "muted" : delta > 0 ? "error" : delta < 0 ? "good" : "muted"}>
+                    {delta == null ? "first" : delta === 0 ? "same" : `${delta > 0 ? "↑" : "↓"} ${money(Math.abs(delta))}`}</td>
+                  <td>{LABEL.guideSource[g.source]}</td>
+                  <td>{byId.get(g.created_by)?.display_name}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
         <AddGuide propertyId={propertyId} campaignId={c.id} />
       </section>
 
@@ -422,6 +466,13 @@ function CampaignCard({ propertyId, c }: { propertyId: string; c: Campaign }) {
             <div key={k}>
               <div className="muted">{LABEL.judgement[k]}</div>
               <strong>{money(latest(k)?.amount_aud)}</strong>
+              {c.judgements.filter((j) => j.kind === k).length > 1 && (
+                <details><summary className="small">history</summary>
+                  {c.judgements.filter((j) => j.kind === k).map((j) => (
+                    <div key={j.id} className="small">{money(j.amount_aud)} · {byId.get(j.created_by)?.display_name}, {day(j.created_at)}</div>
+                  ))}
+                </details>
+              )}
               {latest(k) && <div className="muted">{byId.get(latest(k)!.created_by)?.display_name}, {day(latest(k)!.created_at)}</div>}
             </div>
           ))}
@@ -511,10 +562,11 @@ function AddGuide({ propertyId, campaignId }: { propertyId: string; campaignId: 
   const [high, setHigh] = useState("");
   const [median, setMedian] = useState("");
   const [note, setNote] = useState("");
+  const [seen, setSeen] = useState("");
   const lowAud = parseMoney(low);
   return (
     <details>
-      <summary>Add a price guide</summary>
+      <summary>Record a new price or guide</summary>
       <div className="stack">
         <select value={source} onChange={(e) => setSource(e.target.value as GuideSource)}>
           {(Object.keys(LABEL.guideSource) as GuideSource[]).map((s) => <option key={s} value={s}>{LABEL.guideSource[s]}</option>)}
@@ -524,6 +576,7 @@ function AddGuide({ propertyId, campaignId }: { propertyId: string; campaignId: 
           <label>To<input placeholder="1.3m" value={high} onChange={(e) => setHigh(e.target.value)} /></label>
         </div>
         {source === "price_statement" && <label>Suburb median<input value={median} onChange={(e) => setMedian(e.target.value)} /></label>}
+        <label>Date seen (leave blank for today)<input type="date" value={seen} onChange={(e) => setSeen(e.target.value)} /></label>
         <input placeholder="Note, e.g. &quot;vendor wants 1.3+&quot;" value={note} onChange={(e) => setNote(e.target.value)} />
         {write.error && <p className="error small">{(write.error as Error).message}</p>}
         <button
@@ -531,8 +584,9 @@ function AddGuide({ propertyId, campaignId }: { propertyId: string; campaignId: 
           onClick={() =>
             write.mutate(
               { path: `/api/campaigns/${campaignId}/price-guides`,
-                body: { source, low_aud: lowAud, high_aud: parseMoney(high), statement_suburb_median_aud: parseMoney(median), note: note || null } },
-              { onSuccess: () => { setLow(""); setHigh(""); setMedian(""); setNote(""); } },
+                body: { source, low_aud: lowAud, high_aud: parseMoney(high), statement_suburb_median_aud: parseMoney(median), note: note || null,
+                        observed_at: seen ? new Date(`${seen}T12:00`).toISOString() : null } },
+              { onSuccess: () => { setLow(""); setHigh(""); setMedian(""); setNote(""); setSeen(""); } },
             )
           }
         >

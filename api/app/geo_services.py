@@ -18,8 +18,13 @@ class Route:
 
 
 class Valhalla:
+    """A self-hosted engine, or the free public FOSSGIS server (fair use: we pause a second between
+    requests, and results are cached in travel_estimate so each route is asked for once)."""
+
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip("/")
+        self.pause = 0.0 if any(h in self.base_url for h in ("localhost", "valhalla:", "127.0.0.1")) else 1.0
+        self._last = 0.0
 
     def matrix(self, origin: tuple[float, float], targets: list[tuple[float, float]], mode: str) -> list[Route]:
         """One origin to many targets. Points are (lon, lat). Unroutable pairs come back as None."""
@@ -29,8 +34,12 @@ class Valhalla:
             "costing": COSTING[mode],
             "units": "kilometers",
         }
+        wait = self.pause - (time.monotonic() - self._last)
+        if wait > 0:
+            time.sleep(wait)
+        self._last = time.monotonic()
         req = Request(f"{self.base_url}/sources_to_targets", data=json.dumps(body).encode(),
-                      headers={"Content-Type": "application/json"}, method="POST")
+                      headers={"Content-Type": "application/json", "User-Agent": USER_AGENT}, method="POST")
         with urlopen(req, timeout=30) as r:
             data = json.load(r)
         return parse_matrix(data, len(targets))

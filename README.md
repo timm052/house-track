@@ -29,17 +29,15 @@ You need Docker with Compose, and a Tailscale account (free). The app is only re
    docker compose up -d --build
    ```
 
-4. Load the region data (addresses, basemap, station list, routing network, school zones and planning overlays). This downloads about 3 GB (G-NAF 1.9 GB, the Australian OpenStreetMap extract 1 GB, basemap tiles for your search area, and school zones and planning data) and takes 10–30 minutes:
+4. Load the region data for all of Victoria. By default this loads G-NAF addresses (1.9 GB download, about 15 minutes), the station list from OpenStreetMap, and the school zones:
 
    ```bash
    docker compose --profile setup run --rm setup
    ```
 
-   ```bash
-   docker compose restart valhalla
-   ```
+   Everything else streams from free public services: the basemap (OpenFreeMap), planning overlays (Vicmap WMS for the map, plus a one-off WFS lookup per house that is saved), and walking and driving times (the FOSSGIS Valhalla server, one request per second). Re-run setup about once a quarter to pick up new addresses. Steps can be run on their own, for example `... run --rm setup gnaf`.
 
-   Valhalla then builds its routing tiles from the new extract (a few minutes for greater Melbourne). Re-run both commands about once a quarter to pick up new addresses and streets. Steps can be run on their own, for example `... run --rm setup gnaf`.
+   Optional, for offline use: `... run --rm setup tiles osm` downloads a basemap extract and the OpenStreetMap network (about 1 GB more). Then start local routing with `docker compose --profile local-routing up -d` and set `VALHALLA_URL=http://valhalla:8002` in `.env`. The local basemap is only used if it covers all of Victoria, or when the device is offline.
 
 5. Open `https://house.<your-tailnet>.ts.net` (use your `TS_HOSTNAME`) on any device signed in to your tailnet, and name the household's members. Then go to **Settings → Choose stations and places**.
 
@@ -63,7 +61,7 @@ docker compose stop api && docker compose --profile ops run --rm restore house-2
 
 ## Unraid
 
-Put `DATA_DIR` on a cache-pool path such as `/mnt/cache/appdata/housetrack`; PostgreSQL is slow through `/mnt/user`. Put `BACKUP_DIR` on an array share. Run the stack with the Compose Manager plugin. The stack brings its own Tailscale sidecar, so Unraid's built-in Tailscale integration isn't needed for this app. Plan for about 5 GB in `DATA_DIR` after setup (downloads cache, G-NAF, tiles, routing), and about 2 GB of RAM for Valhalla.
+Put `DATA_DIR` on a cache-pool path such as `/mnt/cache/appdata/housetrack`; PostgreSQL is slow through `/mnt/user`. Put `BACKUP_DIR` on an array share. Run the stack with the Compose Manager plugin. The stack brings its own Tailscale sidecar, so Unraid's built-in Tailscale integration isn't needed for this app. Plan for about 4 GB in `DATA_DIR` after setup (downloads cache and G-NAF); add about 2 GB, plus 2 GB of RAM, if you run local tiles and Valhalla.
 
 ## Develop
 
@@ -120,7 +118,7 @@ When the repo goes public (planned after milestone 2): push it to GitHub, then t
 
 ## Data sources
 
-G-NAF © Geoscape Australia (Open G-NAF EULA). Map data © OpenStreetMap contributors (ODbL), basemap by Protomaps. School zones © State of Victoria (Department of Education), and Vicmap Planning © State of Victoria, both via DataVic (CC BY 4.0). Geocoding fallback by Nominatim/OpenStreetMap (usage policy: at most one request per second, which the worker respects).
+G-NAF © Geoscape Australia (Open G-NAF EULA). Map data © OpenStreetMap contributors (ODbL); basemap tiles by OpenFreeMap (or Protomaps when installed locally); stations via the Overpass API; routing by Valhalla on the FOSSGIS server. School zones © State of Victoria (Department of Education), and Vicmap Planning © State of Victoria, both via DataVic (CC BY 4.0). Geocoding fallback by Nominatim/OpenStreetMap (usage policy: at most one request per second, which the worker respects).
 
 ## Licence
 

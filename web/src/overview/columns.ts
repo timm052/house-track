@@ -3,7 +3,7 @@
 import type { Person } from "../api";
 import { LABEL, money, parseMoney } from "../format";
 
-export type Kind = "text" | "int" | "money" | "date" | "datetime" | "enum" | "verdict" | "url" | "bool" | "minutes" | "pct";
+export type Kind = "text" | "int" | "money" | "date" | "datetime" | "enum" | "verdict" | "url" | "bool" | "minutes" | "pct" | "tags";
 
 export type Column = {
   key: string;
@@ -21,6 +21,7 @@ export type OverviewRow = Record<string, unknown> & { id: string; _v: Record<str
 export type OverviewPlace = { id: string; kind: "station" | "destination"; name: string; person_id: string | null; is_favourite: boolean };
 
 const SOURCE = LABEL.guideSource;
+const VERDICTS = { yes: "Yes", maybe: "Maybe", no: "No" };
 const enumOf = (labels: Record<string, string>) => labels;
 
 export function catalogue(persons: Person[], places: OverviewPlace[]): Column[] {
@@ -41,6 +42,7 @@ export function catalogue(persons: Person[], places: OverviewPlace[]): Column[] 
     { key: "owners_corp_fees_aud_pa", label: "OC fee/yr", group: "House", kind: "money", editable: true, width: 90 },
     { key: "council_rates_aud_pa", label: "Rates/yr", group: "House", kind: "money", editable: true, width: 90 },
     { key: "notes", label: "Notes", group: "House", kind: "text", editable: true, width: 200 },
+    { key: "tags", label: "Tags", group: "House", kind: "tags", editable: true, byDefault: true, width: 160 },
     { key: "created_at", label: "Added", group: "House", kind: "date", width: 90 },
     { key: "pin_source", label: "Pin", group: "House", kind: "text", width: 80 },
 
@@ -75,6 +77,10 @@ export function catalogue(persons: Person[], places: OverviewPlace[]): Column[] 
     { key: "guide_date", label: "Guide date", group: "Price", kind: "date", width: 90 },
     { key: "suburb_median", label: "Suburb median", group: "Price", kind: "money", width: 100 },
     { key: "guide_change", label: "Guide change", group: "Price", kind: "money", width: 95 },
+    { key: "first_guide_low", label: "First guide low", group: "Price", kind: "money", width: 100 },
+    { key: "first_guide_high", label: "First guide high", group: "Price", kind: "money", width: 100 },
+    { key: "guide_changes", label: "Price changes", group: "Price", kind: "int", byDefault: true, width: 90 },
+    { key: "last_guide_change", label: "Last price change", group: "Price", kind: "date", width: 110 },
     { key: "estimated_reserve", label: "Our reserve", group: "Price", kind: "money", editable: true, history: true, byDefault: true, width: 95 },
     { key: "expected_sale", label: "Expected sale", group: "Price", kind: "money", editable: true, history: true, byDefault: true, width: 100 },
     { key: "walk_away", label: "Walk-away", group: "Price", kind: "money", editable: true, history: true, byDefault: true, width: 90 },
@@ -83,8 +89,8 @@ export function catalogue(persons: Person[], places: OverviewPlace[]): Column[] 
   ];
   for (const p of persons.filter((x) => x.active)) {
     cols.push(
-      { key: `v:${p.id}:pre`, label: `${p.display_name} pre`, group: "Opinions", kind: "verdict", editable: true, history: true, byDefault: true, width: 90 },
-      { key: `v:${p.id}:post`, label: `${p.display_name} post`, group: "Opinions", kind: "verdict", editable: true, history: true, byDefault: true, width: 95 },
+      { key: `v:${p.id}:pre`, label: `${p.display_name} pre`, group: "Opinions", kind: "verdict", editable: true, history: true, byDefault: true, width: 90, options: VERDICTS },
+      { key: `v:${p.id}:post`, label: `${p.display_name} post`, group: "Opinions", kind: "verdict", editable: true, history: true, byDefault: true, width: 95, options: VERDICTS },
       { key: `last_verdict:${p.id}`, label: `${p.display_name} last verdict`, group: "Opinions", kind: "date", width: 110 },
     );
   }
@@ -161,12 +167,15 @@ const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart
 
 /** Typed text -> the value sent to the API, or an error message. */
 export function parseInput(col: Column, raw: unknown): { value: unknown } | { error: string } {
-  const text = raw == null ? "" : String(raw).trim();
-  if (text === "") return col.history && col.kind === "verdict" ? { error: "Type Y, M or N" } : { value: null };
+  const text = raw == null ? "" : Array.isArray(raw) ? raw.join(",") : String(raw).trim();
+  if (text === "" && col.kind === "tags") return { value: [] };
+  if (text === "") return col.history ? { error: col.kind === "verdict" ? "Choose Yes, Maybe or No" : "This keeps history: enter a value" } : { value: null };
   switch (col.kind) {
     case "int": {
       const n = Number(text.replace(/,/g, ""));
-      return Number.isInteger(n) && n >= 0 ? { value: n } : { error: "Whole number" };
+      const max = ["beds", "baths", "car_spaces"].includes(col.key) ? 20 : 10_000_000;
+      if (!/^[\d,]+$/.test(text) || !Number.isInteger(n)) return { error: "A whole number, e.g. 3" };
+      return n <= max ? { value: n } : { error: `At most ${max.toLocaleString()}` };
     }
     case "money": {
       const n = parseMoney(text);
@@ -192,7 +201,9 @@ export function parseInput(col: Column, raw: unknown): { value: unknown } | { er
       return hit ? { value: hit[0] } : { error: `One of: ${Object.values(opts).join(", ")}` };
     }
     case "url":
-      return /^https?:\/\//.test(text) ? { value: text } : { error: "A web address" };
+      return /^https?:\/\//.test(text) ? { value: text } : { error: "A web address starting https://" };
+    case "tags":
+      return { value: (Array.isArray(raw) ? raw : text.split(",")).map((t) => String(t).trim()).filter(Boolean) };
     default:
       return { value: text };
   }
@@ -205,6 +216,7 @@ const dtFmt = new Intl.DateTimeFormat("en-AU", { weekday: "short", day: "numeric
 export function display(col: Column, v: unknown): string {
   if (v == null || v === "") return "";
   switch (col.kind) {
+    case "tags": return (v as string[]).join(", ");
     case "money": return col.key === "guide_change" && (v as number) > 0 ? `+${money(v as number)}` : (v as number) < 0 ? `−${money(-(v as number))}` : money(v as number);
     case "date": return dayFmt.format(new Date(String(v).length === 10 ? `${v}T00:00` : String(v)));
     case "datetime": return dtFmt.format(new Date(String(v)));
@@ -232,5 +244,6 @@ export function editText(col: Column, v: unknown): string {
   }
   if (col.kind === "enum") return col.options?.[String(v)] ?? String(v);
   if (col.kind === "verdict") return String(v)[0].toUpperCase();
+  if (col.kind === "tags") return (v as string[]).join(", ");
   return String(v);
 }

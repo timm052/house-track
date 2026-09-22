@@ -1,11 +1,13 @@
 import json
 import zipfile
 
+from app import worker
+from app.db import tx
 from app.setup import overlays
 
 from .conftest import as_
 
-BOX = (145.0, -37.9, 145.3, -37.7)
+BOX = (144.0, -39.0, 146.5, -37.0)
 
 
 def square(lon, lat, d=0.01):
@@ -26,18 +28,19 @@ def school_zip(tmp_path):
     return path
 
 
-def fake_wfs(layer, bbox):
-    if layer.code == "vic_flood":
-        return [
-            {"type": "Feature", "properties": {"zone_description": "LAND SUBJECT TO INUNDATION OVERLAY", "zone_code": "LSIO"},
-             "geometry": {"type": "MultiPolygon", "coordinates": [square(145.2005, -37.8005, 0.002)["coordinates"]]}},
-            # Crosses the edge of the search area: only the part inside is kept.
-            {"type": "Feature", "properties": {"zone_description": "LAND SUBJECT TO INUNDATION OVERLAY"},
-             "geometry": square(144.99, -37.75, 0.02)},
-        ]
-    if layer.code == "vic_heritage":
-        return [{"type": "Feature", "properties": {"zone_description": "HERITAGE OVERLAY (HO35)"}, "geometry": square(145.2, -37.8, 0.003)}]
-    return []
+class FakeService:
+    """Stands in for Victoria's WFS: a flood overlay and a heritage overlay near (145.2, -37.8)."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def __call__(self, lon, lat, pause=0):
+        self.calls += 1
+        near = abs(lon - 145.2) < 0.01 and abs(lat + 37.8) < 0.01
+        return {layer.code: [] for layer in overlays.VIC_STREAMED} | ({
+            "vic_flood": [{"label": "Land Subject to Inundation Overlay", "attrs": {"scheme_code": "LSIO"}}],
+            "vic_heritage": [{"label": "Heritage Overlay (HO35)", "attrs": {"scheme_code": "HO"}}],
+        } if near else {})
 
 
 def test_labels_are_readable():
@@ -46,35 +49,48 @@ def test_labels_are_readable():
     assert overlays.nice_label("NEIGHBOURHOOD RESIDENTIAL ZONE - SCHEDULE 5") == "Neighbourhood Residential Zone - Schedule 5"
 
 
-def test_overlays_load_clip_and_flag(client, people, database_url, tmp_path, monkeypatch):
-    monkeypatch.setattr(overlays, "wfs_features", fake_wfs)
-    overlays.load(database_url, BOX, tmp_path, school_zip(tmp_path))
+def test_streamed_layers_have_wms_tiles():
+    url = overlays.STREAMED["vic_heritage"].wms_tiles()
+    assert "request=GetMap" in url and "{bbox-epsg-3857}" in url and "CQL_FILTER=scheme_code%20%3D%20%27HO%27" in url
+
+
+def test_school_zones_local_and_planning_looked_up_once(client, people, database_url, tmp_path, monkeypatch):
+    fake = FakeService()
+    monkeypatch.setattr(overlays, "lookup_all", fake)
+    overlays.load_schools(database_url, BOX, tmp_path, school_zip(tmp_path))
+    with tx() as conn:
+        overlays.ensure_streamed_layers(conn)
     layers = {layer["code"]: layer for layer in client.get("/api/overlays").json()}
-    assert layers["vic_school_primary"]["pieces"] == 1 and len([c for c in layers if "school" in c]) == 2
-    assert layers["vic_flood"]["pieces"] == 2  # the edge-crossing polygon is clipped, not dropped
+    assert layers["vic_school_primary"]["pieces"] == 1 and layers["vic_school_primary"]["tiles"] is None
+    assert layers["vic_flood"]["tiles"].startswith("https://") and layers["vic_flood"]["pieces"] == 0
 
     a = people["a"]
-    r = client.post("/api/properties", headers=as_(a), json={
-        "address": {"street_number": "1", "street": "Overlay Rd", "suburb": "Box Hill North", "postcode": "3129"}})
-    pid = r.json()["id"]
+    pid = client.post("/api/properties", headers=as_(a), json={
+        "address": {"street_number": "1", "street": "Overlay Rd", "suburb": "Box Hill North", "postcode": "3129"}}).json()["id"]
     client.put(f"/api/properties/{pid}/location", headers=as_(a), json={"lon": 145.2004, "lat": -37.8004})
+    while worker.lookup_overlays():
+        pass
     detail = client.get(f"/api/properties/{pid}").json()
     labels = {o["code"]: o["label"] for o in detail["overlays"]}
     assert labels["vic_school_primary"] == "Box Hill North Primary School"
-    assert labels["vic_flood"] == "Land Subject to Inundation Overlay"
-    assert labels["vic_heritage"] == "Heritage Overlay (HO35)"
+    assert labels["vic_flood"] == "Land Subject to Inundation Overlay" and labels["vic_heritage"] == "Heritage Overlay (HO35)"
     row = next(x for x in client.get("/api/overview", headers=as_(a)).json()["rows"] if x["id"] == pid)
     assert row["school_secondary"] == "Box Hill High School" and "Heritage Overlay (HO35)" in row["planning"]
-    assert row["warned"] is True  # flood overlays warn by default, for everyone
+    assert row["warned"] is True  # flood warns by default, for everyone
 
-    # Make floods a hard exclusion for the household.
+    # Saved: no second lookup until the pin moves.
+    calls = fake.calls
+    assert worker.lookup_overlays() == 0 and fake.calls == calls
+    client.put(f"/api/properties/{pid}/location", headers=as_(a), json={"lon": 145.30, "lat": -37.85})
+    while worker.lookup_overlays():
+        pass
+    labels = {o["code"] for o in client.get(f"/api/properties/{pid}").json()["overlays"]}
+    assert "vic_flood" not in labels and fake.calls > calls
+
+    # The household can turn a warning layer into a hard exclusion.
+    client.put(f"/api/properties/{pid}/location", headers=as_(a), json={"lon": 145.2004, "lat": -37.8004})
+    while worker.lookup_overlays():
+        pass
     assert client.patch("/api/overlays/vic_flood", headers=as_(a), json={"effect": "hard_exclude"}).status_code == 200
     assert next(x for x in client.get("/api/overview", headers=as_(people["b"])).json()["rows"] if x["id"] == pid)["excluded"]
     client.patch("/api/overlays/vic_flood", headers=as_(a), json={"effect": "soft_warn"})
-
-    fc = client.get("/api/overlays/vic_heritage/features", params={"bbox": "145.19,-37.81,145.21,-37.79", "zoom": 15}).json()
-    assert fc["features"][0]["properties"]["label"] == "Heritage Overlay (HO35)"
-
-    # Re-running replaces a layer rather than duplicating it.
-    overlays.load(database_url, BOX, tmp_path, school_zip(tmp_path))
-    assert {layer["code"]: layer for layer in client.get("/api/overlays").json()}["vic_heritage"]["pieces"] == 1

@@ -7,18 +7,25 @@ from pydantic import BaseModel
 
 from ..db import tx
 from ..deps import Person, not_found
+from ..setup.overlays import STREAMED
 
 router = APIRouter(prefix="/api")
 
 
 @router.get("/overlays")
 def list_layers() -> list[dict]:
+    """Layers and how the map draws them: streamed ones as image tiles straight from the state's
+    map service, local ones (school zones) as vector features from this server."""
     with tx() as conn:
-        return conn.execute(
+        rows = conn.execute(
             """SELECT l.code, l.title, l.effect, l.data_as_of, l.imported_at, count(f.id) AS pieces
                FROM overlay_layer l LEFT JOIN overlay_feature f ON f.layer_id = l.id
                GROUP BY l.id ORDER BY l.code"""
         ).fetchall()
+    for r in rows:
+        streamed = STREAMED.get(r["code"])
+        r["tiles"] = streamed.wms_tiles() if streamed else None
+    return rows
 
 
 class LayerPatch(BaseModel):

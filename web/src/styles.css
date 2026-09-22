@@ -162,19 +162,30 @@ details > summary { cursor: pointer; color: var(--muted); padding: 6px 0; }
 .popover { position: fixed; z-index: 20; width: 270px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.2); }
 .popover-list { max-height: 260px; overflow-y: auto; }
 .col-head { display: flex; align-items: center; gap: 4px; width: 100%; }
-.col-name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.col-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .col-sort { font-size: 10px; color: var(--accent); }
 .col-filter { min-height: 0; padding: 0 3px; border: 0; background: none; color: var(--muted); font-size: 11px; cursor: pointer; }
 .col-filter.on { color: var(--accent); }
 .open-link { text-decoration: none; }
-revo-grid .ro { color: var(--muted); }
+/* Suburb row colours (see colour.ts); these come before the cell states so saving/error/conflict win. */
+revo-grid .tint { background: var(--sub-tint, transparent); }
+revo-grid .stripe { box-shadow: inset 4px 0 0 var(--sub-ink, transparent) !important; }
+revo-grid .dim > * { opacity: 0.5; }
+revo-grid .ro { color: var(--muted) !important; }
+/* RevoGrid's theme colours cell text with more specific selectors, so these need !important. */
+revo-grid .suburb-cell { color: var(--sub-ink) !important; font-weight: 600; }
+revo-grid .tone-good { color: var(--yes) !important; font-weight: 600; }
+revo-grid .tone-warn { color: var(--maybe) !important; font-weight: 600; }
+revo-grid .tone-bad { color: var(--no) !important; font-weight: 600; }
+revo-grid .tag { font-size: 12px; line-height: 18px; }
+.status-cell { display: inline-flex; align-items: center; gap: 6px; }
 revo-grid .cell-saving { background: rgba(59,130,246,.12); }
 revo-grid .cell-saved { background: rgba(34,197,94,.18); transition: background .6s; }
 revo-grid .cell-error { background: rgba(239,68,68,.22); }
 revo-grid .cell-conflict { background: rgba(245,158,11,.35); }
-revo-grid .v-yes { color: var(--yes); font-weight: 600; }
-revo-grid .v-maybe { color: var(--maybe); font-weight: 600; }
-revo-grid .v-no { color: var(--no); font-weight: 600; }
+revo-grid .v-yes { color: var(--yes) !important; font-weight: 600; }
+revo-grid .v-maybe { color: var(--maybe) !important; font-weight: 600; }
+revo-grid .v-no { color: var(--no) !important; font-weight: 600; }
 .cell-editor { width: 100%; height: 100%; border: 2px solid var(--accent); border-radius: 0; padding: 0 4px; }
 .narrow-note { display: none; }
 @media (max-width: 900px) {
@@ -220,3 +231,56 @@ table.compare { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
 table.compare th, table.compare td { border-bottom: 1px solid var(--border); padding: 6px 8px; text-align: left; vertical-align: top; }
 table.compare tbody th { color: var(--muted); font-weight: 500; white-space: nowrap; }
 table.compare tr.differ td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+
+/* ─── checked editing, tags ─────────────────────────────────────────── */
+.cell-editor.invalid { border-color: var(--no); background: color-mix(in srgb, var(--no) 10%, var(--surface)); }
+.cell-hint { position: fixed; z-index: 40; background: var(--no); color: #fff; font-size: 0.8rem; padding: 3px 8px; border-radius: 6px; }
+.tags-popover { width: 250px; }
+.tag { display: inline-block; font-size: 0.75rem; padding: 1px 8px; border-radius: 999px; margin-right: 4px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); }
+
+table.history-table { width: 100%; border-collapse: collapse; }
+table.history-table th, table.history-table td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+table.history-table th { color: var(--muted); font-weight: 500; }
+.good { color: var(--yes); }
+
+/* ─── trends charts (validated palette slots 1-2, light and dark) ───── */
+.viz-root { --series-1: #2a78d6; --series-2: #eb6834; --viz-grid: #e4e6ea; }
+@media (prefers-color-scheme: dark) { .viz-root { --series-1: #3987e5; --series-2: #d95926; --viz-grid: #2c313c; } }
+.viz-frame { position: relative; }
+svg.viz { width: 100%; height: auto; display: block; touch-action: pan-y; }
+.viz-grid { stroke: var(--viz-grid); stroke-width: 1; }
+.viz-tick { fill: var(--muted); font-size: 11px; }
+.viz-label { fill: var(--text); font-size: 11px; font-weight: 600; }
+.viz-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.viz-line.slot-1 { stroke: var(--series-1); } .viz-line.slot-2 { stroke: var(--series-2); }
+.viz-dot.slot-1, .viz-bar.slot-1 { fill: var(--series-1); } .viz-dot.slot-2 { fill: var(--series-2); }
+.viz-dot { stroke: var(--surface); stroke-width: 2; }
+.viz-hit { fill: transparent; }
+.viz-ref { stroke: var(--muted); stroke-width: 1; opacity: 0.6; }
+.viz-crosshair { stroke: var(--muted); stroke-width: 1; }
+.viz-tip { position: absolute; transform: translate(-50%, -110%); pointer-events: none; background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 0.8rem; white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,.15); z-index: 5; }
+.viz-legend { display: flex; gap: 14px; font-size: 0.85rem; color: var(--text); margin-bottom: 4px; }
+.viz-key { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; }
+.viz-key.slot-1 { background: var(--series-1); } .viz-key.slot-2 { background: var(--series-2); }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; margin: 12px 0; }
+.stat { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.stat-value { font-size: 1.4rem; font-weight: 700; }
+.trends { max-width: 980px; }
+
+.picker-group { border-top: 1px solid var(--border); padding: 4px 0; }
+.picker-group-head { display: flex; align-items: center; gap: 8px; }
+.picker-group-head .link { text-align: left; font-weight: 600; color: var(--text); }
+.picker-group .picker-row { padding-left: 18px; }
+.popover-actions { display: flex; gap: 12px; flex-wrap: wrap; padding: 4px 0 8px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
+
+/* ─── colour for meaning (colour.ts) ─────────────────────────────────── */
+.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.status-pill { display: inline-flex; align-items: center; gap: 6px; }
+.tone-good { color: var(--yes); } .tone-warn { color: var(--maybe); } .tone-bad { color: var(--no); }
+.tag { border: 1px solid transparent; }
+.suburb-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: var(--sub-ink); margin-right: 5px; vertical-align: -1px; }
+.suburb-name { color: var(--sub-ink); font-weight: 600; }
+.property-card.tint { border-left: 5px solid var(--sub-ink); }
+.property-card.dim { opacity: 0.6; }

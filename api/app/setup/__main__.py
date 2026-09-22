@@ -1,7 +1,9 @@
-"""Region data setup: `python -m app.setup [all|gnaf|osm|tiles|overlays] ...`
+"""Region data setup: `python -m app.setup [all|gnaf|stations|schools|tiles|osm] ...`
 
-Run through compose: `docker compose --profile setup run --rm setup` (all steps). Re-run quarterly
-to refresh, then `docker compose restart valhalla` so it rebuilds routing tiles.
+`all` (the default) loads what's kept locally: G-NAF addresses, the station list and school zones.
+The basemap, planning overlays and routing stream from free online services instead. Two optional
+steps make them local for fully offline use: `tiles` (basemap extract) and `osm` (network for a
+self-hosted Valhalla; then `docker compose --profile local-routing up -d valhalla`).
 """
 
 import argparse
@@ -14,7 +16,8 @@ import psycopg
 from ..migrate import migrate
 from . import gnaf_load, osm, overlays, regions, tiles
 
-STEPS = ("gnaf", "osm", "tiles", "overlays")
+STEPS = ("gnaf", "stations", "schools", "tiles", "osm")
+DEFAULT_STEPS = {"gnaf", "stations", "schools"}
 
 
 def ensure_database(database_url: str, name: str) -> str:
@@ -30,7 +33,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("steps", nargs="*", default=["all"], choices=("all", *STEPS))
     args = parser.parse_args()
-    steps = set(STEPS) if "all" in args.steps else set(args.steps)
+    steps = DEFAULT_STEPS if "all" in args.steps else set(args.steps)
 
     region = regions.get(os.environ.get("REGION", "vic"))
     bbox = regions.parse_bbox(os.environ.get("BBOX"), region)
@@ -47,6 +50,9 @@ def main() -> None:
         zip_path = gnaf_load.fetch(downloads, os.environ.get("GNAF_ZIP_URL"))
         gnaf_load.load(zip_path, region.gnaf_state, gnaf_url)
 
+    if "stations" in steps:
+        osm.load_stations(osm.overpass_stations(bbox), database_url)
+
     if "osm" in steps:
         region_pbf = osm.fetch_and_clip(os.environ.get("OSM_EXTRACT_URL") or region.osm_extract,
                                         downloads, bbox, valhalla_dir / "region.osm.pbf")
@@ -56,11 +62,12 @@ def main() -> None:
         tiles.extract(bbox, tiles_dir, os.environ.get("PMTILES_SOURCE"))
         tiles.assets(tiles_dir, downloads)
 
-    if "overlays" in steps:
+    if "schools" in steps:
         school_zip = os.environ.get("SCHOOL_ZONES_ZIP")
-        overlays.load(database_url, bbox, downloads, Path(school_zip) if school_zip else None)
+        overlays.load_schools(database_url, bbox, downloads, Path(school_zip) if school_zip else None)
 
-    print("setup: done. If the OSM step ran, restart valhalla: docker compose restart valhalla", flush=True)
+    print("setup: done." + (" Restart the local routing engine: docker compose restart valhalla" if "osm" in steps else ""),
+          flush=True)
 
 
 if __name__ == "__main__":

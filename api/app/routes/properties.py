@@ -193,6 +193,9 @@ def get_property(property_id: UUID) -> dict:
         prop["inspections"] = inspections_for(conn, property_id)
         prop["attachments"] = attachments_for(conn, property_id)
         prop["overlays"] = overlays_for(conn, property_id)
+        prop["tags"] = [r["name"] for r in conn.execute(
+            "SELECT t.name FROM property_tag pt JOIN tag t ON t.id = pt.tag_id WHERE pt.property_id = %s ORDER BY lower(t.name)",
+            (property_id,))]
     return prop
 
 

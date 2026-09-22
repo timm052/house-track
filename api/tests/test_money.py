@@ -82,3 +82,12 @@ def test_auction_bids_and_walk_away_block(client, people):
     assert state["walk_away"] == 1_100_000 and [b["bidder"] for b in state["bids"]] == ["vendor", "us", "us"]
     client.delete(f"/api/bids/{state['bids'][-1]['id']}", headers=as_(a))
     assert len(client.get(f"/api/campaigns/{cid}/auction").json()["bids"]) == 2
+
+
+def test_all_comparables_have_a_suburb(client, people):
+    a = people["a"]
+    _, cid = house(client, a, 9)
+    client.post(f"/api/campaigns/{cid}/comparables", headers=as_(a),
+                json={"address": "14 Elm Grove, Mitcham VIC 3132", "sold_price_aud": 990_000, "sold_on": "2026-07-01"})
+    comps = {c["address"]: c for c in client.get("/api/comparables").json()}
+    assert comps["14 Elm Grove, Mitcham VIC 3132"]["suburb"] == "Mitcham"

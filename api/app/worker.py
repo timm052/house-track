@@ -16,6 +16,7 @@ from uuid import UUID
 from psycopg.types.json import Jsonb
 
 from . import gnaf
+from .setup import overlays
 from .address import Address, address_key, normalise
 from .db import tx
 from .geo_services import Nominatim, Valhalla
@@ -129,13 +130,44 @@ def route_stale(valhalla: Valhalla, limit: int = 200) -> int:
     return len(rows)
 
 
+def lookup_overlays(limit: int = 3) -> int:
+    """Streamed planning layers: look each pinned house up once, and again if its pin moves."""
+    with tx() as conn:
+        rows = conn.execute(
+            """SELECT p.id, ST_X(p.location) AS lon, ST_Y(p.location) AS lat
+               FROM property p LEFT JOIN overlay_check c ON c.property_id = p.id
+               WHERE p.location IS NOT NULL AND (c.property_id IS NULL OR NOT ST_Equals(c.origin, p.location))
+               ORDER BY p.updated_at DESC LIMIT %s""",
+            (limit,),
+        ).fetchall()
+    for r in rows:
+        found = overlays.lookup_all(r["lon"], r["lat"])  # network errors propagate: retried later
+        with tx() as conn:
+            conn.execute("DELETE FROM overlay_lookup WHERE property_id = %s", (r["id"],))
+            for code, hits in found.items():
+                for h in hits:
+                    conn.execute("INSERT INTO overlay_lookup (property_id, layer_code, label, attrs) VALUES (%s, %s, %s, %s)",
+                                 (r["id"], code, h["label"], Jsonb(h["attrs"])))
+            conn.execute(
+                """INSERT INTO overlay_check (property_id, origin) VALUES (%s, ST_SetSRID(ST_MakePoint(%s, %s), 4326))
+                   ON CONFLICT (property_id) DO UPDATE SET origin = EXCLUDED.origin, checked_at = now()""",
+                (r["id"], r["lon"], r["lat"]),
+            )
+    return len(rows)
+
+
 class Worker(threading.Thread):
-    def __init__(self, valhalla: Valhalla | None, nominatim: Nominatim | None):
+    def __init__(self, valhalla: Valhalla | None, nominatim: Nominatim | None, lookups: bool = True):
         super().__init__(name="housetrack-worker", daemon=True)
-        self.valhalla, self.nominatim = valhalla, nominatim
+        self.valhalla, self.nominatim, self.lookups = valhalla, nominatim, lookups
         self.stop_event = threading.Event()
 
     def run(self) -> None:
+        try:
+            with tx() as conn:
+                overlays.ensure_streamed_layers(conn)
+        except Exception as e:
+            log.warning("worker: couldn't register streamed layers: %s", e)
         backoff = 0
         while not self.stop_event.is_set():
             busy = 0
@@ -143,6 +175,8 @@ class Worker(threading.Thread):
                 busy += geocode_pending(self.nominatim)
                 if self.valhalla:
                     busy += route_stale(self.valhalla)
+                if self.lookups:
+                    busy += lookup_overlays()
                 backoff = 0
             except Exception as e:  # routing engine still building tiles, database restarting, ...
                 backoff = min(backoff + 10, 120)

@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 
 from . import db, gnaf
 from .geo_services import Nominatim, Valhalla
-from .routes import campaigns, decide, driveway, geo, money, overlays, overview, people, properties
+from .routes import campaigns, decide, driveway, geo, money, overlays, overview, people, properties, tags
 from .worker import Worker
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -20,11 +20,13 @@ async def lifespan(_: FastAPI):
     gnaf.configure(os.environ.get("GNAF_DATABASE_URL"))
     worker = None
     if os.environ.get("WORKER", "1") != "0":
-        valhalla_url = os.environ.get("VALHALLA_URL")
+        # Free public routing by default; point VALHALLA_URL at a self-hosted engine to keep it local.
+        valhalla_url = os.environ.get("VALHALLA_URL", "https://valhalla1.openstreetmap.de")
         # Public Nominatim by default (free, 1 request/second); set NOMINATIM_URL="" to turn it off.
         nominatim_url = os.environ.get("NOMINATIM_URL", "https://nominatim.openstreetmap.org")
         worker = Worker(Valhalla(valhalla_url) if valhalla_url else None,
-                        Nominatim(nominatim_url) if nominatim_url else None)
+                        Nominatim(nominatim_url) if nominatim_url else None,
+                        lookups=os.environ.get("OVERLAY_LOOKUPS", "1") != "0")
         worker.start()
     yield
     if worker:
@@ -43,6 +45,7 @@ app.include_router(driveway.router)
 app.include_router(money.router)
 app.include_router(overlays.router)
 app.include_router(decide.router)
+app.include_router(tags.router)
 
 
 @app.get("/api/health")

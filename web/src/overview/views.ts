@@ -26,6 +26,7 @@ export function useViews() {
 }
 
 function comparable(v: unknown): number | string | null {
+  if (Array.isArray(v)) return v.length ? v.join(", ").toLowerCase() : null;
   if (v == null || v === "") return null;
   if (typeof v === "number" || typeof v === "boolean") return Number(v);
   const s = String(v);
@@ -35,9 +36,12 @@ function comparable(v: unknown): number | string | null {
 export function matches(row: OverviewRow, f: Filter, col: Column | undefined): boolean {
   const v = row[f.column];
   switch (f.op) {
-    case "empty": return v == null || v === "";
-    case "notempty": return !(v == null || v === "");
-    case "in": return (f.value as unknown[]).map(String).includes(String(v));
+    case "empty": return v == null || v === "" || (Array.isArray(v) && v.length === 0);
+    case "notempty": return !(v == null || v === "" || (Array.isArray(v) && v.length === 0));
+    case "in": {
+      const wanted = (f.value as unknown[]).map(String);
+      return Array.isArray(v) ? v.some((x) => wanted.includes(String(x))) : wanted.includes(String(v));
+    }
     case "contains": return (col ? display(col, v) : String(v ?? "")).toLowerCase().includes(String(f.value ?? "").toLowerCase());
     case "gte": { const a = comparable(v), b = comparable(f.value); return a != null && b != null && a >= b; }
     case "lte": { const a = comparable(v), b = comparable(f.value); return a != null && b != null && a <= b; }
@@ -90,6 +94,7 @@ export function toCsv(rows: OverviewRow[], cols: Column[]): string {
       const v = r[c.key];
       // Money and counts stay plain numbers so a spreadsheet can sum them; links stay full.
       if (v == null) return "";
+      if (Array.isArray(v)) return cell(v.join("; "));
       if (["money", "int", "minutes", "pct"].includes(c.kind) || c.kind === "url") return cell(String(v));
       return cell(display(c, v));
     }).join(","));

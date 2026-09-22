@@ -32,6 +32,9 @@ createRoot(document.getElementById("root")!).render(
       persistOptions={{
         persister,
         maxAge: 7 * 24 * 3600_000,
+        // A new build may change what the API returns, so a cache saved by an older build is thrown away
+        // rather than shown to pages that expect the new shape.
+        buster: __BUILD_ID__,
         dehydrateOptions: { shouldDehydrateQuery: (q) => q.state.status === "success" && PERSISTED.has(String(q.queryKey[0])) },
       }}
     >

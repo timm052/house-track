@@ -107,3 +107,32 @@ def test_at_most_five_favourite_places(client, people):
     assert client.put(f"/api/places/{ids[5]}/favourite", headers=a, json={"is_favourite": True}).status_code == 200
     for place_id in ids:
         client.delete(f"/api/places/{place_id}", headers=a)
+
+
+def test_tags_on_houses_and_in_the_grid(client, people):
+    a, b = people["a"], people["b"]
+    pid = new_house(client, a, 150)
+    r = client.put(f"/api/properties/{pid}/tags", headers=as_(a), json={"names": ["Corner block", " needs  reno "]})
+    assert r.json()["tags"] == ["Corner block", "needs reno"]
+    row = row_for(client, a, pid)
+    assert row["tags"] == ["Corner block", "needs reno"]
+    # Grid edit replaces the set; an existing tag is matched case-insensitively.
+    r = cell(client, a, pid, "tags", ["corner block", "North garden"], expected=row["tags"])
+    assert r.status_code == 200 and sorted(r.json()["tags"]) == ["Corner block", "North garden"]
+    assert cell(client, b, pid, "tags", ["x"], expected=["Corner block"]).status_code == 409
+    tags = {t["name"]: t for t in client.get("/api/tags").json()}
+    assert tags["Corner block"]["houses"] >= 1 and tags["needs reno"]["houses"] == 0
+    client.delete(f"/api/tags/{tags['North garden']['id']}", headers=as_(a))
+    assert row_for(client, a, pid)["tags"] == ["Corner block"]
+    assert client.patch(f"/api/tags/{tags['needs reno']['id']}", headers=as_(a), json={"name": "Corner Block"}).status_code == 409
+
+
+def test_price_history_columns(client, people):
+    a = people["a"]
+    pid = new_house(client, a, 151)
+    cid = row_for(client, a, pid)["campaign_id"]
+    client.post(f"/api/campaigns/{cid}/price-guides", headers=as_(a),
+                json={"source": "advertised", "low_aud": 850_000, "high_aud": 935_000, "observed_at": "2026-09-30T09:00:00+10:00"})
+    row = row_for(client, a, pid)
+    assert (row["first_guide_low"], row["first_guide_high"]) == (900_000, 990_000)
+    assert row["guide_changes"] == 1 and row["last_guide_change"] == "2026-09-30" and row["guide_change"] == -52_500

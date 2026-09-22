@@ -27,6 +27,7 @@ A self-hosted web app for a household tracking houses to buy: map, per-person op
 | D17 | Conflicts | **Per-field compare-and-set on every write API.** A write may carry the value it saw ("expected"): the plain value for ordinary fields, the latest entry's ID for history fields. The server checks it inside the transaction and returns 409 with the current value, who changed it and when. The UI offers **Keep mine / Keep theirs**, plus **Keep both** for history fields. Writes without "expected" stay last-write-wins. | No schema change: `updated_by`/`updated_at` and the append-only tables already hold what the 409 reports. The milestone-3 offline queue uses this. |
 | D18 | Saved views | **Shared** named views (filters, sort, visible columns) stored in the database, used by both Overview and the phone Houses tab. The default view hides rejected, lost, withdrawn and bought, and can be edited. Column widths and order are remembered per device. | New `grid_view` table. |
 | D19 | Favourite places | Up to **five shared favourite places**. They get default drive-time columns in Overview and appear on phone cards. | New `place.is_favourite`; the five-favourite limit is enforced by a trigger. |
+| D20 | Statewide data, streamed (settled 2026-09-22) | The region covers **all of Victoria**. Only G-NAF is downloaded (≈4.4 M addresses; offline geocoding). The basemap streams from **OpenFreeMap**, planning overlays display as **Vicmap WMS** images, and each pinned house's planning hits are **looked up once over WFS and saved** (redone if the pin moves). Stations come from **Overpass**; routing uses the public **FOSSGIS Valhalla** (1 request/second). School zones stay local (one small zip). A local basemap extract and local Valhalla remain optional (`setup tiles osm`, profile `local-routing`); a local extract is only used when it covers the whole region, or when offline. | Migration `0005` (`overlay_check`, `overlay_lookup`). Trade-off: the map background, overlay images and new travel times need internet; saved results don't. |
 
 ### Assumptions (⚠ = expensive to reverse later)
 
@@ -1024,4 +1025,8 @@ The `gnaf` database, tiles and routing data are left out of backups because setu
 
 ---
 
-**Signed off 2026-09-22** (decisions D1–D19). All milestones (1–6, including 2.5) are implemented; see README.md.
+7. ✅ **Statewide data and analysis** (done 2026-09-22). All of Victoria, streamed per D20. Land and building area on quick add, cards and Overview. Overview dropdowns for fixed-choice fields, checked number, money and date entry, and a tags editor. Shared tags (`PUT /api/properties/{id}/tags`). Multi-select filters on the phone Houses tab, plus a filter on any column. A price and guide history on the house page, with first-guide, guide-change and last-change columns in Overview. A desktop **Trends** page with medians, sold-vs-guide, clearance, days on market, land and $/m², a monthly chart, a scatter, a histogram and a by-suburb table, filterable by suburb, type, beds, land and period.
+
+---
+
+**Signed off 2026-09-22** (decisions D1–D20). All milestones (1–7, including 2.5) are implemented; see README.md.

@@ -2,7 +2,7 @@ import { layers, namedFlavor } from "@protomaps/basemaps";
 import * as maplibregl from "maplibre-gl";
 import type { StyleSpecification } from "maplibre-gl";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
-import { Protocol } from "pmtiles";
+import { PMTiles, Protocol } from "pmtiles";
 
 // MapLibre 6 runs its tile parsing in a module worker that the bundler has to emit separately.
 maplibregl.setWorkerUrl(workerUrl);
@@ -14,6 +14,19 @@ const HOSTED_ASSETS = "https://protomaps.github.io/basemaps-assets";
 
 let registered = false;
 
+// Victoria's extent: a local extract smaller than this (e.g. a test area) would leave most of the map
+// blank, so when online the streamed basemap wins over it.
+const REGION = { minLon: 141.0, minLat: -39.1, maxLon: 149.9, maxLat: -34.0 };
+
+async function coversRegion(url: string): Promise<boolean> {
+  try {
+    const h = await new PMTiles(url).getHeader();
+    return h.minLon <= REGION.minLon && h.minLat <= REGION.minLat && h.maxLon >= REGION.maxLon && h.maxLat >= REGION.maxLat;
+  } catch {
+    return false;
+  }
+}
+
 async function exists(url: string): Promise<boolean> {
   try {
     const res = await fetch(url, { method: "HEAD" });
@@ -23,11 +36,12 @@ async function exists(url: string): Promise<boolean> {
   }
 }
 
-export type Basemap = { style: StyleSpecification; hasTiles: boolean };
+export type Basemap = { style: StyleSpecification | string; hasTiles: boolean; streamed: boolean };
+const STREAMED = { light: "https://tiles.openfreemap.org/styles/positron", dark: "https://tiles.openfreemap.org/styles/dark" };
 
-/** Protomaps light or dark style over the local PMTiles extract (PLAN.md decision 5). Fonts and sprites
- *  come from the local copy when setup installed it, otherwise from Protomaps' hosted copy (online only).
- *  Without tiles the map still works on a plain background, so pins and areas remain usable. */
+/** A local PMTiles extract when `setup tiles` has installed one (works offline, PLAN.md decision 5);
+ *  otherwise the free OpenFreeMap vector tiles for anywhere in Australia, streamed (needs internet;
+ *  offline, pins and areas still draw on a blank background). */
 export async function basemapStyle(dark: boolean): Promise<Basemap> {
   if (!registered) {
     maplibregl.addProtocol("pmtiles", new Protocol().tile);
@@ -42,16 +56,11 @@ export async function basemapStyle(dark: boolean): Promise<Basemap> {
   // Only the light sprite is installed locally; the dark style reuses it.
   const spriteFlavor = hasAssets ? "light" : flavor;
 
-  const background = dark ? "#1b1d23" : "#eef0f2";
-  if (!hasTiles) {
-    return {
-      hasTiles,
-      style: { version: 8, glyphs: `${assets}/fonts/{fontstack}/{range}.pbf`, sources: {},
-               layers: [{ id: "background", type: "background", paint: { "background-color": background } }] },
-    };
-  }
+  const useLocal = hasTiles && (!navigator.onLine || (await coversRegion(`${location.origin}${LOCAL_TILES}`)));
+  if (!useLocal) return { hasTiles, streamed: true, style: dark ? STREAMED.dark : STREAMED.light };
   return {
     hasTiles,
+    streamed: false,
     style: {
       version: 8,
       glyphs: `${assets}/fonts/{fontstack}/{range}.pbf`,

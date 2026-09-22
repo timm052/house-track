@@ -6,16 +6,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { TerraDraw, TerraDrawPolygonMode, TerraDrawSelectMode } from "terra-draw";
 import { TerraDrawMapLibreGLAdapter } from "terra-draw-maplibre-gl-adapter";
-import { api, type AreaKind, type MapArea, type MapData, type MapProperty, type Status } from "../api";
+import { api, type AreaKind, type MapArea, type MapData, type MapProperty } from "../api";
 import { LABEL, minutes } from "../format";
 import { basemapStyle } from "../map/basemap";
 import { colourFor, syncOverlays, type OverlayLayer } from "../map/overlays";
 import { usePeople } from "../people";
+import { STATUS_COLOUR, minutesTone } from "../colour";
 
-const STATUS_COLOUR: Record<Status, string> = {
-  watching: "#64748b", inspecting: "#0284c7", shortlisted: "#16a34a", bidding: "#9333ea",
-  rejected: "#9ca3af", lost: "#78716c", withdrawn: "#a8a29e", bought: "#ca8a04",
-};
 const MELBOURNE: [number, number] = [145.0, -37.81];
 type Filter = "all" | "mine" | "either";
 type Selected = { kind: "property"; p: MapProperty } | { kind: "area"; a: MapArea } | null;
@@ -37,7 +34,7 @@ export default function MapPage() {
   const drawRef = useRef<TerraDraw | null>(null);
   const fitted = useRef(false);
   const [ready, setReady] = useState(false);
-  const [hasTiles, setHasTiles] = useState(true);
+
   const [filter, setFilter] = useState<Filter>("all");
   const [selected, setSelected] = useState<Selected>(null);
   const [drawKind, setDrawKind] = useState<AreaKind | null>(null);
@@ -69,9 +66,8 @@ export default function MapPage() {
   useEffect(() => {
     let map: maplibregl.Map | null = null;
     let cancelled = false;
-    basemapStyle(dark()).then(({ style, hasTiles }) => {
+    basemapStyle(dark()).then(({ style }) => {
       if (cancelled || !container.current) return;
-      setHasTiles(hasTiles);
       map = new maplibregl.Map({ container: container.current, style, center: MELBOURNE, zoom: 10, attributionControl: { compact: true } });
       mapRef.current = map;
       map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
@@ -254,7 +250,6 @@ export default function MapPage() {
             <button className="link" onClick={cancelDrawing}>Cancel</button>
           </div>
         )}
-        {!hasTiles && !pinFor && <div className="banner muted">No basemap yet. Run the setup job to download it.</div>}
         {error && <div className="banner error" onClick={() => setError(null)}>{error}</div>}
       </div>
 
@@ -309,7 +304,7 @@ function addLayers(map: maplibregl.Map) {
   map.addLayer({ id: "areas-line-others", type: "line", source: "areas", filter: ["!=", ["get", "mine"], true],
     paint: { "line-color": ["get", "colour"], "line-width": ["case", hard, 2.5, 1.5], "line-dasharray": [2, 2] } });
   map.addLayer({ id: "areas-label", type: "symbol", source: "areas",
-    layout: { "text-field": ["get", "name"], "text-size": 12, "text-font": ["Noto Sans Medium"] },
+    layout: { "text-field": ["get", "name"], "text-size": 12, "text-font": ["Noto Sans Regular"] },
     paint: { "text-color": ["get", "colour"], "text-halo-color": "#fff", "text-halo-width": 1.2 } });
   map.addLayer({ id: "places-circle", type: "circle", source: "places",
     paint: { "circle-radius": 6, "circle-color": ["case", ["==", ["get", "kind"], "station"], "#ffffff", "#111827"],
@@ -331,10 +326,10 @@ function PropertySheet({ p, onClose }: { p: MapProperty; onClose: () => void }) 
     <div className="sheet">
       <div className="row">
         <strong className="grow">{addressOf(p)}</strong>
-        <span className="pill">{LABEL.status[p.status]}</span>
+        <span className="pill status-pill"><span className="status-dot" style={{ background: STATUS_COLOUR[p.status] }} />{LABEL.status[p.status]}</span>
         <button className="link" onClick={onClose} aria-label="Close">✕</button>
       </div>
-      {p.nearest_station && <div className="small">{minutes(p.nearest_station_walk_s)} walk to {p.nearest_station}</div>}
+      {p.nearest_station && <div className="small"><span className={`tone-${minutesTone(p.nearest_station_walk_s == null ? null : p.nearest_station_walk_s / 60)}`}>{minutes(p.nearest_station_walk_s)}</span> walk to {p.nearest_station}</div>}
       {p.excluded && <div className="small error">Excluded by you: {p.reasons.join(", ")}</div>}
       {!p.excluded && p.warned && <div className="small" style={{ color: "var(--maybe)" }}>Warning: {p.reasons.join(", ")}</div>}
       {p.others_flags.map((f, i) => (

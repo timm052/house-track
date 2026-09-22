@@ -8,6 +8,15 @@ import { fromLocalInput, LABEL, parseMoney } from "../format";
 const EMPTY: Address = { unit: "", street_number: "", street: "", suburb: "", postcode: "", plan_number: "", lot_number: "" };
 const blankToNull = (v: string | null) => (v && v.trim() ? v.trim() : null);
 const count = (v: string) => (v.trim() === "" ? null : Number(v));
+// "652", "652 m2", "1,200m²" or "0.25 ha" -> square metres
+const area = (v: string): number | null => {
+  const s = v.trim().toLowerCase().replace(/,/g, "");
+  if (!s) return null;
+  const m = s.match(/^(\d+(?:\.\d+)?)\s*(ha|hectares?|acres?|m2|m²|sqm)?$/);
+  if (!m) return NaN;
+  const n = parseFloat(m[1]) * (m[2]?.startsWith("ha") || m[2]?.startsWith("hect") ? 10_000 : m[2]?.startsWith("acre") ? 4046.86 : 1);
+  return Math.round(n);
+};
 
 export default function QuickAdd() {
   const navigate = useNavigate();
@@ -22,6 +31,8 @@ export default function QuickAdd() {
   const [beds, setBeds] = useState("");
   const [baths, setBaths] = useState("");
   const [cars, setCars] = useState("");
+  const [land, setLand] = useState("");
+  const [building, setBuilding] = useState("");
   const [method, setMethod] = useState<SaleMethod | "">("auction");
   const [saleAt, setSaleAt] = useState("");
   const [url, setUrl] = useState("");
@@ -33,7 +44,7 @@ export default function QuickAdd() {
   const [importUrl, setImportUrl] = useState("");
   const [importMsg, setImportMsg] = useState<string | null>(null);
 
-  type Prefill = { url: string | null; address: string | null; beds: number | null; baths: number | null; car_spaces: number | null;
+  type Prefill = { url: string | null; address: string | null; beds: number | null; baths: number | null; car_spaces: number | null; land_m2: number | null;
                    sale_method: SaleMethod | null; guide_low_aud: number | null; guide_high_aud: number | null };
   async function applyPrefill(p: Prefill) {
     const filled: string[] = [];
@@ -48,6 +59,7 @@ export default function QuickAdd() {
     if (p.beds != null) { setBeds(String(p.beds)); filled.push("beds"); }
     if (p.baths != null) { setBaths(String(p.baths)); filled.push("baths"); }
     if (p.car_spaces != null) { setCars(String(p.car_spaces)); filled.push("cars"); }
+    if (p.land_m2 != null) { setLand(String(p.land_m2)); filled.push("land area"); }
     if (p.sale_method) { setMethod(p.sale_method); filled.push("sale method"); }
     if (p.guide_low_aud) { setLow(String(p.guide_low_aud)); setHigh(String(p.guide_high_aud ?? p.guide_low_aud)); filled.push("price guide"); }
     if (p.url) setUrl(p.url);
@@ -99,7 +111,8 @@ export default function QuickAdd() {
 
   const lowAud = parseMoney(low);
   const highAud = parseMoney(high);
-  const priceProblem = (low && lowAud == null) || (high && highAud == null) ? "Prices look like 1.2m, 950k or 1250000." : null;
+  const priceProblem = (low && lowAud == null) || (high && highAud == null) ? "Prices look like 1.2m, 950k or 1250000."
+    : Number.isNaN(area(land)) || Number.isNaN(area(building)) ? "Check the areas." : null;
 
   const save = useMutation({
     mutationFn: () =>
@@ -121,6 +134,8 @@ export default function QuickAdd() {
           beds: count(beds),
           baths: count(baths),
           car_spaces: count(cars),
+          land_m2: area(land),
+          building_m2: area(building),
           campaign: method
             ? {
                 sale_method: method,
@@ -216,6 +231,11 @@ export default function QuickAdd() {
           <label>Baths<input inputMode="numeric" value={baths} onChange={(e) => setBaths(e.target.value)} /></label>
           <label>Cars<input inputMode="numeric" value={cars} onChange={(e) => setCars(e.target.value)} /></label>
         </div>
+        <div className="grid2">
+          <label>Land area (m² or ha)<input inputMode="decimal" placeholder="e.g. 652" value={land} onChange={(e) => setLand(e.target.value)} /></label>
+          <label>Building area (m²)<input inputMode="decimal" value={building} onChange={(e) => setBuilding(e.target.value)} /></label>
+        </div>
+        {(Number.isNaN(area(land)) || Number.isNaN(area(building))) && <p className="error small">Areas look like 652, 652 m² or 0.25 ha.</p>}
       </div>
 
       <div className="card stack">

@@ -4,11 +4,15 @@ import { RevoGrid, Editor, type EditorType } from "@revolist/react-datagrid";
 import type { ColumnRegular, HyperFunc, VNode } from "@revolist/revogrid";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router-dom";
 import { api, ApiError, type Address } from "../api";
 import { catalogue, display, editText, parseInput, type Column, type OverviewPlace, type OverviewRow } from "../overview/columns";
-import { applyView, builtInDefault, describe, toCsv, useViews, type Filter, type Sort, type View } from "../overview/views";
+import { applyView, builtInDefault, describe, toCsv, useViews, type Sort, type View } from "../overview/views";
+import FilterPopover from "../overview/FilterPopover";
 import { usePeople } from "../people";
+import { CLOSED, STATUS_COLOUR, changeTone, minutesTone, soonTone, suburbClass, suburbSlots, tagStyle, useTagColours, type Tone } from "../colour";
+import type { Status } from "../api";
 
 type Overview = { rows: OverviewRow[]; places: OverviewPlace[] };
 type CellState =
@@ -20,6 +24,46 @@ const LAYOUT_KEY = "housetrack.overview.widths";
 const readWidths = (): Record<string, number> => {
   try { return JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "{}"); } catch { return {}; }
 };
+
+// ─── auto column widths ─────────────────────────────────────────────
+// Each column is as wide as its longest value or its header, whichever is wider, measured in the grid's own
+// font. A width you drag by hand is kept on this device until you choose "Fit width" in the header menu.
+const HEAD_EXTRA = 30 + 4 + 17 + 4;  // header padding and sort control, the gap, the ⏷ button, sub-pixel slack
+const SORT_EXTRA = 13;           // ▲ plus its gap, when the column is sorted
+const CELL_EXTRA = 32;           // cell padding either side, plus a little air
+const MIN_WIDTH = 44, MAX_WIDTH = 360;
+let measurer: CanvasRenderingContext2D | null = null;
+const textWidths = new Map<string, number>();
+function textWidth(text: string, font: string): number {
+  const key = `${font}|${text}`;
+  let w = textWidths.get(key);
+  if (w == null) {
+    measurer ??= document.createElement("canvas").getContext("2d");
+    if (!measurer) return text.length * 8;
+    measurer.font = font;
+    w = measurer.measureText(text).width;
+    if (textWidths.size > 20_000) textWidths.clear();
+    textWidths.set(key, w);
+  }
+  return w;
+}
+function gridFont(weight = "400"): string {
+  const el = document.querySelector("revo-grid") ?? document.body;
+  return `${weight} 14px ${getComputedStyle(el).fontFamily}`;
+}
+function fitWidth(col: Column, rows: OverviewRow[], sorted: boolean): number {
+  const head = textWidth(col.label, gridFont("600")) + HEAD_EXTRA + (sorted ? SORT_EXTRA : 0);
+  const body = gridFont(col.kind === "verdict" || col.key === "suburb" ? "600" : "400");
+  let widest = 0;
+  for (const r of rows) {
+    const v = r[col.key];
+    const w = col.kind === "tags"
+      ? ((v as string[] | null) ?? []).reduce((sum, t) => sum + textWidth(`#${t}`, body) * 0.86 + 22, 0)  // 12px chips
+      : textWidth(display(col, v), body) + (col.key === "status" ? 14 : 0);                              // status dot
+    widest = Math.max(widest, w);
+  }
+  return Math.ceil(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, head, widest + CELL_EXTRA)));
+}
 
 export default function Overview() {
   const queryClient = useQueryClient();
@@ -54,6 +98,9 @@ export default function Overview() {
   }, [data]);
 
   const cols = useMemo(() => { const c = catalogue(persons, data?.places ?? []); registerEditFormats(c); return c; }, [persons, data?.places]);
+  const tags = useQuery({ queryKey: ["tags"], queryFn: () => api<{ name: string }[]>("/api/tags") });
+  const tagColours = useTagColours();
+  useEffect(() => registerTags((tags.data ?? []).map((t) => t.name)), [tags.data]);
   const byKey = useMemo(() => new Map(cols.map((c) => [c.key, c])), [cols]);
 
   // ─── current view ─────────────────────────────────────────────────
@@ -112,7 +159,7 @@ export default function Overview() {
       const parsed = parseInput(col, raw);
       if ("error" in parsed) { setCell(key, { kind: "error", message: parsed.error }); continue; }
       const row = rows.find((r) => r.id === rowId);
-      if (!row || String(row[col.key] ?? "") === String(parsed.value ?? "")) continue;
+      if (!row || JSON.stringify(row[col.key] ?? null) === JSON.stringify(parsed.value ?? null)) continue;
       changes.push({ rowId, column: col.key, before: row[col.key] ?? null, after: parsed.value });
       await saveCell(rowId, col, parsed.value);
     }
@@ -153,12 +200,28 @@ export default function Overview() {
   }
 
   // ─── grid columns ─────────────────────────────────────────────────
-  const widths = useMemo(readWidths, []);
+  const [widths, setWidths] = useState(readWidths);
+  const fitColumn = (key: string) => {
+    const w = readWidths();
+    delete w[key];
+    try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(w)); } catch { /* per-device nicety only */ }
+    setWidths(w);
+  };
   const [filterFor, setFilterFor] = useState<{ key: string; x: number; y: number } | null>(null);
+
+  // Row colour = suburb (a faint tint on every cell, a stripe on the open link); closed or excluded houses fade.
+  const slots = useMemo(() => suburbSlots(rows), [rows]);
+  const rowClass = (m: OverviewRow) => [
+    "tint", suburbClass(slots, m.suburb),
+    (m.excluded || CLOSED.includes(m.status as Status)) ? "dim" : "",
+  ];
+  const toneOf = (col: Column, v: unknown): Tone =>
+    col.kind === "minutes" ? minutesTone(v, col.key.startsWith("drive:") ? "drive" : "walk") : col.key === "guide_change" ? changeTone(v) : col.key === "sale_at" ? soonTone(v) : "";
 
   const gridColumns: ColumnRegular[] = useMemo(() => {
     const open: ColumnRegular = {
       prop: "_open", name: "", size: 34, readonly: true, pin: "colPinStart",
+      cellProperties: (p) => ({ class: [...rowClass(p.model as OverviewRow), "stripe"].filter(Boolean).join(" ") }),
       cellTemplate: (h: HyperFunc<VNode>, p) => h("a", { class: "open-link", href: `/p/${p.model.id}`, title: "Open",
         onClick: (e: MouseEvent) => { e.preventDefault(); navigate(`/p/${p.model.id}`); } }, "↗"),
     };
@@ -168,22 +231,28 @@ export default function Overview() {
       return {
         prop: col.key,
         name: col.label,
-        size: widths[col.key] ?? col.width ?? 110,
+        size: widths[col.key] ?? fitWidth(col, rows, sortIdx >= 0),
         readonly: !col.editable,
         sortable: true,
         pin: col.key === "address" ? "colPinStart" : undefined,
         editor: col.editable ? "house" : undefined,
-        columnTemplate: (h: HyperFunc<VNode>) => h("span", { class: "col-head" }, [
+        columnTemplate: (h: HyperFunc<VNode>) => h("span", {
+          class: "col-head",
+          onContextMenu: (e: MouseEvent) => { e.preventDefault(); setFilterFor({ key: col.key, x: e.clientX, y: e.clientY }); },
+        }, [
           h("span", { class: "col-name", title: col.label }, col.label),
           sortIdx >= 0 ? h("span", { class: "col-sort" }, `${current.sort[sortIdx].dir === "asc" ? "▲" : "▼"}${current.sort.length > 1 ? sortIdx + 1 : ""}`) : null,
           h("button", {
-            class: `col-filter ${filtered ? "on" : ""}`, title: "Filter",
+            class: `col-filter ${filtered ? "on" : ""}`, title: "Filter, hide or move (or right-click the header)",
             onClick: (e: MouseEvent) => { e.stopPropagation(); const r = (e.target as HTMLElement).getBoundingClientRect(); setFilterFor({ key: col.key, x: r.left, y: r.bottom }); },
           }, "⏷"),
         ]),
         cellProperties: (p) => {
           const s = cells[`${p.model.id}|${col.key}`];
-          const classes = [col.editable ? "" : "ro", s ? `cell-${s.kind}` : "", col.kind === "verdict" && p.model[col.key] ? `v-${p.model[col.key]}` : ""];
+          const tone = toneOf(col, p.model[col.key]);
+          const classes = [...rowClass(p.model as OverviewRow), col.editable ? "" : "ro", s ? `cell-${s.kind}` : "",
+            col.kind === "verdict" && p.model[col.key] ? `v-${p.model[col.key]}` : "", tone && `tone-${tone}`,
+            col.key === "suburb" ? "suburb-cell" : ""];
           return { class: classes.filter(Boolean).join(" ") };
         },
         cellTemplate: (h: HyperFunc<VNode>, p) => {
@@ -194,6 +263,15 @@ export default function Overview() {
             const note = p.model[`${col.key}:note`], by = p.model[`${col.key}:by`];
             title = [note, by && `entered by ${by}`].filter(Boolean).join(" · ") || title;
           }
+          if (col.key === "status" && v) {
+            return h("span", { title, class: "status-cell" }, [
+              h("span", { class: "status-dot", style: { background: STATUS_COLOUR[v as Status] } }), h("span", {}, display(col, v))]);
+          }
+          if (col.kind === "tags" && Array.isArray(v)) {
+            return h("span", { title: (v as string[]).map((t) => `#${t}`).join(" ") },
+              (v as string[]).map((t) => h("span", { class: "tag", style: tagStyle(tagColours, t) }, `#${t}`)));
+          }
+          if (col.key === "sale_at" && soonTone(v)) title = "In the next seven days";
           if (col.kind === "url" && v) {
             return h("a", { href: String(v), target: "_blank", rel: "noreferrer", title: String(v) }, display(col, v));
           }
@@ -201,7 +279,7 @@ export default function Overview() {
         },
       };
     })];
-  }, [visibleCols, current.sort, current.filters, cells, widths, navigate]);
+  }, [visibleCols, current.sort, current.filters, cells, widths, rows, navigate, slots, tagColours]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const editors = useMemo(() => ({ house: Editor(CellEditor) }), []);
 
@@ -209,7 +287,7 @@ export default function Overview() {
     e.preventDefault(); // we own the data: save through the API, then re-render
     const d = e.detail as { prop: string; model: OverviewRow; val: unknown };
     const col = byKey.get(d.prop);
-    if (col) commit([{ rowId: d.model.id, col, raw: d.val }]);
+    if (col) commit([{ rowId: d.model.id, col, raw: d.val }]).then(() => { if (col.kind === "tags") queryClient.invalidateQueries({ queryKey: ["tags"] }); });
   }
 
   function onBeforeRangeEdit(e: CustomEvent) {
@@ -225,6 +303,7 @@ export default function Overview() {
       }
     }
     commit(edits);
+    queryClient.invalidateQueries({ queryKey: ["tags"] });
   }
 
   function onBeforeSorting(e: CustomEvent) {
@@ -243,7 +322,42 @@ export default function Overview() {
     const w = readWidths();
     Object.values(sizes).forEach((c) => { if (c?.prop) w[c.prop] = c.size; });
     try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(w)); } catch { /* per-device nicety only */ }
+    setWidths(w);
   }
+
+  // ─── column order: drag headers, or the header menu ───────────────
+  // Address is pinned on the left, so "start" means just after it.
+  const shownKeys = visibleCols.map((c) => c.key);
+  const moveColumn = (key: string, where: "start" | "end") => {
+    const rest = shownKeys.filter((k) => k !== key);
+    const at = where === "end" ? rest.length : rest[0] === "address" ? 1 : 0;
+    rest.splice(at, 0, key);
+    change({ columns: rest });
+  };
+  function onBeforeColumnDragEnd(e: CustomEvent) {
+    // We own the order (it is part of the view), so stop the grid moving it and re-render from the view instead.
+    e.preventDefault();
+    const d = e.detail as { pin?: string; startPosition: { itemIndex: number }; newPosition: { itemIndex: number } };
+    if (d.pin) return; // Address and the open link stay pinned
+    const scrolling = shownKeys.filter((k) => k !== "address");
+    const from = d.startPosition.itemIndex, to = Math.min(d.newPosition.itemIndex, scrolling.length - 1);
+    if (from === to || !scrolling[from]) return;
+    const [moved] = scrolling.splice(from, 1);
+    scrolling.splice(to, 0, moved);
+    change({ columns: shownKeys.includes("address") ? ["address", ...scrolling] : scrolling });
+  }
+
+  // The React wrapper has no prop for this event, so listen on the grid element itself.
+  const mainRef = useRef<HTMLDivElement>(null);
+  const dragEndRef = useRef(onBeforeColumnDragEnd);
+  dragEndRef.current = onBeforeColumnDragEnd;
+  useEffect(() => {
+    const grid = mainRef.current?.querySelector("revo-grid");
+    if (!grid) return;
+    const handler = (e: Event) => dragEndRef.current(e as CustomEvent);
+    grid.addEventListener("beforecolumndragend", handler);
+    return () => grid.removeEventListener("beforecolumndragend", handler);
+  }, []);
 
   // ─── views ────────────────────────────────────────────────────────
   const saveView = async (asNew: boolean) => {
@@ -318,7 +432,7 @@ export default function Overview() {
         {current.filters.length > 0 && <button className="link" onClick={() => change({ filters: [] })}>Show all</button>}
       </div>
 
-      <div className="overview-main">
+      <div className="overview-main" ref={mainRef}>
         <RevoGrid
           className="grid"
           theme={window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "darkCompact" : "compact"}
@@ -334,11 +448,13 @@ export default function Overview() {
           onBeforerangeedit={onBeforeRangeEdit}
           onBeforesorting={onBeforeSorting}
           onAftercolumnresize={onResize}
+          canMoveColumns
           onBeforeeditstart={() => { editingRef.current = true; }}
           onAfteredit={() => { editingRef.current = false; }}
           onBeforefocuslost={() => { editingRef.current = false; }}
         />
-        {picker && <ColumnPicker cols={cols} selected={current.columns} onChange={(columns) => change({ columns })} onClose={() => setPicker(false)} />}
+        {picker && <ColumnPicker cols={cols} selected={current.columns}
+          onFitAll={Object.keys(widths).length ? () => { try { localStorage.removeItem(LAYOUT_KEY); } catch { /* ignore */ } setWidths({}); } : undefined} onChange={(columns) => change({ columns })} onClose={() => setPicker(false)} />}
         {conflicts.length > 0 && (
           <aside className="conflicts">
             <strong>Changed by someone else</strong>
@@ -372,6 +488,14 @@ export default function Overview() {
 
       {filterFor && byKey.get(filterFor.key) && (
         <FilterPopover col={byKey.get(filterFor.key)!} rows={rows} at={filterFor}
+          actions={<>
+            {widths[filterFor.key] != null && <button className="link" onClick={() => { fitColumn(filterFor.key); setFilterFor(null); }}>Fit width</button>}
+            {filterFor.key !== "address" && <>
+            <button className="link" onClick={() => { moveColumn(filterFor.key, "start"); setFilterFor(null); }}>Move to start</button>
+            <button className="link" onClick={() => { moveColumn(filterFor.key, "end"); setFilterFor(null); }}>Move to end</button>
+            <button className="link" onClick={() => { change({ columns: shownKeys.filter((k) => k !== filterFor.key) }); setFilterFor(null); }}>Hide column</button>
+            </>}
+          </>}
           existing={current.filters.find((f) => f.column === filterFor.key)}
           onApply={(fs) => { change({ filters: [...current.filters.filter((x) => x.column !== filterFor.key), ...fs] }); setFilterFor(null); }}
           onClose={() => setFilterFor(null)} />
@@ -381,123 +505,170 @@ export default function Overview() {
   );
 }
 
-// ─── cell editor: shows what you'd type, e.g. "1250000", "17/10/26 11:00", "Y" ─
-function CellEditor({ column, save, close, val, model, prop }: EditorType) {
-  const col = column as unknown as { prop: string };
-  const [text, setText] = useState<string>(() => {
-    if (typeof val === "string" && val.length > 0) return val; // started by typing a character
-    return editTextFor(String(prop ?? col.prop), model?.[prop ?? col.prop]);
-  });
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => { ref.current?.focus(); ref.current?.select(); }, []);
-  return (
-    <input
-      ref={ref} className="cell-editor" value={text}
-      onChange={(e) => setText(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); save(text); }
-        else if (e.key === "Escape") { e.preventDefault(); close(); }
-        e.stopPropagation();
-      }}
-      onBlur={() => save(text, true)}
-    />
-  );
-}
-
-// The editor doesn't receive our column catalogue, so it formats with a registry filled by the page.
+// ─── cell editors: a dropdown for fixed choices, a pick-list for tags, and a checked text box ─
+// The editor doesn't receive our column catalogue, so it looks columns up in a registry the page fills.
 const editFormat = new Map<string, Column>();
-function editTextFor(prop: string, v: unknown): string {
-  const col = editFormat.get(prop);
-  return col ? editText(col, v) : v == null ? "" : String(v);
-}
+let knownTags: string[] = [];
 export function registerEditFormats(cols: Column[]) {
   cols.forEach((c) => editFormat.set(c.key, c));
 }
+export function registerTags(names: string[]) {
+  knownTags = names;
+}
 
-// ─── column picker ────────────────────────────────────────────────────
-function ColumnPicker({ cols, selected, onChange, onClose }: { cols: Column[]; selected: string[]; onChange: (c: string[]) => void; onClose: () => void }) {
-  const groups = [...new Set(cols.map((c) => c.group))];
-  const move = (key: string, delta: number) => {
-    const i = selected.indexOf(key), j = i + delta;
-    if (i < 0 || j < 0 || j >= selected.length) return;
-    const next = [...selected];
-    [next[i], next[j]] = [next[j], next[i]];
-    onChange(next);
-  };
+function CellEditor(props: EditorType) {
+  const key = String(props.prop ?? (props.column as unknown as { prop: string }).prop);
+  const col = editFormat.get(key);
+  if (col?.kind === "tags") return <TagsEditor col={col} {...props} />;
+  if (col?.options) return <ChoiceEditor col={col} {...props} />;
+  return <TextEditor col={col} {...props} />;
+}
+
+/** Fixed choices: a dropdown; typing a letter first (e.g. "y" for Yes) picks straight away. */
+function ChoiceEditor({ col, save, close, val, model, prop }: EditorType & { col: Column }) {
+  const ref = useRef<HTMLSelectElement>(null);
+  // Only a single typed character is a shortcut; a double-click hands over the cell's whole current value.
+  const typed = typeof val === "string" && val.length === 1 ? parseInput(col, val) : null;
+  useEffect(() => {
+    if (typed && "value" in typed) { save(typed.value); return; }
+    ref.current?.focus();
+    try { ref.current?.showPicker?.(); } catch { /* not supported: the focused select still works with arrow keys */ }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const current = model?.[String(prop)];
   return (
-    <aside className="picker">
-      <div className="row"><strong className="grow">Columns</strong><button className="link" onClick={onClose}>Done</button></div>
-      <p className="small muted">Tick to show; arrows change the order.</p>
-      {groups.map((g) => (
-        <div key={g}>
-          <div className="small muted" style={{ marginTop: 8 }}>{g}</div>
-          {cols.filter((c) => c.group === g).map((c) => {
-            const on = selected.includes(c.key);
-            return (
-              <div key={c.key} className="picker-row">
-                <label className="check grow">
-                  <input type="checkbox" checked={on} onChange={() => onChange(on ? selected.filter((k) => k !== c.key) : [...selected, c.key])} />
-                  {c.label}{!c.editable && <span className="muted small"> (read-only)</span>}
-                </label>
-                {on && <><button className="link" onClick={() => move(c.key, -1)}>↑</button><button className="link" onClick={() => move(c.key, 1)}>↓</button></>}
-              </div>
-            );
-          })}
-        </div>
-      ))}
-    </aside>
+    <select ref={ref} className="cell-editor" defaultValue={current == null ? "" : String(current)}
+      onChange={(e) => e.target.value && save(e.target.value)}
+      onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); close(); } e.stopPropagation(); }}
+      onBlur={() => close()}>
+      <option value="" disabled>Choose…</option>
+      {Object.entries(col.options ?? {}).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+    </select>
   );
 }
 
-// ─── per-column filter popover ────────────────────────────────────────
-function FilterPopover({ col, rows, at, existing, onApply, onClose }: {
-  col: Column; rows: OverviewRow[]; at: { x: number; y: number }; existing?: Filter; onApply: (f: Filter[]) => void; onClose: () => void;
-}) {
-  const categorical = ["enum", "verdict", "bool"].includes(col.kind) || (col.kind === "text" && new Set(rows.map((r) => r[col.key])).size <= 25);
-  const values = useMemo(() => [...new Set(rows.map((r) => r[col.key]).filter((v) => v != null && v !== "").map(String))].sort(), [rows, col.key]);
-  const [picked, setPicked] = useState<string[]>(existing?.op === "in" ? (existing.value as string[]) : values);
-  const [text, setText] = useState(existing?.op === "contains" ? String(existing.value) : "");
-  const [min, setMin] = useState(existing?.op === "gte" ? String(existing.value) : "");  // shown as stored (ISO for dates)
-  const [max, setMax] = useState(existing?.op === "lte" ? String(existing.value) : "");
-  const numeric = ["int", "money", "minutes", "pct", "date", "datetime"].includes(col.kind);
-  const asValue = (s: string) => { const p = parseInput({ ...col, history: false }, s); return "value" in p ? p.value : null; };
+/** Free text, numbers, money and dates: checked as you type; an invalid value can't be saved. */
+function TextEditor({ col, save, close, val, model, prop }: EditorType & { col?: Column }) {
+  const [text, setText] = useState<string>(() => {
+    if (typeof val === "string" && val.length > 0) return val; // started by typing a character
+    const v = model?.[String(prop)];
+    return col ? editText(col, v) : v == null ? "" : String(v);
+  });
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { ref.current?.focus(); ref.current?.select(); }, []);
+  const check = col ? parseInput(col, text) : { value: text };
+  const error = "error" in check ? check.error : null;
+  const box = ref.current?.getBoundingClientRect();
   return (
-    <div className="popover" style={{ left: Math.min(at.x, window.innerWidth - 280), top: at.y + 4 }}>
-      <div className="row"><strong className="grow">{col.label}</strong><button className="link" onClick={onClose}>✕</button></div>
-      {categorical ? (
-        <div className="popover-list">
-          <label className="check"><input type="checkbox" checked={picked.length === values.length}
-            onChange={(e) => setPicked(e.target.checked ? values : [])} /> (all)</label>
-          {values.map((v) => (
-            <label key={v} className="check">
-              <input type="checkbox" checked={picked.includes(v)} onChange={(e) => setPicked(e.target.checked ? [...picked, v] : picked.filter((x) => x !== v))} />
-              {display(col, col.kind === "bool" ? v === "true" : v)}
-            </label>
-          ))}
-        </div>
-      ) : numeric ? (
-        <div className="grid2">
-          <input placeholder="From" value={min} onChange={(e) => setMin(e.target.value)} />
-          <input placeholder="To" value={max} onChange={(e) => setMax(e.target.value)} />
-        </div>
-      ) : (
-        <input placeholder="Contains" value={text} onChange={(e) => setText(e.target.value)} autoFocus />
-      )}
-      <div className="row" style={{ marginTop: 8 }}>
-        <button className="primary" onClick={() => {
-          if (categorical) onApply(picked.length === values.length ? [] : [{ column: col.key, op: "in", value: picked }]);
-          else if (numeric) onApply([
-            ...(min ? [{ column: col.key, op: "gte" as const, value: asValue(min) }] : []),
-            ...(max ? [{ column: col.key, op: "lte" as const, value: asValue(max) }] : []),
-          ]);
-          else onApply(text ? [{ column: col.key, op: "contains", value: text }] : []);
-        }}>Apply</button>
-        <button onClick={() => onApply([{ column: col.key, op: "empty" }])}>Blank</button>
-        <button onClick={() => onApply([{ column: col.key, op: "notempty" }])}>Not blank</button>
-        {col.kind === "datetime" && <button onClick={() => onApply([{ column: col.key, op: "thisweek" }])}>This week</button>}
-        <button onClick={() => onApply([])}>Clear</button>
-      </div>
-    </div>
+    <>
+      <input
+        ref={ref} className={`cell-editor ${error ? "invalid" : ""}`} value={text} aria-invalid={!!error}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); if (!error) save(text); }
+          else if (e.key === "Escape") { e.preventDefault(); close(); }
+          e.stopPropagation();
+        }}
+        onBlur={() => (error ? close() : save(text, true))}
+      />
+      {error && box && createPortal(<div className="cell-hint" style={{ left: box.left, top: box.bottom + 2 }}>{error}</div>, document.body)}
+    </>
+  );
+}
+
+/** Tags: tick existing ones or type a new one. */
+function TagsEditor({ save, close, model, prop }: EditorType & { col: Column }) {
+  const start = (model?.[String(prop)] as string[] | undefined) ?? [];
+  const [picked, setPicked] = useState<string[]>(start);
+  const [fresh, setFresh] = useState("");
+  const anchor = useRef<HTMLSpanElement>(null);
+  const [box, setBox] = useState<DOMRect | null>(null);
+  useEffect(() => setBox(anchor.current?.getBoundingClientRect() ?? null), []);
+  const all = [...new Set([...knownTags, ...picked])].sort((a, b) => a.localeCompare(b));
+  const done = () => save([...picked, ...(fresh.trim() ? [fresh.trim()] : [])]);
+  return (
+    <span ref={anchor} className="cell-editor">
+      {box && createPortal(
+        <div className="popover tags-popover" style={{ left: Math.min(box.left, window.innerWidth - 260), top: box.top }}
+             onKeyDown={(e) => { if (e.key === "Escape") close(); e.stopPropagation(); }}>
+          <div className="popover-list">
+            {all.map((t) => (
+              <label key={t} className="check">
+                <input type="checkbox" checked={picked.includes(t)}
+                  onChange={(e) => setPicked(e.target.checked ? [...picked, t] : picked.filter((x) => x !== t))} />{t}
+              </label>
+            ))}
+          </div>
+          <input autoFocus placeholder="New tag" value={fresh} onChange={(e) => setFresh(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); done(); } }} />
+          <div className="row" style={{ marginTop: 6 }}>
+            <button className="primary" onClick={done}>Save tags</button>
+            <button onClick={() => close()}>Cancel</button>
+          </div>
+        </div>, document.body)}
+    </span>
+  );
+}
+
+// ─── column picker ────────────────────────────────────────────────────
+function ColumnPicker({ cols, selected, onChange, onClose, onFitAll }: {
+  cols: Column[]; selected: string[]; onChange: (c: string[]) => void; onClose: () => void; onFitAll?: () => void;
+}) {
+  // Show and hide only: order is set by dragging headers in the grid. Groups keep every column in a fixed place.
+  const groupOf = new Map(cols.map((c) => [c.key, c.group]));
+  const shown = selected.filter((k) => groupOf.has(k));
+  const groups = [...new Set(cols.map((c) => c.group))];
+  const [find, setFind] = useState("");
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const match = (c: Column) => !find || `${c.label} ${c.group}`.toLowerCase().includes(find.toLowerCase());
+  // A newly shown column goes after the last shown column from its own group, so related columns sit together.
+  const show = (keys: string[]) => {
+    const next = [...shown];
+    for (const key of keys) {
+      if (next.includes(key)) continue;
+      let at = next.length;
+      next.forEach((k, i) => { if (groupOf.get(k) === groupOf.get(key)) at = i + 1; });
+      next.splice(at, 0, key);
+    }
+    onChange(next);
+  };
+  const hide = (keys: string[]) => onChange(shown.filter((k) => !keys.includes(k)));
+  return (
+    <aside className="picker">
+      <div className="row"><strong className="grow">Columns</strong><button className="link" onClick={onClose}>Done</button></div>
+      <input type="search" placeholder="Find a column" value={find} onChange={(e) => setFind(e.target.value)} style={{ margin: "6px 0" }} />
+      <p className="small muted">To reorder, drag a column's header in the grid, or use its ⏷ menu.
+        Widths fit the longest value; a width you drag is kept on this device.
+        {onFitAll && <> <button className="link" onClick={onFitAll}>Fit all widths</button></>}</p>
+      {groups.map((g) => {
+        const inGroup = cols.filter((c) => c.group === g);
+        const matching = inGroup.filter(match);
+        if (!matching.length) return null;
+        const on = inGroup.filter((c) => shown.includes(c.key)).length;
+        const expanded = !!find || (open[g] ?? on > 0);
+        return (
+          <div key={g} className="picker-group">
+            <div className="picker-group-head">
+              <button className="link grow" aria-expanded={expanded} onClick={() => setOpen({ ...open, [g]: !expanded })}>
+                {expanded ? "▾" : "▸"} {g}
+              </button>
+              <span className="small muted">{on} of {inGroup.length}</span>
+              <input type="checkbox" aria-label={`Show all ${g} columns`} checked={on === inGroup.length}
+                ref={(el) => { if (el) el.indeterminate = on > 0 && on < inGroup.length; }}
+                onChange={(e) => (e.target.checked ? show(inGroup.map((c) => c.key)) : hide(inGroup.map((c) => c.key)))} />
+            </div>
+            {expanded && matching.map((c) => {
+              const ticked = shown.includes(c.key);
+              return (
+                <label key={c.key} className="check picker-row">
+                  <input type="checkbox" checked={ticked} onChange={() => (ticked ? hide([c.key]) : show([c.key]))} />
+                  {c.label}{!c.editable && <span className="muted small"> (read-only)</span>}
+                </label>
+              );
+            })}
+          </div>
+        );
+      })}
+    </aside>
   );
 }
 

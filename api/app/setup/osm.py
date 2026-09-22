@@ -3,12 +3,16 @@ station list the Places screen picks from (PLAN.md D10)."""
 
 import json
 import subprocess
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 import tempfile
 from pathlib import Path
 
 import psycopg
 
-from .fetch import download
+from .fetch import USER_AGENT, download
+
+OVERPASS = "https://overpass-api.de/api/interpreter"
 
 Bbox = tuple[float, float, float, float]
 
@@ -80,3 +84,24 @@ def load_stations(stations: list[dict], database_url: str) -> int:
         )
     print(f"osm: {len(stations)} stations loaded", flush=True)
     return len(stations)
+
+
+def overpass_stations(bbox: Bbox) -> list[dict]:
+    """Named railway stations in the search area from the public Overpass API: a few hundred records,
+    instead of downloading and clipping the national OpenStreetMap extract."""
+    south, west, north, east = bbox[1], bbox[0], bbox[3], bbox[2]
+    query = (f"[out:json][timeout:180];(node[railway=station]({south},{west},{north},{east});"
+             f"way[railway=station]({south},{west},{north},{east}););out center tags;")
+    req = Request(OVERPASS, data=urlencode({"data": query}).encode(), headers={"User-Agent": USER_AGENT})
+    with urlopen(req, timeout=240) as r:
+        elements = json.load(r)["elements"]
+    stations = []
+    for e in elements:
+        tags = e.get("tags", {})
+        if not tags.get("name") or tags.get("station") == "miniature" or tags.get("disused") == "yes":
+            continue
+        lon, lat = (e["lon"], e["lat"]) if e["type"] == "node" else (e["center"]["lon"], e["center"]["lat"])
+        offset = {"node": 0, "way": 10**12, "relation": 2 * 10**12}[e["type"]]
+        stations.append({"osm_id": offset + e["id"], "name": tags["name"],
+                         "geometry": {"type": "Point", "coordinates": [lon, lat]}})
+    return stations

@@ -18,7 +18,7 @@ REGIONS = {
         gnaf_state="VIC",
         # Geofabrik has no per-state extracts for Australia; the national file is clipped to BBOX.
         osm_extract="https://download.geofabrik.de/australia-oceania/australia-latest.osm.pbf",
-        default_bbox=(144.40, -38.50, 145.60, -37.40),  # greater Melbourne
+        default_bbox=(140.96, -39.20, 150.00, -33.98),  # all of Victoria
     ),
 }
 

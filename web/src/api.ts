@@ -105,6 +105,7 @@ export type PropertyDetail = PropertyBase & {
   inspections: import("./pages/PropertyExtras").Inspection[];
   attachments: import("./pages/PropertyExtras").Attachment[];
   overlays: { code: string; title: string; effect: "info" | "soft_warn" | "hard_exclude"; label: string }[];
+  tags: string[];
 };
 
 export type Settings = { walk_limit_min: number };

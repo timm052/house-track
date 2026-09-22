@@ -244,3 +244,18 @@ def add_bid(campaign_id: UUID, body: BidIn, person: Person) -> dict:
 def delete_bid(bid_id: UUID, person: Person) -> None:
     with tx(person) as conn:
         conn.execute("DELETE FROM auction_bid WHERE id = %s", (bid_id,))
+
+
+@router.get("/comparables")
+def all_comparables() -> list[dict]:
+    """Every comparable sale entered from price statements or research, for the trends page. The
+    suburb is read from the address text (comparables are stored as plain addresses)."""
+    from ..address import parse as parse_address
+
+    with tx() as conn:
+        rows = conn.execute("SELECT id, address, sold_price_aud, sold_on, beds, baths, car_spaces, land_m2, source"
+                            " FROM comparable_sale WHERE sold_price_aud IS NOT NULL ORDER BY sold_on DESC NULLS LAST").fetchall()
+    for r in rows:
+        parsed = parse_address(r["address"])
+        r["suburb"] = parsed.suburb if parsed else (r["address"].rsplit(",", 1)[-1].strip() if "," in r["address"] else None)
+    return rows

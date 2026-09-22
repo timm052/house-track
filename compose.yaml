@@ -36,7 +36,9 @@ services:
       <<: *pg-env
       DATABASE_URL: postgresql://house:${DB_PASSWORD}@db:5432/house
       GNAF_DATABASE_URL: postgresql://house:${DB_PASSWORD}@db:5432/gnaf
-      VALHALLA_URL: http://valhalla:8002
+      # Walking/driving times: the free public FOSSGIS server by default. For a local engine, run
+      # `setup osm`, start the local-routing profile and set VALHALLA_URL=http://valhalla:8002.
+      VALHALLA_URL: ${VALHALLA_URL:-https://valhalla1.openstreetmap.de}
       # Free public geocoding fallback when G-NAF has no match; set to "" to turn off.
       NOMINATIM_URL: ${NOMINATIM_URL-https://nominatim.openstreetmap.org}
       REGION: ${REGION:-vic}
@@ -56,10 +58,11 @@ services:
     volumes:
       - ${DATA_DIR}/tiles:/srv/tiles:ro
 
-  # Walking and driving times (PLAN.md D11). Builds its routing tiles from region.osm.pbf, which the
-  # setup job writes; until then it waits and the app shows travel times as pending.
+  # Optional self-hosted routing (docker compose --profile local-routing up -d valhalla). Builds its
+  # tiles from region.osm.pbf, which `setup osm` writes.
   valhalla:
     image: ghcr.io/valhalla/valhalla-scripted:latest
+    profiles: [local-routing]
     restart: unless-stopped
     environment:
       use_tiles_ignore_pbf: "False"   # rebuild when setup writes a new extract, then reuse

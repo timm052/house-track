@@ -7,10 +7,12 @@ figures). A write sends that back as `expected`; if the field changed underneath
 refused with the current value, who changed it and when.
 """
 
+import os
 from collections import defaultdict
 from datetime import date, datetime
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 import psycopg
 from fastapi import HTTPException
@@ -25,6 +27,11 @@ PROPERTY_FIELDS = {
 }
 CAMPAIGN_FIELDS = {"sale_method": str, "listed_on": date, "outcome": str, "sold_price_aud": int,
                    "passed_in_bid_aud": int}
+
+
+def _day(t: datetime | None) -> date | None:
+    """Calendar date in the household's time zone (a 9 am Melbourne change is not "yesterday")."""
+    return t.astimezone(ZoneInfo(os.environ.get("TZ", "Australia/Melbourne"))).date() if t else None
 
 
 def _street(r: dict) -> str:
@@ -79,6 +86,8 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
     hits = by_property("SELECT property_id, owner_id, kind, name FROM property_area_hit WHERE property_id = ANY(%s)")
     context = by_property("SELECT DISTINCT property_id, code, label FROM property_overlay_hit WHERE property_id = ANY(%s)")
     scores = by_property("SELECT property_id, person_id, score FROM property_score WHERE property_id = ANY(%s)")
+    tag_rows = by_property("SELECT pt.property_id, t.name FROM property_tag pt JOIN tag t ON t.id = pt.tag_id"
+                           " WHERE pt.property_id = ANY(%s) ORDER BY lower(t.name)")
     travel = by_property(
         """SELECT t.property_id, t.place_id, t.mode, t.duration_s FROM travel_estimate t
            JOIN place pl ON pl.id = t.place_id AND pl.archived_at IS NULL WHERE t.property_id = ANY(%s)""")
@@ -87,7 +96,7 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
         (ids,)).fetchall()}
     persons = {r["id"]: r["display_name"] for r in conn.execute("SELECT id, display_name FROM person")}
 
-    today = date.today()
+    today = _day(datetime.now(ZoneInfo("UTC")))
     rows = []
     for p in props:
         pid = p["id"]
@@ -99,7 +108,7 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
         cj = {j["kind"]: j for j in judgements.get(pid, []) if c and j["campaign_id"] == c["id"]}
         lead = next((a for a in agents.get(pid, []) if c and a["campaign_id"] == c["id"]), None)
         link = next((l["url"] for l in links.get(pid, []) if c and l["campaign_id"] == c["id"]), None)
-        started = (c and (c["listed_on"] or c["created_at"].date())) or None
+        started = (c and (c["listed_on"] or _day(c["created_at"]))) or None
         ended = c and c["outcome_on"]
         sale_at = c and (c["auction_at"] if c["sale_method"] == "auction" else c["eoi_closes_at"] if c["sale_method"] == "eoi" else None)
         guide_high = latest_guide and latest_guide["high_aud"]
@@ -111,11 +120,11 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
                                                                    "postcode", "plan_number", "lot_number")})),
             "suburb": p["suburb"], "postcode": p["postcode"],
             "plan_lot": f"{p['lot_number']}\\{p['plan_number']}" if p["plan_number"] else None,
-            "created_at": p["created_at"].date(),
+            "created_at": _day(p["created_at"]),
             "pin_source": "manual" if p["manual_location"] else p["geocode_source"],
             "lat": p["lat"], "lon": p["lon"],
             **{k: p[k] for k in PROPERTY_FIELDS},
-            "status": p["status"], "status_since": p["status_since"],
+            "status": p["status"], "status_since": _day(p["status_since"]),
             "excluded": p["excluded"], "warned": p["warned"],
             "flagged_by": ", ".join(sorted({persons.get(h["owner_id"], "?") for h in hits.get(pid, [])
                                             if h["owner_id"] != me and h["kind"] == "hard_exclude"})) or None,
@@ -129,10 +138,15 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
             "agent_phone": lead and lead["mobile"], "agent_email": lead and lead["email"],
             "guide_low": latest_guide and latest_guide["low_aud"], "guide_high": guide_high,
             "guide_source": latest_guide and latest_guide["source"],
-            "guide_date": latest_guide and latest_guide["observed_at"].date(),
+            "guide_date": latest_guide and _day(latest_guide["observed_at"]),
             "suburb_median": latest_guide and latest_guide["statement_suburb_median_aud"],
             "guide_change": (round(_mid(latest_guide["low_aud"], latest_guide["high_aud"]) - _mid(first_any["low_aud"], first_any["high_aud"]))
                              if latest_guide and first_any else None),
+            # Price history across every campaign: how often the guide or asking price moved, and when.
+            "first_guide_low": first_any and first_any["low_aud"], "first_guide_high": first_any and first_any["high_aud"],
+            "guide_changes": max(len(guides.get(pid, [])) - 1, 0),
+            "last_guide_change": (_day(guides[pid][-1]["observed_at"]) if len(guides.get(pid, [])) > 1 else None),
+            "tags": [t["name"] for t in tag_rows.get(pid, [])],
             **{k: (cj[k]["amount_aud"] if k in cj else None) for k in JUDGEMENTS},
             "sold_vs_guide_pct": (round((c["sold_price_aud"] / guide_high - 1) * 100, 1)
                                   if c and c["sold_price_aud"] and guide_high else None),
@@ -156,7 +170,7 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
             v[key] = str(o["id"])
             latest_by_person[o["person_id"]] = max(latest_by_person.get(o["person_id"], o["recorded_at"]), o["recorded_at"])
         for person_id, when in latest_by_person.items():
-            row[f"last_verdict:{person_id}"] = when.date()
+            row[f"last_verdict:{person_id}"] = _day(when)
         person_scores = [s for s in scores.get(pid, []) if s["score"] is not None]
         for s in person_scores:
             row[f"score:{s['person_id']}"] = int(s["score"])
@@ -219,6 +233,17 @@ def apply_cell(conn: psycopg.Connection, person: UUID, property_id: UUID, column
             raise _conflict(column, prop[column], prop["updated_by"], prop["updated_at"], conn)
         conn.execute(f'UPDATE property SET "{column}" = %s WHERE id = %s',
                      (_coerce(PROPERTY_FIELDS[column], value), property_id))
+        return
+
+    if column == "tags":
+        from .routes.tags import set_property_tags
+        current = [r["name"] for r in conn.execute(
+            "SELECT t.name FROM property_tag pt JOIN tag t ON t.id = pt.tag_id WHERE pt.property_id = %s ORDER BY lower(t.name)",
+            (property_id,))]
+        if check and sorted(n.lower() for n in current) != sorted(str(n).lower() for n in (expected or [])):
+            raise _conflict(column, current, prop["updated_by"], prop["updated_at"], conn)
+        names = value if isinstance(value, list) else [n for n in str(value or "").split(",")]
+        set_property_tags(conn, property_id, [str(n) for n in names])
         return
 
     if column == "status":

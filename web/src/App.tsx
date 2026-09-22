@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState } from "react";
-import { Link, NavLink, Route, Routes } from "react-router-dom";
+import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import ErrorBoundary from "./ErrorBoundary";
 import { getActingPerson, setActingPerson } from "./api";
 import { useOutbox } from "./outbox";
 import Auction from "./pages/Auction";
@@ -18,8 +19,10 @@ import { usePersons } from "./people";
 // The map pulls in MapLibre and the drawing tools; load it only when opened.
 const MapPage = lazy(() => import("./pages/MapPage"));
 const Overview = lazy(() => import("./pages/Overview"));
+const Trends = lazy(() => import("./pages/Trends"));
 
 export default function App() {
+  const location = useLocation();
   const persons = usePersons();
   const [acting, setActing] = useState(getActingPerson());
   const queued = useOutbox();
@@ -59,6 +62,7 @@ export default function App() {
           <NavLink to="/" end>Houses</NavLink>
           <NavLink to="/map">Map</NavLink>
           <NavLink to="/overview" className="desktop-only">Overview</NavLink>
+          <NavLink to="/trends" className="desktop-only">Trends</NavLink>
           <NavLink to="/drive">Drive</NavLink>
           <NavLink to="/settings">Settings</NavLink>
         </nav>
@@ -71,6 +75,7 @@ export default function App() {
         </button>
       </header>
       <main className="shell">
+        <ErrorBoundary resetKey={location.pathname}>
         <Routes>
           <Route path="/" element={<PropertyList />} />
           <Route path="/add" element={<QuickAdd />} />
@@ -83,10 +88,12 @@ export default function App() {
           <Route path="/outbox" element={<Outbox />} />
           <Route path="/auction/:campaignId" element={<Auction />} />
           <Route path="/compare" element={<Compare />} />
+          <Route path="/trends" element={<Suspense fallback={<p className="muted">Loading…</p>}><Trends /></Suspense>} />
           <Route path="/disagree" element={<Disagreements />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<p>Page not found.</p>} />
         </Routes>
+        </ErrorBoundary>
       </main>
     </>
   );

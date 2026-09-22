@@ -34,7 +34,7 @@ export default function QuickAdd() {
   const [cars, setCars] = useState("");
   const [land, setLand] = useState("");
   const [building, setBuilding] = useState("");
-  const [method, setMethod] = useState<SaleMethod | "">("auction");
+  const [method, setMethod] = useState<SaleMethod | "">("");  // "Not listed yet" until a listing or the person says otherwise
   const [saleAt, setSaleAt] = useState("");
   const [url, setUrl] = useState("");
   const [low, setLow] = useState("");

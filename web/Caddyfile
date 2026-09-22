@@ -1,0 +1,29 @@
+{
+	auto_https off
+	admin off
+}
+
+:80 {
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy {$API_UPSTREAM:api:8000}
+	}
+
+	# Basemap tiles (milestone 2), served straight from disk with range requests.
+	handle_path /tiles/* {
+		root * /srv/tiles
+		file_server
+	}
+
+	handle {
+		root * /srv/web
+		@immutable path /assets/*
+		header @immutable Cache-Control "public, max-age=31536000, immutable"
+		# The service worker and app entry must always be revalidated so updates reach installed phones.
+		@entry path /sw.js /registerSW.js /index.html /manifest.webmanifest /
+		header @entry Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}

@@ -1,0 +1,79 @@
+import type { GuideSource, JudgementKind, Outcome, SaleMethod, Stage, Stance, Status } from "./api";
+
+/** "1.2m", "950k", "$1,250,000", "1250000" → whole dollars; null if it isn't a price. */
+export function parseMoney(input: string): number | null {
+  const s = input.trim().toLowerCase().replace(/[$,\s]/g, "");
+  if (!s) return null;
+  const m = s.match(/^(\d+(?:\.\d+)?)(k|m)?$/);
+  if (!m) return null;
+  const n = parseFloat(m[1]) * (m[2] === "m" ? 1_000_000 : m[2] === "k" ? 1_000 : 1);
+  return n > 0 ? Math.round(n) : null;
+}
+
+/** $1.25m / $950k style, for dense lists. */
+export function money(n: number | null | undefined): string {
+  if (n == null) return "—";
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(3).replace(/\.?0+$/, "")}m`;
+  if (n >= 1_000) return `$${Math.round(n / 1_000)}k`;
+  return `$${n}`;
+}
+
+export function moneyRange(low: number | null, high: number | null): string {
+  if (low == null) return "No guide";
+  return high == null || high === low ? money(low) : `${money(low)}–${money(high)}`;
+}
+
+const dateTime = new Intl.DateTimeFormat("en-AU", { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+const dateOnly = new Intl.DateTimeFormat("en-AU", { day: "numeric", month: "short", year: "numeric" });
+
+export const when = (iso: string | null) => (iso ? dateTime.format(new Date(iso)) : "");
+export const day = (iso: string | null) => (iso ? dateOnly.format(new Date(iso)) : "");
+
+/** <input type="datetime-local"> value ⇄ ISO with offset. */
+export function toLocalInput(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+export const fromLocalInput = (v: string): string | null => (v ? new Date(v).toISOString() : null);
+
+export const LABEL = {
+  status: {
+    watching: "Watching", inspecting: "Inspecting", shortlisted: "Shortlisted", bidding: "Bidding",
+    rejected: "Rejected", lost: "Lost", withdrawn: "Withdrawn", bought: "Bought",
+  } satisfies Record<Status, string>,
+  method: { auction: "Auction", eoi: "EOI", private_sale: "Private sale", other: "Other" } satisfies Record<SaleMethod, string>,
+  stage: { pre_inspection: "Before inspecting", post_inspection: "After inspecting" } satisfies Record<Stage, string>,
+  stageShort: { pre_inspection: "Pre", post_inspection: "Post" } satisfies Record<Stage, string>,
+  stance: { yes: "Yes", maybe: "Maybe", no: "No" } satisfies Record<Stance, string>,
+  outcome: {
+    sold_prior: "Sold prior", sold_at_auction: "Sold at auction", sold_after_auction: "Sold after auction",
+    sold: "Sold", passed_in: "Passed in", withdrawn: "Withdrawn", disappeared: "Listing disappeared",
+  } satisfies Record<Outcome, string>,
+  // Victorian labels for the generic database values (region pack, PLAN.md D9).
+  guideSource: {
+    price_statement: "Statement of Information", advertised: "Advertised", agent_verbal: "Agent (verbal)", other: "Other",
+  } satisfies Record<GuideSource, string>,
+  judgement: {
+    estimated_reserve: "Our reserve estimate", expected_sale: "Expected sale", walk_away: "Walk-away limit",
+  } satisfies Record<JudgementKind, string>,
+};
+
+export function saleWhen(p: { sale_method: SaleMethod | null; auction_at: string | null; eoi_closes_at: string | null }): string {
+  if (p.sale_method === "auction" && p.auction_at) return `Auction ${when(p.auction_at)}`;
+  if (p.sale_method === "eoi" && p.eoi_closes_at) return `EOI closes ${when(p.eoi_closes_at)}`;
+  return p.sale_method ? LABEL.method[p.sale_method] : "Not listed";
+}
+
+export function rooms(p: { beds: number | null; baths: number | null; car_spaces: number | null }): string {
+  const parts = [
+    p.beds != null && `${p.beds} bed`,
+    p.baths != null && `${p.baths} bath`,
+    p.car_spaces != null && `${p.car_spaces} car`,
+  ].filter(Boolean);
+  return parts.join(" · ");
+}
+
+export const minutes = (s: number | null) => (s == null ? "" : `${Math.max(1, Math.round(s / 60))} min`);
+export const km = (m: number | null) => (m == null ? "" : m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`);

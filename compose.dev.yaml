@@ -1,0 +1,16 @@
+# Local development and testing without Tailscale: the web container publishes plain HTTP on
+# localhost:8080 instead of sitting behind the Tailscale sidecar. Offline mode and GPS need HTTPS,
+# so use the real deployment for phone testing.
+#
+#   docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.dev up -d --build
+services:
+  web:
+    network_mode: !reset null
+    depends_on: !override [api]
+    ports: ["127.0.0.1:8080:80"]
+
+  tailscale:
+    profiles: [tailscale]
+
+  offsite:
+    profiles: !override [tailscale]

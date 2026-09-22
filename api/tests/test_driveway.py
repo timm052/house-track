@@ -1,0 +1,90 @@
+import io
+import uuid
+
+from PIL import Image
+
+from .conftest import as_
+
+
+def house(client, person, n, auction="2099-10-17T11:00:00+11:00"):
+    r = client.post("/api/properties", headers=as_(person), json={
+        "address": {"street_number": str(n), "street": "Drive Way", "suburb": "Blackburn", "postcode": "3130"},
+        "campaign": {"sale_method": "auction", "auction_at": auction}})
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+def test_inspections_attendees_and_single_event_ics(client, people):
+    a, b = people["a"], people["b"]
+    pid = house(client, a, 1)
+    iid = client.post(f"/api/properties/{pid}/inspections", headers=as_(a),
+                      json={"kind": "open", "starts_at": "2099-10-11T10:00:00+11:00"}).json()["id"]
+    client.put(f"/api/inspections/{iid}/attendees/{b['id']}", headers=as_(a), json={"note": "Damp in the laundry"})
+    [insp] = client.get(f"/api/properties/{pid}").json()["inspections"]
+    assert insp["state"] == "attended" and insp["attendees"] == [{"person_id": b["id"], "note": "Damp in the laundry"}]
+    assert insp["ends_at"].startswith("2099-10-10T23:30")  # 30 minutes by default (stored in UTC)
+
+    assert client.get("/api/calendar.ics").text.startswith("BEGIN:VCALENDAR")
+    one = client.get(f"/api/events/inspection/{iid}.ics")
+    assert one.status_code == 200
+    assert "SUMMARY:Open for inspection: 1 Drive Way\\, Blackburn 3130" in one.text
+    assert "DTSTART:20991010T230000Z" in one.text
+
+
+def test_upcoming_events_include_auctions_and_feed(client, people):
+    pid = house(client, people["a"], 2, auction="2026-12-31T11:00:00+11:00")
+    events = client.get("/api/inspections", params={"days": 400}).json()
+    assert any(e["property_id"] == pid and e["type"] == "auction" for e in events)
+
+
+def jpeg() -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (1200, 900), (180, 120, 60)).save(buf, "JPEG")
+    return buf.getvalue()
+
+
+def test_photo_upload_thumbnail_and_dedup(client, people, tmp_path, monkeypatch):
+    monkeypatch.setenv("BLOB_DIR", str(tmp_path))
+    a = people["a"]
+    pid = house(client, a, 3)
+    data = jpeg()
+    r1 = client.post(f"/api/properties/{pid}/attachments", headers=as_(a),
+                     files={"file": ("kitchen.jpg", data, "image/jpeg")}, data={"kind": "photo", "caption": "Kitchen"})
+    r2 = client.post(f"/api/properties/{pid}/attachments", headers=as_(a),
+                     files={"file": ("again.jpg", data, "image/jpeg")}, data={"kind": "photo"})
+    assert r1.status_code == 201 and r2.status_code == 201, r1.text
+    atts = client.get(f"/api/properties/{pid}").json()["attachments"]
+    assert len(atts) == 2 and atts[0]["sha256"] == atts[1]["sha256"]
+    assert len([p for p in tmp_path.rglob(atts[0]["sha256"]) if p.is_file()]) == 1  # stored once
+    thumb = client.get(f"/api/attachments/{atts[0]['id']}/thumb")
+    assert thumb.status_code == 200 and max(Image.open(io.BytesIO(thumb.content)).size) <= 480
+    assert client.get(f"/api/attachments/{atts[0]['id']}/file").content == data
+
+    # A vendor statement link works without a file; nothing at all is refused.
+    r = client.post(f"/api/properties/{pid}/attachments", headers=as_(a),
+                    data={"kind": "vendor_statement", "url": "https://docs.example/s32.pdf"})
+    assert r.status_code == 201
+    assert client.post(f"/api/properties/{pid}/attachments", headers=as_(a), data={"kind": "photo"}).status_code == 422
+
+
+def test_offline_verdict_conflict_check(client, people):
+    a, b = people["a"], people["b"]
+    pid = house(client, a, 4)
+    # A's phone saw no verdict; meanwhile B entered one on A's behalf.
+    client.post(f"/api/properties/{pid}/opinions", headers=as_(b),
+                json={"person_id": a["id"], "stage": "post_inspection", "stance": "no"})
+    queued = {"id": str(uuid.uuid4()), "stage": "post_inspection", "stance": "yes", "check_latest": True}
+    r = client.post(f"/api/properties/{pid}/opinions", headers=as_(a), json=queued)
+    assert r.status_code == 409 and r.json()["detail"]["current"] == "no"
+    # Keep mine: resend without the check. Replaying the same queued item later is not a conflict.
+    assert client.post(f"/api/properties/{pid}/opinions", headers=as_(a), json=queued | {"check_latest": False}).status_code == 201
+    assert client.post(f"/api/properties/{pid}/opinions", headers=as_(a), json=queued).status_code == 201
+    current = [o for o in client.get(f"/api/properties/{pid}").json()["opinions"] if o["person_id"] == a["id"]]
+    assert current[0]["stance"] == "yes" and len(current) == 2
+
+
+def test_overview_rows_carry_coordinates(client, people):
+    pid = house(client, people["a"], 5)
+    client.put(f"/api/properties/{pid}/location", headers=as_(people["a"]), json={"lon": 145.15, "lat": -37.82})
+    row = next(r for r in client.get("/api/overview").json()["rows"] if r["id"] == pid)
+    assert (row["lon"], row["lat"]) == (145.15, -37.82)

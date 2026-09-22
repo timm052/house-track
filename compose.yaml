@@ -1,0 +1,155 @@
+# House Track. See PLAN.md §4 and README.md. All host paths and secrets come from .env.
+# First run and quarterly refresh of region data: docker compose --profile setup run --rm setup
+name: housetrack
+
+x-pg-env: &pg-env
+  PGHOST: db
+  PGUSER: house
+  PGPASSWORD: ${DB_PASSWORD:?set in .env}
+  PGDATABASE: house
+  TZ: ${TZ:-Australia/Melbourne}
+
+services:
+  db:
+    image: postgis/postgis:18-3.6
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: house
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set in .env}
+      POSTGRES_DB: house
+      TZ: ${TZ:-Australia/Melbourne}
+    volumes:
+      - ${DATA_DIR:?set in .env}/pgdata:/var/lib/postgresql   # PG18 image layout
+    shm_size: 256m
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "house", "-d", "house"]
+      interval: 10s
+      retries: 10
+
+  api:
+    image: ghcr.io/${IMAGE_OWNER:-housetrack}/housetrack-api:${VERSION:-latest}
+    build: { context: ./api, target: api }
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      <<: *pg-env
+      DATABASE_URL: postgresql://house:${DB_PASSWORD}@db:5432/house
+      GNAF_DATABASE_URL: postgresql://house:${DB_PASSWORD}@db:5432/gnaf
+      VALHALLA_URL: http://valhalla:8002
+      # Free public geocoding fallback when G-NAF has no match; set to "" to turn off.
+      NOMINATIM_URL: ${NOMINATIM_URL-https://nominatim.openstreetmap.org}
+      REGION: ${REGION:-vic}
+      BLOB_DIR: /data/blobs
+      BACKUP_DIR: /backups/db
+      TZ: ${TZ:-Australia/Melbourne}
+    volumes:
+      - ${DATA_DIR}/blobs:/data/blobs
+      - ${BACKUP_DIR:?set in .env}:/backups
+
+  web:
+    image: ghcr.io/${IMAGE_OWNER:-housetrack}/housetrack-web:${VERSION:-latest}
+    build: ./web
+    restart: unless-stopped
+    network_mode: service:tailscale
+    depends_on: [api, tailscale]
+    volumes:
+      - ${DATA_DIR}/tiles:/srv/tiles:ro
+
+  # Walking and driving times (PLAN.md D11). Builds its routing tiles from region.osm.pbf, which the
+  # setup job writes; until then it waits and the app shows travel times as pending.
+  valhalla:
+    image: ghcr.io/valhalla/valhalla-scripted:latest
+    restart: unless-stopped
+    environment:
+      use_tiles_ignore_pbf: "False"   # rebuild when setup writes a new extract, then reuse
+      build_elevation: "False"
+      build_admins: "False"
+      build_time_zones: "False"
+      serve_tiles: "True"
+    volumes:
+      - ${DATA_DIR}/valhalla:/custom_files
+
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: ${TS_HOSTNAME:-house}
+    restart: unless-stopped
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:?set in .env}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+    volumes:
+      - ${DATA_DIR}/tailscale:/var/lib/tailscale
+      - ./deploy/serve.json:/config/serve.json:ro
+    devices: ["/dev/net/tun:/dev/net/tun"]
+    cap_add: [net_admin]
+
+  # ─── setup: docker compose --profile setup run --rm setup [gnaf|osm|tiles] ─
+  setup:
+    image: ghcr.io/${IMAGE_OWNER:-housetrack}/housetrack-setup:${VERSION:-latest}
+    build: { context: ./api, target: setup }
+    profiles: [setup]
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      <<: *pg-env
+      DATABASE_URL: postgresql://house:${DB_PASSWORD}@db:5432/house
+      REGION: ${REGION:-vic}
+      BBOX: ${BBOX:-}
+      DOWNLOAD_DIR: /downloads
+      TILES_DIR: /out/tiles
+      VALHALLA_DIR: /out/valhalla
+    volumes:
+      - ${DATA_DIR}/downloads:/downloads
+      - ${DATA_DIR}/tiles:/out/tiles
+      - ${DATA_DIR}/valhalla:/out/valhalla
+
+  # ─── ops: docker compose --profile ops run --rm <service> ───────────
+  backup:
+    image: postgis/postgis:18-3.6
+    profiles: [ops]
+    depends_on:
+      db: { condition: service_healthy }
+    environment: *pg-env
+    volumes:
+      - ${DATA_DIR}/blobs:/blobs:ro
+      - ${BACKUP_DIR}:/backups
+    entrypoint: ["/bin/sh", "-euc"]
+    command:
+      - |
+        mkdir -p /backups/db /backups/blobs
+        f=/backups/db/house-$$(date +%Y%m%dT%H%M%S).dump
+        pg_dump -Fc -f "$$f"
+        cp -au /blobs/. /backups/blobs/
+        find /backups/db -name 'house-*.dump' -mtime +60 -delete
+        echo "wrote $$f"
+
+  offsite:
+    image: rclone/rclone:latest
+    profiles: [ops]
+    network_mode: service:tailscale   # reaches the offsite machine over the tailnet
+    volumes:
+      - ${BACKUP_DIR}:/backups:ro
+      - ${DATA_DIR}/rclone:/config/rclone
+    command: ["copy", "/backups", "${OFFSITE_TARGET:-unset:}"]
+
+  restore:
+    image: postgis/postgis:18-3.6
+    profiles: [ops]
+    depends_on:
+      db: { condition: service_healthy }
+    environment: *pg-env
+    volumes:
+      - ${DATA_DIR}/blobs:/blobs
+      - ${BACKUP_DIR}:/backups:ro
+    entrypoint:
+      - /bin/sh
+      - -euc
+      - |
+        f="/backups/db/$${1:?usage: restore <dump filename>}"
+        dropdb --if-exists --force house
+        createdb house
+        pg_restore --no-owner -d house "$$f"
+        cp -au /backups/blobs/. /blobs/
+        echo "restored $$f"
+      - restore

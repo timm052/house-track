@@ -279,4 +279,11 @@ def extract(url: str, html: str = "", next_data: str | None = None, argonaut: st
     status = next((n.get("status") for _, n in _walk(tree) if "stats" in n and isinstance(n.get("status"), str)), None)
     archived = any(n.get("isArchived") is True for _, n in _walk(tree))
     out["listing_status"] = "archived" if archived else status
+    # A sold listing's price line is the sale price ("Sold for $1,250,000"), not a new guide.
+    sold = (status or "").lower() == "sold" or re.match(r"\s*sold\b", out.get("price_text") or "", re.I)
+    if sold:
+        out["listing_status"] = "sold"
+        out["sold_price_aud"] = out.pop("guide_low_aud", None) if out.get("guide_low_aud") == out.get("guide_high_aud") else None
+        out.pop("guide_low_aud", None)
+        out.pop("guide_high_aud", None)
     return out

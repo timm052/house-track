@@ -9,7 +9,7 @@ refused with the current value, who changed it and when.
 
 import os
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -40,8 +40,40 @@ def _street(r: dict) -> str:
     return f"Lot {r['lot_number']} {r['street'] or ''}".strip()
 
 
+def _mins(seconds: int | None) -> int | None:
+    return None if seconds is None else max(1, round(seconds / 60))
+
+
 def _mid(low: int | None, high: int | None) -> float | None:
     return None if low is None else (low + (high or low)) / 2
+
+
+ENDED_ON_LISTING = {"sold", "archived", "offmarket", "withdrawn", "leased"}
+
+
+def _needs_outcome(c: dict | None, sale_at: datetime | None) -> bool:
+    """A live campaign whose auction or EOI has been and gone, or whose listing says it's over: time to record how it ended."""
+    if not c or c["outcome"] is not None:
+        return False
+    listing = (c["listing_status"] or "").replace("_", "").replace(" ", "").lower()
+    passed = sale_at is not None and sale_at < datetime.now(ZoneInfo("UTC")) - timedelta(hours=3)
+    return passed or listing in ENDED_ON_LISTING
+
+
+def _max_bid(conn: psycopg.Connection) -> int | None:
+    """The most we can bid with every cost included (Settings → Budget), or None if the budget isn't set."""
+    from .money import max_bid
+    from .routes.money import load_costs
+    costs = load_costs(conn)
+    return max_bid(costs) if costs.budget else None
+
+
+def _budget(guide: dict | None, cap: int | None) -> str | None:
+    """Where the current guide sits against the max bid: within it, only its top above ("stretch"), or over."""
+    if not guide or cap is None:
+        return None
+    high = guide["high_aud"] or guide["low_aud"]
+    return "over" if guide["low_aud"] > cap else "stretch" if high > cap else "within"
 
 
 def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = None) -> list[dict]:
@@ -86,6 +118,8 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
     hits = by_property("SELECT property_id, owner_id, kind, name FROM property_area_hit WHERE property_id = ANY(%s)")
     context = by_property("SELECT DISTINCT property_id, code, label FROM property_overlay_hit WHERE property_id = ANY(%s)")
     scores = by_property("SELECT property_id, person_id, score FROM property_score WHERE property_id = ANY(%s)")
+    attended = by_property("""SELECT DISTINCT i.property_id, a.person_id FROM inspection_attendee a
+                              JOIN inspection i ON i.id = a.inspection_id WHERE i.property_id = ANY(%s)""")
     covers = {r["property_id"]: str(r["attachment_id"]) for r in conn.execute(
         "SELECT property_id, attachment_id FROM property_cover WHERE property_id = ANY(%s)", (ids,)).fetchall()}
     tag_rows = by_property("SELECT pt.property_id, t.name FROM property_tag pt JOIN tag t ON t.id = pt.tag_id"
@@ -93,10 +127,12 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
     travel = by_property(
         """SELECT t.property_id, t.place_id, t.mode, t.duration_s FROM travel_estimate t
            JOIN place pl ON pl.id = t.place_id AND pl.archived_at IS NULL WHERE t.property_id = ANY(%s)""")
+    transit = by_property("SELECT property_id, place_id, duration_s FROM transit_estimate WHERE property_id = ANY(%s) AND duration_s IS NOT NULL")
     nearest = {r["property_id"]: r for r in conn.execute(
-        "SELECT property_id, name, duration_s FROM property_station_access WHERE is_nearest AND property_id = ANY(%s)",
+        "SELECT property_id, name, walk_s, walk_m, drive_s FROM property_nearest_station WHERE property_id = ANY(%s)",
         (ids,)).fetchall()}
     persons = {r["id"]: r["display_name"] for r in conn.execute("SELECT id, display_name FROM person")}
+    cap = _max_bid(conn)
 
     today = _day(datetime.now(ZoneInfo("UTC")))
     rows = []
@@ -135,10 +171,14 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
             "days_on_market": ((ended or today) - started).days if started else None,
             "outcome": c and c["outcome"], "outcome_on": c and c["outcome_on"],
             "sold_price_aud": c and c["sold_price_aud"], "passed_in_bid_aud": c and c["passed_in_bid_aud"],
+            "bought_by_us": bool(c and c["bought_by_us"]),
+            "listing_status": c and c["listing_status"], "listing_price_text": c and c["listing_price_text"],
+            "needs_outcome": _needs_outcome(c, sale_at),
             "listing_url": link, "relists": max(len(cs) - 1, 0),
             "agent_name": lead and lead["name"], "agency": lead and lead["agency"],
             "agent_phone": lead and lead["mobile"], "agent_email": lead and lead["email"],
             "guide_low": latest_guide and latest_guide["low_aud"], "guide_high": guide_high,
+            "budget": _budget(latest_guide, cap),
             "guide_source": latest_guide and latest_guide["source"],
             "guide_date": latest_guide and _day(latest_guide["observed_at"]),
             "suburb_median": latest_guide and latest_guide["statement_suburb_median_aud"],
@@ -150,6 +190,7 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
             "last_guide_change": (_day(guides[pid][-1]["observed_at"]) if len(guides.get(pid, [])) > 1 else None),
             "tags": [t["name"] for t in tag_rows.get(pid, [])],
             "cover_id": covers.get(pid),
+            "attended_by": [str(r["person_id"]) for r in attended.get(pid, [])],
             **{k: (cj[k]["amount_aud"] if k in cj else None) for k in JUDGEMENTS},
             "sold_vs_guide_pct": (round((c["sold_price_aud"] / guide_high - 1) * 100, 1)
                                   if c and c["sold_price_aud"] and guide_high else None),
@@ -158,7 +199,9 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
             "school_secondary": ", ".join(sorted({h["label"] for h in context.get(pid, []) if h["code"].endswith("school_secondary")})) or None,
             "planning": ", ".join(sorted({h["label"] for h in context.get(pid, []) if "school" not in h["code"]})) or None,
             "nearest_station": nearest.get(pid, {}).get("name"),
-            "nearest_station_walk": round(nearest[pid]["duration_s"] / 60) if pid in nearest else None,
+            "nearest_station_walk": _mins(nearest.get(pid, {}).get("walk_s")),
+            "nearest_station_drive": _mins(nearest.get(pid, {}).get("drive_s")),
+            "nearest_station_km": round(nearest[pid]["walk_m"] / 1000, 1) if nearest.get(pid, {}).get("walk_m") else None,
         }
         v: dict[str, Any] = {"status": str(p["status_id"]), "guide": latest_guide and str(latest_guide["id"])}
         for k in JUDGEMENTS:
@@ -178,6 +221,8 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
         for s in person_scores:
             row[f"score:{s['person_id']}"] = int(s["score"])
         row["score_avg"] = round(sum(int(s["score"]) for s in person_scores) / len(person_scores)) if person_scores else None
+        for t in transit.get(pid, []):
+            row[f"transit:{t['place_id']}"] = _mins(t["duration_s"])
         for t in travel.get(pid, []):
             if t["duration_s"] is not None:
                 row[f"{t['mode']}:{t['place_id']}"] = round(t["duration_s"] / 60)
@@ -214,6 +259,15 @@ def _coerce(kind: type, value: Any) -> Any:
         raise HTTPException(422, f"Not a valid {kind.__name__}: {value!r}") from None
 
 
+def _validated(model: type, field: str, value: Any) -> Any:
+    """Run a grid value through the same schema the house page's forms use, so both accept the same values."""
+    from pydantic import ValidationError
+    try:
+        return getattr(model.model_validate({field: value}), field)
+    except ValidationError as e:
+        raise HTTPException(422, f"{field.replace('_', ' ').capitalize()}: {e.errors()[0]['msg'].lower()}") from None
+
+
 def _live_campaign(conn: psycopg.Connection, property_id: UUID) -> dict | None:
     return conn.execute(
         "SELECT * FROM campaign WHERE property_id = %s ORDER BY (outcome IS NULL) DESC, created_at DESC LIMIT 1",
@@ -234,8 +288,9 @@ def apply_cell(conn: psycopg.Connection, person: UUID, property_id: UUID, column
     if column in PROPERTY_FIELDS:
         if check and not _same(prop[column], expected):
             raise _conflict(column, prop[column], prop["updated_by"], prop["updated_at"], conn)
-        conn.execute(f'UPDATE property SET "{column}" = %s WHERE id = %s',
-                     (_coerce(PROPERTY_FIELDS[column], value), property_id))
+        from .schemas import PropertyPatch
+        new = _validated(PropertyPatch, column, _coerce(PROPERTY_FIELDS[column], value))
+        conn.execute(f'UPDATE property SET "{column}" = %s WHERE id = %s', (new, property_id))
         return
 
     if column == "tags":
@@ -278,6 +333,13 @@ def apply_cell(conn: psycopg.Connection, person: UUID, property_id: UUID, column
     if c is None:
         raise HTTPException(422, "This house has no campaign yet. Set its sale method first.")
 
+    if column == "sale_method":
+        if check and not _same(c["sale_method"], expected):
+            raise _conflict(column, c["sale_method"], c["updated_by"], c["updated_at"], conn)
+        from .routes.campaigns import set_sale_method
+        set_sale_method(conn, c["id"], _coerce(str, value))
+        return
+
     if column in CAMPAIGN_FIELDS or column == "sale_at":
         target = ("auction_at" if c["sale_method"] == "auction" else "eoi_closes_at" if c["sale_method"] == "eoi" else None) \
             if column == "sale_at" else column
@@ -285,11 +347,13 @@ def apply_cell(conn: psycopg.Connection, person: UUID, property_id: UUID, column
             raise HTTPException(422, "Only auctions and EOIs have a date.")
         if check and not _same(c[target], expected):
             raise _conflict(column, c[target], c["updated_by"], c["updated_at"], conn)
-        new = value if column == "sale_at" else _coerce(CAMPAIGN_FIELDS[column], value)
-        extra = ""
-        if column == "outcome":
-            extra = ", outcome_on = CASE WHEN %(v)s::text IS NULL THEN NULL ELSE coalesce(outcome_on, current_date) END"
-        conn.execute(f'UPDATE campaign SET "{target}" = %(v)s{extra} WHERE id = %(id)s', {"v": new, "id": c["id"]})
+        from .routes.campaigns import update_campaign_fields
+        from .schemas import CampaignPatch
+        new = _validated(CampaignPatch, target, value if column == "sale_at" else _coerce(CAMPAIGN_FIELDS[column], value))
+        if column == "outcome" and new is not None and c["outcome_on"] is not None:
+            update_campaign_fields(conn, c["id"], {"outcome": new, "outcome_on": c["outcome_on"]})
+        else:
+            update_campaign_fields(conn, c["id"], {target: new})
         return
 
     if column == "listing_url":

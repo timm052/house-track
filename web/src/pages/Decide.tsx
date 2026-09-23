@@ -3,7 +3,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type Stance } from "../api";
-import { LABEL } from "../format";
 import { catalogue, display, type OverviewPlace, type OverviewRow } from "../overview/columns";
 import { usePeople } from "../people";
 
@@ -151,10 +150,9 @@ export function Compare() {
 }
 
 /** Houses where your current verdicts differ: the ones worth talking about. */
-export function Disagreements() {
-  const { active } = usePeople();
-  const { data } = useQuery({ queryKey: ["overview"], queryFn: () => api<Overview>("/api/overview") });
-  const rows = (data?.rows ?? []).flatMap((r) => {
+/** Houses where the latest verdicts differ: after inspecting, or before if nobody has inspected yet. */
+export function findDisagreements(rows: OverviewRow[], active: { id: string }[]) {
+  return rows.flatMap((r) => {
     for (const stage of ["post", "pre"] as const) {
       const stances = active.map((p) => r[`v:${p.id}:${stage}`] as Stance | undefined);
       const given = stances.filter(Boolean);
@@ -163,23 +161,5 @@ export function Disagreements() {
     }
     return [];
   });
-  return (
-    <div style={{ marginTop: 12 }}>
-      <h1>We disagree</h1>
-      <p className="small muted">Houses where your latest verdicts differ (after inspecting, or before if neither has inspected).</p>
-      {rows.length === 0 && <p className="muted">Nothing to argue about right now.</p>}
-      {rows.map(({ r, stage, stances }) => (
-        <Link key={r.id} to={`/p/${r.id}`} className="card property-card">
-          <div className="address">{String(r.address)}, {String(r.suburb)}</div>
-          <div className="row small">
-            <span className="muted">{stage === "post" ? "After inspecting" : "Before inspecting"}:</span>
-            {active.map((p, i) => (
-              <span key={p.id}><span className="dot" style={{ background: p.colour }} />{p.display_name}{" "}
-                {stances[i] ? <span className={`pill ${stances[i]}`}>{LABEL.stance[stances[i]!]}</span> : <span className="muted">—</span>}</span>
-            ))}
-          </div>
-        </Link>
-      ))}
-    </div>
-  );
 }
+

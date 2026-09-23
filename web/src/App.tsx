@@ -1,11 +1,11 @@
 import { lazy, Suspense, useState } from "react";
-import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { Link, NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import ErrorBoundary from "./ErrorBoundary";
 import { getActingPerson, setActingPerson } from "./api";
 import { useOutbox } from "./outbox";
 import Auction from "./pages/Auction";
-import Calendar from "./pages/Calendar";
-import { Compare, Disagreements } from "./pages/Decide";
+import ThisWeek from "./pages/ThisWeek";
+import { Compare } from "./pages/Decide";
 import Driveway from "./pages/Driveway";
 import Outbox from "./pages/Outbox";
 import Places from "./pages/Places";
@@ -16,7 +16,8 @@ import Settings from "./pages/Settings";
 import Setup from "./pages/Setup";
 import Refresh from "./pages/Refresh";
 import { usePersons } from "./people";
-import { ArrowUpDown } from "lucide-react";
+import { ArrowUpDown, CalendarDays, DoorOpen, House, Map as MapIcon, MapPin, Settings as SettingsIcon, Sheet, TrendingUp } from "lucide-react";
+import Plan from "./pages/Plan";
 
 // The map pulls in MapLibre and the drawing tools; load it only when opened.
 const MapPage = lazy(() => import("./pages/MapPage"));
@@ -24,7 +25,19 @@ const Overview = lazy(() => import("./pages/Overview"));
 const Trends = lazy(() => import("./pages/Trends"));
 
 // Lists, the house page and dashboards use the full width; forms and settings stay narrow.
-const WIDE = [/^\/$/, /^\/p\//, /^\/trends/, /^\/compare/];
+const WIDE = [/^\/$/, /^\/week/, /^\/p\//, /^\/trends/, /^\/compare/, /^\/plan/];
+
+/** The tabs, in the order of a house hunt: the list, what's on, where things are, then the tools. */
+const NAV: { to: string; label: string; icon: React.ReactNode; desktopOnly?: boolean; end?: boolean }[] = [
+  { to: "/", label: "Houses", icon: <House />, end: true },
+  { to: "/week", label: "This week", icon: <CalendarDays /> },
+  { to: "/map", label: "Map", icon: <MapIcon /> },
+  { to: "/overview", label: "Grid", icon: <Sheet />, desktopOnly: true },
+  { to: "/trends", label: "Trends", icon: <TrendingUp />, desktopOnly: true },
+  { to: "/places", label: "Places", icon: <MapPin /> },
+  { to: "/on-site", label: "On site", icon: <DoorOpen /> },
+  { to: "/settings", label: "Settings", icon: <SettingsIcon /> },
+];
 
 export default function App() {
   const location = useLocation();
@@ -63,20 +76,19 @@ export default function App() {
     <>
       <header className="topbar">
         <NavLink to="/" className="brand" aria-label="House Track"><BrandMark /><span className="brand-name">House Track</span></NavLink>
-        <nav>
-          <NavLink to="/" end>Houses</NavLink>
-          <NavLink to="/map">Map</NavLink>
-          <NavLink to="/overview" className="desktop-only">Overview</NavLink>
-          <NavLink to="/trends" className="desktop-only">Trends</NavLink>
-          <NavLink to="/drive">Drive</NavLink>
-          <NavLink to="/settings">Settings</NavLink>
+        <nav aria-label="Main">
+          {NAV.map(({ to, label, icon, desktopOnly, end }) => (
+            <NavLink key={to} to={to} end={end} className={desktopOnly ? "desktop-only" : undefined} title={label} aria-label={label}>
+              {icon}<span className="nav-label">{label}</span>
+            </NavLink>
+          ))}
         </nav>
         {queued.length > 0 && (
           <Link to="/outbox" className={`badge ${queued.some((q) => q.conflict) ? "warn" : ""}`} title="Waiting to send"><ArrowUpDown /> {queued.length}</Link>
         )}
         <button className="link" onClick={() => choose(null)} title="Switch person">
           <span className="dot" style={{ background: me.colour }} />
-          {me.display_name}
+          <span className="person-name">{me.display_name}</span>
         </button>
       </header>
       <main className="shell">
@@ -89,13 +101,16 @@ export default function App() {
           <Route path="/map" element={<Suspense fallback={<p className="muted">Loading map…</p>}><MapPage /></Suspense>} />
           <Route path="/overview" element={<Suspense fallback={<p className="muted">Loading…</p>}><Overview /></Suspense>} />
           <Route path="/places" element={<Places />} />
-          <Route path="/drive" element={<Driveway />} />
-          <Route path="/calendar" element={<Calendar />} />
+          <Route path="/on-site" element={<Driveway />} />
+          <Route path="/drive" element={<Navigate to="/on-site" replace />} />
+          <Route path="/week" element={<ThisWeek />} />
+          <Route path="/calendar" element={<Navigate to="/week" replace />} />
+          <Route path="/plan" element={<Plan />} />
           <Route path="/outbox" element={<Outbox />} />
           <Route path="/auction/:campaignId" element={<Auction />} />
           <Route path="/compare" element={<Compare />} />
           <Route path="/trends" element={<Suspense fallback={<p className="muted">Loading…</p>}><Trends /></Suspense>} />
-          <Route path="/disagree" element={<Disagreements />} />
+          <Route path="/disagree" element={<Navigate to="/week" replace />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/refresh" element={<Refresh />} />
           <Route path="*" element={<p>Page not found.</p>} />

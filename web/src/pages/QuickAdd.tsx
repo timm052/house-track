@@ -6,6 +6,10 @@ import { api, ApiError, PROPERTY_TYPES, type Address, type BuildStatus, type Pro
 import { fromLocalInput, LABEL, parseMoney, toLocalInput } from "../format";
 import { CaptureReview, defaultChoices, ExistingUpdate, extrasFor, listingNotes, type Capture, type Choices } from "../listing/Capture";
 
+// The listing sites that block server reads; their listings come in through the + House Track bookmarklet.
+const PORTAL_ORIGIN = /^https:\/\/([a-z0-9-]+\.)*(domain|realestate)\.com\.au$/;
+const PORTAL_URL = /^https?:\/\/([a-z0-9-]+\.)*(domain|realestate)\.com\.au\//i;
+
 const EMPTY: Address = { unit: "", street_number: "", street: "", suburb: "", postcode: "", plan_number: "", lot_number: "" };
 const blankToNull = (v: string | null) => (v && v.trim() ? v.trim() : null);
 const count = (v: string) => (v.trim() === "" ? null : Number(v));
@@ -107,7 +111,7 @@ export default function QuickAdd() {
     if (!params.get("capture")) return;
     setImportMsg("Waiting for the listing page…");
     const onMessage = async (e: MessageEvent) => {
-      if (e.data?.type !== "housetrack-capture") return;
+      if (e.data?.type !== "housetrack-capture" || !PORTAL_ORIGIN.test(e.origin)) return;
       (e.source as Window | null)?.postMessage("housetrack-got-it", e.origin);
       window.removeEventListener("message", onMessage);
       try {
@@ -194,7 +198,7 @@ export default function QuickAdd() {
   return (
     <div className="stack" style={{ marginTop: 12 }}>
       <h1>Add a house</h1>
-      <p className="muted small">Paste a listing link to fill most of this in, or type the address. Only the address is needed; the rest can wait.</p>
+      <p className="muted small">Use the + House Track button on a listing to fill most of this in, or type the address. Only the address is needed; the rest can wait.</p>
 
       {capture?.existing_property_id && (
         <>
@@ -206,13 +210,20 @@ export default function QuickAdd() {
 
       <div className="card stack">
         <h2>From a listing</h2>
+        <p className="small" style={{ margin: 0 }}>
+          On <strong>Domain</strong> or <strong>realestate.com.au</strong>, open the listing and click <strong>+ House Track</strong> in
+          your bookmarks bar: it fills all of this in, with photos, agents and inspection times.{" "}
+          <Link to="/settings#bookmarklets">Set up the button</Link>
+        </p>
         <label>
-          Listing link
+          Another agent's website? Paste its link
           <div className="row" style={{ marginTop: 4 }}>
-            <input className="grow" type="url" placeholder="https://www.domain.com.au/…" value={importUrl} onChange={(e) => setImportUrl(e.target.value)} />
+            <input className="grow" type="url" placeholder="https://www.agency.com.au/listing/…" value={importUrl} onChange={(e) => setImportUrl(e.target.value)} />
             <button disabled={!/^https?:\/\//.test(importUrl)} onClick={importLink}>Import</button>
           </div>
         </label>
+        {PORTAL_URL.test(importUrl) && <p className="small tone-warn" style={{ margin: 0 }}>
+          Domain and realestate.com.au don't let House Track read their pages. Use the + House Track button on the listing instead.</p>}
         {importMsg && <p className="small muted">{importMsg}</p>}
       </div>
 

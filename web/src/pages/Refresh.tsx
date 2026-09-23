@@ -12,7 +12,7 @@ import { when } from "../format";
 import { refreshBookmarklet } from "./Settings";
 
 type Target = { id: string; url: string; address: string; last_checked_at: string | null };
-type Result = { changes: string[]; flag?: string | null; error?: string; price_text?: string | null };
+type Result = { changes: string[]; differs?: string[]; flag?: string | null; error?: string; price_text?: string | null };
 type Row = Target & { state: "waiting" | "checking" | "done"; result?: Result };
 
 const GAP_MS = 4000;
@@ -142,6 +142,7 @@ export default function Refresh() {
                       <div className="small">
                         {r.result.changes.length > 0 ? <strong>{r.result.changes.join(" · ")}</strong> : !r.result.error && !r.result.flag && <span className="muted">No change</span>}
                         {r.result.flag && <div className="tone-warn">{r.result.flag}</div>}
+                        {r.result.differs?.map((d) => <div key={d} className="tone-warn">{d}. Open the listing and use + House Track to update it.</div>)}
                         {r.result.error && <div className="tone-bad">{r.result.error}</div>}
                         {r.result.price_text && <div className="muted">Listing says: {r.result.price_text}</div>}
                       </div>

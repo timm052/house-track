@@ -61,6 +61,7 @@ export type PropertySummary = PropertyBase & {
   opinions: { person_id: string; stage: Stage; stance: Stance }[];
   nearest_station: string | null;
   nearest_station_walk_s: number | null;
+  nearest_station_drive_s?: number | null;
   excluded: boolean;
   warned: boolean;
 };
@@ -88,6 +89,7 @@ export type Campaign = {
   sold_price_aud: number | null;
   passed_in_bid_aud: number | null;
   bought_by_us: boolean;
+  listing_status?: string | null; listing_price_text?: string | null;  // what the listing last said (weekly refresh, + House Track)
   links: { id: string; portal: string; url: string; external_id: string | null }[];
   price_guides: {
     id: string; source: GuideSource; low_aud: number; high_aud: number;
@@ -171,7 +173,7 @@ export type MapProperty = {
   plan_number: string | null; lot_number: string | null; manual_pin: boolean; status: Status;
   excluded: boolean; warned: boolean; reasons: string[]; others_flags: Flag[];
   opinions: { person_id: string; stage: Stage; stance: Stance }[];
-  nearest_station: string | null; nearest_station_walk_s: number | null; cover_id: string | null;
+  nearest_station: string | null; nearest_station_walk_s: number | null; nearest_station_drive_s: number | null; cover_id: string | null; score_avg: number | null;
 };
 export type MapArea = { id: string; owner_id: string; name: string; kind: AreaKind; reason: string | null };
 export type MapPlace = { id: string; kind: "station" | "destination"; name: string; person_id: string | null; station_osm_id: number | null; is_favourite: boolean };
@@ -191,10 +193,19 @@ export type AddressHit = {
   suburb: string; postcode: string; lot_number: string | null; lon: number; lat: number;
 };
 export type StationHit = { osm_id: number; name: string; lon: number; lat: number; chosen: boolean };
-export type Place = MapPlace & { lon: number; lat: number };
+export type TravelMode = "walk" | "drive" | "transit";
+export type Place = MapPlace & { lon: number; lat: number; modes: TravelMode[]; houses: number };
 
 export type Travel = {
+  /** The nearest of all the region's train stations, worked out automatically. */
+  nearest: { station_osm_id: number; name: string; walk_m: number | null; walk_s: number | null; drive_m: number | null; drive_s: number | null } | null;
+  /** Stations picked on the Places screen. */
   stations: { place_id: string; name: string; distance_m: number; duration_s: number; is_nearest: boolean; within_limit: boolean }[];
-  destinations: { place_id: string; name: string; person_id: string | null; walk_m: number | null; walk_s: number | null; drive_m: number | null; drive_s: number | null }[];
+  destinations: { place_id: string; name: string; person_id: string | null; walk_m: number | null; walk_s: number | null; drive_m: number | null; drive_s: number | null;
+                  transit?: Transit | null }[];
   pending: number;
 };
+
+/** A public transport journey (from Transitous), planned to arrive by 9am on a weekday. */
+export type Transit = { duration_s: number | null; depart_at: string | null; arrive_at: string | null; arrive_by: string; transfers: number | null;
+                        legs: { mode: string; name: string | null; minutes: number; from: string | null; to: string | null }[] };

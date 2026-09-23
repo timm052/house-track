@@ -182,10 +182,6 @@ class RefreshIn(BaseModel):
     image: str | None = Field(default=None, max_length=2000)
 
 
-def _money(n: int) -> str:
-    return f"${n / 1_000_000:.3f}".rstrip("0").rstrip(".") + "m" if n >= 1_000_000 else f"${round(n / 1000)}k"
-
-
 @router.post("/listing/refresh")
 def refresh_one(body: RefreshIn, person: Person) -> dict:
     """One listing's page data, as loaded by the bookmarklet: apply what changed and say what it was."""
@@ -206,26 +202,13 @@ def refresh_one(body: RefreshIn, person: Person) -> dict:
         auction_at=got.get("auction_at") if method == "auction" else None,
         eoi_closes_at=got.get("eoi_closes_at") if method == "eoi" else None,
         inspections=got.get("inspections") or [], agents=got.get("agents") or [], soi_url=got.get("soi_url"),
+        **{f: got.get(f) for f, _ in listing_apply.DETAILS}, apply_details=False,  # unattended: report, don't overwrite
+        listing_status=got.get("listing_status"), listing_price_text=got.get("price_text"),
     )
     with tx(person) as conn:
         added = listing_apply.refresh(conn, body.property_id, update)
-    changes = []
-    if added.get("guide") and update.guide_low_aud:
-        hi = update.guide_high_aud or update.guide_low_aud
-        changes.append(f"New price guide {_money(update.guide_low_aud)}" + (f"–{_money(hi)}" if hi != update.guide_low_aud else ""))
-    if added.get("method"):
-        changes.append({"auction": "Now selling by auction", "eoi": "Now selling by expressions of interest",
-                        "private_sale": "Now a private sale"}.get(added["method"], "Sale method changed"))
-    if added.get("date"):
-        changes.append("Auction date changed" if method == "auction" else "EOI closing date changed")
-    if added.get("inspections"):
-        n = added["inspections"]
-        changes.append(f"{n} new inspection {'time' if n == 1 else 'times'}")
-    if added.get("agents"):
-        changes.append(f"{added['agents']} new {'agent' if added['agents'] == 1 else 'agents'}")
-    if added.get("soi"):
-        changes.append("Statement of Information added")
     status = (got.get("listing_status") or "").replace("_", "").lower()
     flag = OFF_MARKET.get(status)
-    return {"property_id": str(body.property_id), "changes": changes, "price_text": got.get("price_text"),
+    return {"property_id": str(body.property_id), "changes": added["changes"], "differs": added["differs"],
+            "price_text": got.get("price_text"),
             "flag": f"{flag}: check the outcome and update the status." if flag else None}

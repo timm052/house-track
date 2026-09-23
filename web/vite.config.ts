@@ -30,7 +30,7 @@ export default defineConfig({
         navigateFallback: "/index.html",
         navigateFallbackDenylist: [/^\/api\//, /^\/tiles\//],
         // The bundled fonts, Latin only (the other scripts load on demand, if ever).
-        globPatterns: ["**/*.{js,css,html,png,svg,webp}", "**/*-latin-{wght,soft}-normal-*.woff2"],
+        globPatterns: ["**/*.{js,mjs,css,html,png,svg,webp}", "**/*-latin-{wght,soft}-normal-*.woff2"],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         runtimeCaching: [
           {

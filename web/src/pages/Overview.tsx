@@ -10,9 +10,11 @@ import { api, ApiError, type Address } from "../api";
 import { catalogue, display, editText, parseInput, type Column, type OverviewPlace, type OverviewRow } from "../overview/columns";
 import { applyView, builtInDefault, describe, toCsv, useViews, type Sort, type View } from "../overview/views";
 import FilterPopover from "../overview/FilterPopover";
+import AddressSearch from "../AddressSearch";
 import { usePeople } from "../people";
-import { useDarkMode, CLOSED, STATUS_COLOUR, changeTone, minutesTone, soonTone, suburbClass, suburbSlots, tagStyle, useTagColours, type Tone } from "../colour";
+import { CLOSED, STATUS_COLOUR, budgetTone, changeTone, minutesTone, soonTone, suburbClass, suburbSlots, tagStyle, type Tone, useDarkMode, useTagColours } from "../colour";
 import type { Status } from "../api";
+import ConfirmButton from "../ConfirmButton";
 
 type Overview = { rows: OverviewRow[]; places: OverviewPlace[] };
 type CellState =
@@ -118,6 +120,7 @@ export default function Overview() {
   const visibleCols = current.columns.map((k) => byKey.get(k)).filter((c): c is Column => !!c);
   const shown = useMemo(() => applyView(rows, current.filters, current.sort, search, cols),
     [rows, current.filters, current.sort, search, cols]);
+  const shownIds = useMemo(() => new Set(shown.map((r) => r.id)), [shown]);
 
   // ─── saving cells ─────────────────────────────────────────────────
   const [lastAction, setLastAction] = useState<Change[] | null>(null);
@@ -217,7 +220,7 @@ export default function Overview() {
     (m.excluded || CLOSED.includes(m.status as Status)) ? "dim" : "",
   ];
   const toneOf = (col: Column, v: unknown): Tone =>
-    col.kind === "minutes" ? minutesTone(v, col.key.startsWith("drive:") ? "drive" : "walk") : col.key === "guide_change" ? changeTone(v) : col.key === "sale_at" ? soonTone(v) : "";
+    col.kind === "minutes" ? minutesTone(v, col.key.startsWith("drive:") || col.key === "nearest_station_drive" ? "drive" : col.key.startsWith("transit:") ? "transit" : "walk") : col.key === "guide_change" ? changeTone(v) : col.key === "sale_at" ? soonTone(v) : col.key === "budget" ? budgetTone(v) : "";
 
   const gridColumns: ColumnRegular[] = useMemo(() => {
     const open: ColumnRegular = {
@@ -361,13 +364,14 @@ export default function Overview() {
   }, []);
 
   // ─── views ────────────────────────────────────────────────────────
-  const saveView = async (asNew: boolean) => {
+  const [naming, setNaming] = useState<string | null>(null);  // the "Save as" name box, when open
+  const saveView = async (asNew: boolean, name?: string) => {
     let body: View = current;
     if (asNew || !current.id) {
-      const name = window.prompt("Name this view", asNew ? "" : current.name);
-      if (!name) return;
-      body = { ...current, id: undefined, name };
+      if (!name?.trim()) { setNaming(asNew ? "" : current.name); return; }
+      body = { ...current, id: undefined, name: name.trim() };
     }
+    setNaming(null);
     const saved = body.id
       ? await api<View>(`/api/views/${body.id}`, { method: "PATCH", body: { filters: body.filters, sort: body.sort, columns: body.columns } })
       : await api<View>("/api/views", { method: "POST", body });
@@ -401,7 +405,14 @@ export default function Overview() {
         </select>
         {dirty && <span className="small muted">Unsaved changes</span>}
         {current.id && dirty && <button onClick={() => saveView(false)}>Save view</button>}
-        <button onClick={() => saveView(true)}>Save as…</button>
+        {naming == null ? <button onClick={() => saveView(true)}>Save as…</button> : (
+          <span className="row" style={{ gap: 4 }}>
+            <input autoFocus placeholder="Name this view" value={naming} style={{ width: 180 }} onChange={(e) => setNaming(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") saveView(true, naming); if (e.key === "Escape") setNaming(null); }} />
+            <button className="primary" disabled={!naming.trim()} onClick={() => saveView(true, naming)}>Save</button>
+            <button onClick={() => setNaming(null)}>Cancel</button>
+          </span>
+        )}
         {current.id && !current.is_default && (
           <button onClick={async () => { await api(`/api/views/${current.id}`, { method: "PATCH", body: { is_default: true } });
                                          queryClient.invalidateQueries({ queryKey: ["views"] }); setView({ ...current, is_default: true }); }}>
@@ -409,11 +420,9 @@ export default function Overview() {
           </button>
         )}
         {current.id && (
-          <button onClick={async () => { if (!window.confirm(`Delete the view “${current.name}”?`)) return;
-                                         await api(`/api/views/${current.id}`, { method: "DELETE" });
-                                         await queryClient.invalidateQueries({ queryKey: ["views"] }); setView(null); }}>
-            Delete view
-          </button>
+          <ConfirmButton className="" label="Delete view" question={`Delete “${current.name}” for everyone?`} yes="Delete view"
+            onConfirm={async () => { await api(`/api/views/${current.id}`, { method: "DELETE" });
+                                     await queryClient.invalidateQueries({ queryKey: ["views"] }); setView(null); }} />
         )}
         <span className="spacer" />
         <input type="search" placeholder="Search address, agent, notes" value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 240 }} />
@@ -485,7 +494,7 @@ export default function Overview() {
         )}
       </div>
 
-      <AddRow onAdded={() => refetch()} />
+      <AddRow onAdded={() => refetch()} shownIds={shownIds} />
 
       {filterFor && byKey.get(filterFor.key) && (
         <FilterPopover col={byKey.get(filterFor.key)!} rows={rows} at={filterFor}
@@ -674,31 +683,93 @@ function ColumnPicker({ cols, selected, onChange, onClose, onFitAll }: {
 }
 
 // ─── add a house (the "blank last row") ───────────────────────────────
-function AddRow({ onAdded }: { onAdded: () => void }) {
+/** Quick add: search the national address file and pick a match (pinned on the map straight away), or type
+ *  the address for an off-the-plan lot or one the file doesn't have. Details go in the grid afterwards. */
+function AddRow({ onAdded, shownIds }: { onAdded: () => void; shownIds: Set<string> }) {
+  const [typing, setTyping] = useState(false);
   const [f, setF] = useState({ address: "", suburb: "", postcode: "" });
-  const [msg, setMsg] = useState<{ text: string; id?: string } | null>(null);
-  async function add() {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ text: string; id?: string; added?: boolean } | null>(null);
+  async function save(address: Record<string, unknown>, gnafPid: string | null, label: string) {
     setMsg(null);
+    setBusy(true);
     try {
-      const parsed = await api<Address>(`/api/address/parse?text=${encodeURIComponent(`${f.address}, ${f.suburb} ${f.postcode}`)}`);
-      await api("/api/properties", { method: "POST", body: { address: { ...parsed, suburb: f.suburb.trim(), postcode: f.postcode.trim() } } });
+      const { id } = await api<{ id: string }>("/api/properties", { method: "POST", body: { address, gnaf_pid: gnafPid } });
       setF({ address: "", suburb: "", postcode: "" });
+      setMsg({ text: `Added ${label}`, id, added: true });
       onAdded();
     } catch (e) {
       const err = e as ApiError;
       setMsg({ text: err.message, id: err.existingPropertyId ?? undefined });
+    } finally {
+      setBusy(false);
     }
   }
+  async function addTyped() {
+    const parsed = await api<Address>(`/api/address/parse?text=${encodeURIComponent(`${f.address}, ${f.suburb} ${f.postcode}`)}`);
+    await save({ ...parsed, suburb: f.suburb.trim(), postcode: f.postcode.trim() }, null, `${f.address.trim()}, ${f.suburb.trim()}`);
+  }
   const ready = f.address.trim() && f.suburb.trim() && /^\d{4}$/.test(f.postcode.trim());
+  const enter = (e: React.KeyboardEvent) => e.key === "Enter" && ready && !busy && addTyped();
   return (
     <div className="add-row">
       <span className="muted">+</span>
-      <input placeholder="Street address, e.g. 3/12 Smith St" value={f.address} onChange={(e) => setF({ ...f, address: e.target.value })}
-        onKeyDown={(e) => e.key === "Enter" && ready && add()} />
-      <input placeholder="Suburb" value={f.suburb} onChange={(e) => setF({ ...f, suburb: e.target.value })} onKeyDown={(e) => e.key === "Enter" && ready && add()} />
-      <input placeholder="Postcode" value={f.postcode} style={{ width: 90 }} onChange={(e) => setF({ ...f, postcode: e.target.value })} onKeyDown={(e) => e.key === "Enter" && ready && add()} />
-      <button disabled={!ready} onClick={add}>Add house</button>
-      {msg && <span className="small error">{msg.text} {msg.id && <Link to={`/p/${msg.id}`}>Open it</Link>}</span>}
+      {typing ? (
+        <>
+          <input placeholder="Street address, e.g. 3/12 Smith St" value={f.address} onChange={(e) => setF({ ...f, address: e.target.value })} onKeyDown={enter} autoFocus />
+          <SuburbInput value={f.suburb} onChange={(suburb) => setF({ ...f, suburb })}
+            onPick={(l) => setF({ ...f, suburb: l.suburb, postcode: l.postcode })} onKeyDown={enter} />
+          <input placeholder="Postcode" value={f.postcode} style={{ width: 90 }} onChange={(e) => setF({ ...f, postcode: e.target.value })} onKeyDown={enter} />
+          <button disabled={!ready || busy} onClick={addTyped}>Add house</button>
+          <button className="link" onClick={() => setTyping(false)}>Search instead</button>
+        </>
+      ) : (
+        <>
+          <div className="add-search">
+            <AddressSearch dropUp clearOnPick placeholder="Add a house: start typing its address"
+              onPick={(hit) => save({ unit: hit.unit, street_number: hit.street_number, street: hit.street, suburb: hit.suburb,
+                                      postcode: hit.postcode }, hit.pid, hit.display)} />
+          </div>
+          <button className="link" onClick={() => setTyping(true)}>Not listed? Type it</button>
+        </>
+      )}
+      {busy && <span className="small muted">Adding…</span>}
+      {msg && (
+        <span className={`small ${msg.added ? "" : "error"}`}>
+          {msg.text}{msg.id && <> · <Link to={`/p/${msg.id}`}>Open it</Link></>}
+          {msg.added && msg.id && !shownIds.has(msg.id) && <span className="muted"> · this view's filters hide it</span>}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** A suburb box that suggests suburbs from the national address file (with their postcodes), so a typed
+ *  address still gets the proper spelling (and the suburb its colour) even when the street isn't listed. */
+function SuburbInput({ value, onChange, onPick, onKeyDown }: {
+  value: string; onChange: (v: string) => void; onPick: (l: { suburb: string; postcode: string }) => void; onKeyDown: (e: React.KeyboardEvent) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [term, setTerm] = useState("");
+  useEffect(() => { const t = setTimeout(() => setTerm(value.trim()), 200); return () => clearTimeout(t); }, [value]);
+  const { data = [] } = useQuery({
+    queryKey: ["localities", term], enabled: term.length >= 2, staleTime: 300_000,
+    queryFn: () => api<{ suburb: string; postcode: string }[]>(`/api/address/localities?q=${encodeURIComponent(term)}`),
+  });
+  const exact = data.some((l) => l.suburb.toLowerCase() === value.trim().toLowerCase() && data.length === 1);
+  return (
+    <div className="address-search drop-up">
+      <input placeholder="Suburb" value={value} autoComplete="off" onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+        onKeyDown={onKeyDown} onBlur={() => setTimeout(() => setOpen(false), 150)} />
+      {open && term.length >= 2 && data.length > 0 && !exact && (
+        <ul className="suggestions">
+          {data.map((l) => (
+            <li key={`${l.suburb}-${l.postcode}`}>
+              <button onMouseDown={(e) => e.preventDefault()} onClick={() => { onPick(l); setOpen(false); }}>{l.suburb} {l.postcode}</button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

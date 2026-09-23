@@ -19,7 +19,7 @@ def overview(person: OptionalPerson) -> dict:
     with tx() as conn:
         rows = build_rows(conn, person)
         places = conn.execute(
-            "SELECT id, kind, name, person_id, is_favourite FROM place WHERE archived_at IS NULL ORDER BY kind, name"
+            "SELECT id, kind, name, person_id, is_favourite, modes FROM place WHERE archived_at IS NULL ORDER BY kind, name"
         ).fetchall()
     return {"rows": rows, "places": places}
 

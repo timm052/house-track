@@ -74,6 +74,27 @@ def by_parcel(plan_number: str, lot_number: str) -> dict | None:
     return rows[0] if rows else None
 
 
+_localities: tuple[object, list[dict]] | None = None  # (loaded_at, [{suburb, postcode}])
+
+
+def localities(q: str, limit: int = 8) -> list[dict]:
+    """Suburbs (with their postcodes) matching what's been typed: names starting with it first, then containing it.
+    The distinct list takes seconds to read from 4 million addresses, so it's read once per G-NAF release."""
+    global _localities
+    stamp = loaded_at()
+    if stamp is None:
+        return []
+    if _localities is None or _localities[0] != stamp:
+        rows = _query("SELECT DISTINCT suburb, postcode FROM address WHERE suburb IS NOT NULL ORDER BY suburb, postcode", ())
+        _localities = (stamp, rows)
+    q = q.strip().lower()
+    if len(q) < 2:
+        return []
+    names = _localities[1]
+    first = [r for r in names if r["suburb"].lower().startswith(q)]
+    return (first + [r for r in names if q in r["suburb"].lower() and r not in first])[:limit]
+
+
 def loaded_at():
     """When the current G-NAF release was loaded, or None if it hasn't been."""
     rows = _query("SELECT loaded_at FROM meta", ())

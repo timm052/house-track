@@ -89,19 +89,41 @@ def create_campaign(property_id: UUID, body: CampaignIn, person: Person) -> dict
         return {"id": insert_campaign(conn, property_id, body)}
 
 
+def set_sale_method(conn: psycopg.Connection, campaign_id: UUID, method: str) -> bool:
+    """Switch how a campaign is selling, dropping what belonged to the old method: a campaign carries an auction
+    date (and a passed-in bid) only as an auction, an EOI closing date only as an EOI. Every path that changes the
+    method comes through here: the house page, the Overview grid and listing updates. True if it changed."""
+    if not method:
+        raise HTTPException(422, "A campaign needs a sale method.")
+    row = conn.execute(
+        """UPDATE campaign SET sale_method = %(m)s,
+               auction_at = CASE WHEN %(m)s = 'auction' THEN auction_at END,
+               eoi_closes_at = CASE WHEN %(m)s = 'eoi' THEN eoi_closes_at END,
+               passed_in_bid_aud = CASE WHEN %(m)s = 'auction' THEN passed_in_bid_aud END
+           WHERE id = %(id)s AND sale_method IS DISTINCT FROM %(m)s RETURNING id""", {"m": method, "id": campaign_id}).fetchone()
+    return row is not None
+
+
 @router.patch("/campaigns/{campaign_id}")
 def update_campaign(campaign_id: UUID, body: CampaignPatch, person: Person) -> dict:
-    values = body.model_dump(exclude_unset=True)
+    with tx(person) as conn:
+        update_campaign_fields(conn, campaign_id, body.model_dump(exclude_unset=True))
+        return {"id": campaign_id}
+
+
+def update_campaign_fields(conn: psycopg.Connection, campaign_id: UUID, values: dict) -> None:
+    """Campaign edits from the house page and the Overview grid alike (values already validated by CampaignPatch)."""
+    values = dict(values)
     if "outcome" in values:
         if values["outcome"] is None:
             # Re-opening a campaign clears the whole outcome.
             values.update(outcome_on=None, sold_price_aud=None, passed_in_bid_aud=None, bought_by_us=False)
         elif values.get("outcome_on") is None:
             values["outcome_on"] = date.today()
-    with tx(person) as conn:
-        if update_columns(conn, "campaign", campaign_id, values) is None:
-            raise not_found("Campaign")
-        return {"id": campaign_id}
+    if "sale_method" in values:
+        set_sale_method(conn, campaign_id, values.pop("sale_method"))
+    if update_columns(conn, "campaign", campaign_id, values) is None:
+        raise not_found("Campaign")
 
 
 @router.post("/campaigns/{campaign_id}/links", status_code=201)

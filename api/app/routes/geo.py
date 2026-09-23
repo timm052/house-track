@@ -1,13 +1,18 @@
 """Geography: address search, pins, the map, per-person areas, stations and places (milestone 2)."""
 
+import os
+import threading
+from typing import Literal
 from uuid import UUID
 
 import psycopg
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from .. import gnaf
 from ..db import tx
 from ..deps import OptionalPerson, Person, not_found
+from ..geo_services import Valhalla
 from ..schemas import AreaIn, AreaPatch, PlaceIn, PlacePatch, PointIn
 
 router = APIRouter(prefix="/api")
@@ -17,6 +22,12 @@ CLEAN_GEOM = "ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_SetSRID(ST_GeomFromG
 
 
 # ─── addresses & pins ─────────────────────────────────────────────────
+@router.get("/address/localities")
+def address_localities(q: str) -> list[dict]:
+    """Suburb and postcode suggestions, for typing an address the national address file doesn't have yet."""
+    return gnaf.localities(q)
+
+
 @router.get("/address/search")
 def address_search(q: str) -> list[dict]:
     return [
@@ -67,12 +78,13 @@ def map_data(person: OptionalPerson) -> dict:
                                 WHERE h.property_id = p.id AND h.owner_id IS DISTINCT FROM %(me)s), '[]') AS others_flags,
                       coalesce((SELECT jsonb_agg(jsonb_build_object('person_id', person_id, 'stage', stage, 'stance', stance))
                                 FROM opinion_current oc WHERE oc.property_id = p.id), '[]') AS opinions,
-                      ns.name AS nearest_station, ns.duration_s AS nearest_station_walk_s,
-                      (SELECT pc.attachment_id::text FROM property_cover pc WHERE pc.property_id = p.id) AS cover_id
+                      ns.name AS nearest_station, ns.walk_s AS nearest_station_walk_s, ns.drive_s AS nearest_station_drive_s,
+                      (SELECT pc.attachment_id::text FROM property_cover pc WHERE pc.property_id = p.id) AS cover_id,
+                      (SELECT round(avg(ps.score))::int FROM property_score ps WHERE ps.property_id = p.id) AS score_avg
                FROM property p
                JOIN property_status s ON s.property_id = p.id
                LEFT JOIN property_flags f ON f.property_id = p.id AND f.person_id = %(me)s
-               LEFT JOIN property_station_access ns ON ns.property_id = p.id AND ns.is_nearest
+               LEFT JOIN property_nearest_station ns ON ns.property_id = p.id
                WHERE p.location IS NOT NULL""",
             {"me": person},
         ).fetchall()
@@ -149,6 +161,16 @@ def station_search(q: str) -> list[dict]:
         ).fetchall()
 
 
+@router.get("/stations")
+def all_stations() -> dict:
+    """Every train station in the region, for the map."""
+    with tx() as conn:
+        rows = conn.execute("SELECT osm_id, name, ST_X(location) AS lon, ST_Y(location) AS lat FROM station ORDER BY name").fetchall()
+    return {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "geometry": {"type": "Point", "coordinates": [r["lon"], r["lat"]]},
+         "properties": {"osm_id": r["osm_id"], "name": r["name"]}} for r in rows]}
+
+
 @router.get("/stations/count")
 def station_count() -> dict:
     with tx() as conn:
@@ -159,8 +181,10 @@ def station_count() -> dict:
 def list_places() -> list[dict]:
     with tx() as conn:
         return conn.execute(
-            """SELECT id, kind, name, person_id, station_osm_id, is_favourite, ST_X(location) AS lon, ST_Y(location) AS lat
-               FROM place WHERE archived_at IS NULL ORDER BY kind DESC, name"""
+            """SELECT pl.id, pl.kind, pl.name, pl.person_id, pl.station_osm_id, pl.is_favourite, pl.modes,
+                      ST_X(pl.location) AS lon, ST_Y(pl.location) AS lat,
+                      (SELECT count(DISTINCT t.property_id) FROM travel_estimate t WHERE t.place_id = pl.id) AS houses
+               FROM place pl WHERE pl.archived_at IS NULL ORDER BY pl.kind DESC, pl.name"""
         ).fetchall()
 
 
@@ -183,9 +207,10 @@ def create_place(body: PlaceIn, person: Person) -> dict:
                 raise not_found("Station")
             return {"id": row["id"]}
         row = conn.execute(
-            """INSERT INTO place (kind, name, person_id, location)
-               VALUES ('destination', %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326)) RETURNING id""",
-            (body.name.strip(), body.person_id, body.location.lon, body.location.lat),
+            """INSERT INTO place (kind, name, person_id, location, modes)
+               VALUES ('destination', %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s) RETURNING id""",
+            (body.name.strip(), body.person_id, body.location.lon, body.location.lat,
+             sorted(set(body.modes)) if body.modes is not None else ["drive", "transit", "walk"]),
         ).fetchone()
         return {"id": row["id"]}
 
@@ -199,6 +224,15 @@ def update_place(place_id: UUID, body: PlacePatch, person: Person) -> dict:
             raise not_found("Place")
         if kind["kind"] == "station" and "location" in values:
             raise HTTPException(422, "A station's location comes from the station list.")
+        if "modes" in values and values["modes"] is not None:
+            if kind["kind"] == "station":
+                raise HTTPException(422, "Stations are always walking times.")
+            modes = sorted(set(values["modes"]))
+            conn.execute("UPDATE place SET modes = %s WHERE id = %s", (modes, place_id))
+            # Times for a mode that's been turned off go, so they don't linger on the cards and in the grid.
+            conn.execute("DELETE FROM travel_estimate WHERE place_id = %s AND NOT (mode = ANY(%s))", (place_id, modes))
+            if "transit" not in modes:
+                conn.execute("DELETE FROM transit_estimate WHERE place_id = %s", (place_id,))
         if "name" in values:
             conn.execute("UPDATE place SET name = %s WHERE id = %s", (values["name"].strip(), place_id))
         if "person_id" in values:
@@ -229,14 +263,99 @@ def travel_for(conn: psycopg.Connection, property_id: UUID) -> dict:
                   max(t.distance_m) FILTER (WHERE t.mode = 'walk') AS walk_m,
                   max(t.duration_s) FILTER (WHERE t.mode = 'walk') AS walk_s,
                   max(t.distance_m) FILTER (WHERE t.mode = 'drive') AS drive_m,
-                  max(t.duration_s) FILTER (WHERE t.mode = 'drive') AS drive_s
+                  max(t.duration_s) FILTER (WHERE t.mode = 'drive') AS drive_s,
+                  (SELECT jsonb_build_object('duration_s', x.duration_s, 'depart_at', x.depart_at, 'arrive_at', x.arrive_at,
+                                             'arrive_by', x.arrive_by, 'transfers', x.transfers, 'legs', x.legs)
+                   FROM transit_estimate x WHERE x.property_id = %(p)s AND x.place_id = pl.id) AS transit
            FROM place pl
-           LEFT JOIN travel_estimate t ON t.place_id = pl.id AND t.property_id = %s
+           LEFT JOIN travel_estimate t ON t.place_id = pl.id AND t.property_id = %(p)s
            WHERE pl.kind = 'destination' AND pl.archived_at IS NULL
            GROUP BY pl.id ORDER BY pl.name""",
-        (property_id,),
+        {"p": property_id},
     ).fetchall()
-    pending = conn.execute("SELECT count(*) AS n FROM travel_estimate_stale WHERE property_id = %s",
-                           (property_id,)).fetchone()["n"]
-    return {"stations": stations, "destinations": destinations, "pending": pending}
+    pending = conn.execute("""SELECT (SELECT count(*) FROM travel_estimate_stale WHERE property_id = %(p)s)
+                                     + (SELECT count(*) FROM station_access_stale WHERE property_id = %(p)s) AS n""",
+                           {"p": property_id}).fetchone()["n"]
+    nearest = conn.execute("""SELECT station_osm_id, name, walk_m, walk_s, drive_m, drive_s FROM property_nearest_station
+                              WHERE property_id = %s""", (property_id,)).fetchone()
+    return {"nearest": nearest, "stations": stations, "destinations": destinations, "pending": pending}
 
+
+
+# ─── inspection planner and commute areas ──────────────────────────────
+# Asked of the routing engine on demand (the free public server unless VALHALLA_URL says otherwise), a second
+# apart, and remembered for the life of the process: the same leg or area is only asked for once.
+_routing_lock = threading.Lock()
+_routing_client: Valhalla | None = None
+_legs: dict[tuple, dict | None] = {}
+_areas: dict[tuple, dict] = {}
+
+
+def _routing() -> Valhalla:
+    global _routing_client
+    if _routing_client is None:
+        _routing_client = Valhalla(os.environ.get("VALHALLA_URL") or "https://valhalla1.openstreetmap.de")
+    return _routing_client
+
+
+class LegsIn(BaseModel):
+    points: list[tuple[float, float]] = Field(min_length=2, max_length=12)  # (lon, lat), in visiting order
+    mode: Literal["drive", "walk"] = "drive"
+
+
+@router.post("/plan/legs")
+def plan_legs(body: LegsIn) -> dict:
+    """Travel between consecutive stops of an inspection plan: one entry per leg, None where there's no route."""
+    out = []
+    with _routing_lock:
+        for a, b in zip(body.points, body.points[1:]):
+            key = (round(a[0], 5), round(a[1], 5), round(b[0], 5), round(b[1], 5), body.mode)
+            if key not in _legs:
+                try:
+                    r = _routing().route(a, b, body.mode)
+                except OSError as e:
+                    raise HTTPException(502, f"The routing service didn't answer ({e}). Try again in a minute.") from None
+                _legs[key] = None if r.duration_s is None else {"distance_m": r.distance_m, "duration_s": r.duration_s}
+            out.append(_legs[key])
+    return {"legs": out}
+
+
+_paths: dict[tuple, dict] = {}
+
+
+@router.get("/properties/{property_id}/station-route")
+def station_route(property_id: UUID) -> dict:
+    """The walk and the drive from a house to its nearest train station, with the paths, for the map."""
+    with tx() as conn:
+        row = conn.execute("""SELECT ST_X(p.location) AS lon, ST_Y(p.location) AS lat, n.name, n.lon AS s_lon, n.lat AS s_lat
+                              FROM property p JOIN property_nearest_station n ON n.property_id = p.id
+                              WHERE p.id = %s""", (property_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "No nearest station for this house yet (it needs a pin, and a moment to work out).")
+    origin, target = (row["lon"], row["lat"]), (row["s_lon"], row["s_lat"])
+    out = {"station": {"name": row["name"], "lon": row["s_lon"], "lat": row["s_lat"]}}
+    with _routing_lock:
+        for mode in ("walk", "drive"):
+            key = (round(origin[0], 5), round(origin[1], 5), round(target[0], 5), round(target[1], 5), mode)
+            if key not in _paths:
+                try:
+                    route, path = _routing().route_path(origin, target, mode)
+                except OSError as e:
+                    raise HTTPException(502, f"The routing service didn't answer ({e}). Try again in a minute.") from None
+                _paths[key] = {"distance_m": route.distance_m, "duration_s": route.duration_s,
+                               "geometry": {"type": "LineString", "coordinates": path} if path else None}
+            out[mode] = _paths[key]
+    return out
+
+
+@router.get("/isochrone")
+def isochrone(lon: float, lat: float, minutes: int = Query(ge=5, le=60), mode: Literal["drive", "walk"] = "drive") -> dict:
+    """Everywhere reachable from a point within so many minutes, as a GeoJSON polygon feature (for the map)."""
+    key = (round(lon, 4), round(lat, 4), minutes, mode)
+    with _routing_lock:
+        if key not in _areas:
+            try:
+                _areas[key] = _routing().isochrone((lon, lat), minutes, mode)
+            except OSError as e:
+                raise HTTPException(502, f"The routing service didn't answer ({e}). Try again in a minute.") from None
+        return _areas[key]

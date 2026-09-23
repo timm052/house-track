@@ -1,8 +1,8 @@
 // Houses (phone-first). Built on the same rows, filters and shared saved views as Overview (D18),
 // with quick filter chips and a sort picker for one-handed use.
 import { useQuery } from "@tanstack/react-query";
-import { Fragment, useMemo, useRef, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { LABEL, landArea, money, moneyRange } from "../format";
 import { STATUSES } from "../api";
@@ -10,13 +10,16 @@ import { catalogue, display, type Column, type OverviewPlace, type OverviewRow }
 import { applyView, builtInDefault, describe, useViews, type Filter, type Sort } from "../overview/views";
 import FilterPopover from "../overview/FilterPopover";
 import { usePeople } from "../people";
-import { CLOSED, STATUS_COLOUR, changeTone, minutesTone, soonTone, suburbClass, suburbSlots, tagStyle, useTagColours } from "../colour";
-import { CalendarDays, Scale } from "lucide-react";
+import { CLOSED, STATUS_COLOUR, budgetTone, changeTone, minutesTone, soonTone, suburbClass, suburbSlots, tagStyle, useTagColours } from "../colour";
+import { ChevronDown, ChevronRight, Scale } from "lucide-react";
+import { useNeeds } from "./ThisWeek";
+import { statusOutOfStep } from "../Outcome";
+import type { Outcome, Status } from "../api";
 
 type Overview = { rows: OverviewRow[]; places: OverviewPlace[] };
 type Quick = { thisWeek: boolean; statuses: string[]; methods: string[]; myVerdicts: string[]; hideExcluded: boolean;
-               suburbs: string[]; tags: string[] };
-const NO_QUICK: Quick = { thisWeek: false, statuses: [], methods: [], myVerdicts: [], hideExcluded: false, suburbs: [], tags: [] };
+               suburbs: string[]; tags: string[]; affordable: boolean };
+const NO_QUICK: Quick = { thisWeek: false, statuses: [], methods: [], myVerdicts: [], hideExcluded: false, suburbs: [], tags: [], affordable: false };
 
 export default function PropertyList() {
   const { all: persons, active, me } = usePeople();
@@ -41,11 +44,12 @@ export default function PropertyList() {
   if (quick.suburbs.length) filters.push({ column: "suburb", op: "in", value: quick.suburbs });
   if (quick.tags.length) filters.push({ column: "tags", op: "in", value: quick.tags });
   if (quick.hideExcluded) filters.push({ column: "excluded", op: "in", value: ["false"] });
+  if (quick.affordable) filters.push({ column: "budget", op: "in", value: ["within", "stretch"] });
   const verdictRows = new Set(me && quick.myVerdicts.length ? (data?.rows ?? []).filter((r) => {
     const v = (r[`v:${me.id}:post`] ?? r[`v:${me.id}:pre`]) as string | undefined;
     return quick.myVerdicts.includes(v ?? "unset");
   }).map((r) => r.id) : []);
-  const sort: Sort[] = sortKey ? [{ column: sortKey, dir: sortKey === "created_at" ? "desc" : "asc" }] : view.sort;
+  const sort: Sort[] = sortKey ? [{ column: sortKey, dir: ["created_at", "score_avg"].includes(sortKey) ? "desc" : "asc" }] : view.sort;
   const filterKey = JSON.stringify(filters), sortJson = JSON.stringify(sort);
   const rows = useMemo(() => applyView(data?.rows ?? [], filters, sort, search, cols)
     .filter((r) => !quick.myVerdicts.length || verdictRows.has(r.id)),
@@ -58,17 +62,40 @@ export default function PropertyList() {
     setQuick({ ...quick, [k]: quick[k].includes(v) ? quick[k].filter((x) => x !== v) : [...quick[k], v] });
   const filtering = Object.values(quick).some((v) => (Array.isArray(v) ? v.length : v)) || extra.length > 0;
   // Everything but status lives under "More filters"; the badge counts what's switched on in there.
-  const moreCount = Number(quick.thisWeek) + Number(quick.hideExcluded) + quick.methods.length + quick.myVerdicts.length
+  const moreCount = Number(quick.thisWeek) + Number(quick.hideExcluded) + Number(quick.affordable) + quick.methods.length + quick.myVerdicts.length
     + quick.suburbs.length + quick.tags.length + extra.length;
   const [moreOpen, setMoreOpen] = useState(false);
+  const needs = useNeeds(data?.rows ?? [], me);
+  // Inspected: someone has been to an inspection there, or given a verdict after one.
+  const inspected = (r: OverviewRow) => ((r.attended_by as string[] | undefined)?.length ?? 0) > 0
+    || persons.some((p) => r[`v:${p.id}:post`] != null);
+  const toSee = rows.filter((r) => !inspected(r)), seenRows = rows.filter(inspected);
+  const [showInspected, setShowInspected] = useState(() => { try { return localStorage.getItem("housetrack.showInspected") !== "0"; } catch { return true; } });
+  useEffect(() => { try { localStorage.setItem("housetrack.showInspected", showInspected ? "1" : "0"); } catch { /* ignore */ } }, [showInspected]);
+  const card = (r: OverviewRow) => <Card key={r.id} r={r} people={active} favourites={favourites} cols={cols} slots={slots} tagColours={tagColours}
+    picked={comparing ? comparing.includes(r.id) : undefined} onPick={pick} />;
+  // Compare: tap "Compare", tap up to four cards, then open them side by side.
+  const navigate = useNavigate();
+  const [comparing, setComparing] = useState<string[] | null>(null);
+  const pick = (id: string) => comparing && setComparing(comparing.includes(id) ? comparing.filter((x) => x !== id)
+    : comparing.length < 4 ? [...comparing, id] : comparing);
   const byKey = new Map(cols.map((c) => [c.key, c]));
 
   return (
     <>
+      {needs.count > 0 && (
+        <Link to="/week" className="week-nudge">
+          <span className="count-badge">{needs.count}</span>
+          {needs.count === 1 ? "thing needs" : "things need"} you: {[needs.needsOutcome.length && `${needs.needsOutcome.length} to record how the sale ended`,
+            needs.outOfStep.length && `${needs.outOfStep.length} ${needs.outOfStep.length === 1 ? "status" : "statuses"} to update`,
+            needs.needsVerdict.length && `${needs.needsVerdict.length} ${needs.needsVerdict.length === 1 ? "verdict" : "verdicts"} to give`].filter(Boolean).join(", ")}
+          <span className="grow" /><span>This week →</span>
+        </Link>
+      )}
       <div className="toolbar">
         <input className="search" type="search" placeholder="Search address, agent, notes" value={search} onChange={(e) => setSearch(e.target.value)} />
-        <Link to="/calendar"><button className="icon-btn" aria-label="Calendar" title="Calendar"><CalendarDays /><span className="label">Calendar</span></button></Link>
-        <Link to="/disagree"><button className="icon-btn" aria-label="Where we disagree" title="Where we disagree"><Scale /><span className="label">Disagreements</span></button></Link>
+        <button className={`icon-btn ${comparing ? "on" : ""}`} aria-pressed={comparing != null} title="Pick houses to compare"
+          onClick={() => setComparing(comparing ? null : [])}><Scale /><span className="label">Compare</span></button>
         <Link to="/add"><button className="primary">+ Add house</button></Link>
       </div>
       <div className="filter-bar">
@@ -81,7 +108,9 @@ export default function PropertyList() {
           <option value="sale_at">Sort: auction / EOI date</option>
           <option value="guide_high">Sort: guide price</option>
           <option value="created_at">Sort: newest first</option>
+          <option value="score_avg">Sort: best score</option>
           <option value="nearest_station_walk">Sort: walk to station</option>
+          <option value="nearest_station_drive">Sort: drive to station</option>
           {favourites.map((f) => <option key={f.id} value={`drive:${f.id}`}>Sort: drive to {f.name}</option>)}
         </select>
         <button className={`chip ${moreOpen || moreCount ? "on" : ""}`} aria-expanded={moreOpen} onClick={() => setMoreOpen(!moreOpen)}>
@@ -107,6 +136,10 @@ export default function PropertyList() {
               {(["auction", "eoi", "private_sale"] as const).map((m) => (
                 <button key={m} className={`chip ${quick.methods.includes(m) ? "on" : ""}`} onClick={() => flip("methods", m)}>{LABEL.method[m]}</button>
               ))}
+              {(data?.rows ?? []).some((r) => r.budget) && (
+                <button className={`chip ${quick.affordable ? "on" : ""}`} onClick={() => setQuick({ ...quick, affordable: !quick.affordable })}>
+                  Hide over budget</button>
+              )}
             </div>
           </div>
           <div>
@@ -166,18 +199,33 @@ export default function PropertyList() {
       {data && data.rows.length > 0 && rows.length === 0 && (
         <div className="card empty">No houses match these filters. <button className="link" onClick={() => { setQuick(NO_QUICK); setExtra([]); setSearch(""); }}>Clear filters</button></div>
       )}
-      <div className="card-grid">
-        {rows.map((r) => <Card key={r.id} r={r} people={active} favourites={favourites} cols={cols} slots={slots} tagColours={tagColours} />)}
-      </div>
+      {/* Houses nobody has inspected yet come first; the ones you've been through sit in their own section. */}
+      <div className="card-grid">{toSee.map(card)}</div>
+      {seenRows.length > 0 && (
+        <section className="inspected-section">
+          <button className="section-toggle" aria-expanded={showInspected} onClick={() => setShowInspected(!showInspected)}>
+            {showInspected ? <ChevronDown /> : <ChevronRight />} Inspected <span className="muted">({seenRows.length})</span>
+          </button>
+          {showInspected && <div className="card-grid">{seenRows.map(card)}</div>}
+        </section>
+      )}
+      {comparing && (
+        <div className="compare-bar" role="status">
+          <span className="grow">{comparing.length ? `${comparing.length} of up to 4 picked` : "Tap the houses to compare (up to 4)"}</span>
+          <button onClick={() => setComparing(null)}>Cancel</button>
+          <button className="primary" disabled={comparing.length < 2} onClick={() => navigate(`/compare?ids=${comparing.join(",")}`)}>Compare</button>
+        </div>
+      )}
     </>
   );
 }
 
 /** The cover photo, then: address and status; rooms and travel; sale and price; verdicts (once there are any).
  *  Long-press shows the agent. */
-function Card({ r, people, favourites, cols, slots, tagColours }: {
+function Card({ r, people, favourites, cols, slots, tagColours, picked, onPick }: {
   r: OverviewRow; people: { id: string; display_name: string; colour: string }[]; favourites: OverviewPlace[]; cols: Column[];
   slots: Map<string, number>; tagColours: Map<string, string>;
+  picked?: boolean; onPick: (id: string) => void;  // picked is undefined when not choosing houses to compare
 }) {
   const [agent, setAgent] = useState(false);
   const timer = useRef<number | undefined>(undefined);
@@ -187,20 +235,27 @@ function Card({ r, people, favourites, cols, slots, tagColours }: {
     [r.beds != null && `${r.beds} bed`, r.baths != null && `${r.baths} bath`, r.car_spaces != null && `${r.car_spaces} car`].filter(Boolean).join(" "),
     r.land_m2 != null && `${landArea(Number(r.land_m2))} land`,
     r.property_type !== "house" && display(col("property_type"), r.property_type),
-    r.nearest_station && <><span className={`tone-${minutesTone(r.nearest_station_walk)}`}>{String(r.nearest_station_walk)} min</span> walk to {String(r.nearest_station)}</>,
-    ...favourites.filter((f) => r[`drive:${f.id}`] != null).map((f) =>
-      <><span className={`tone-${minutesTone(r[`drive:${f.id}`], "drive")}`}>{String(r[`drive:${f.id}`])} min</span> drive to {f.name}</>),
+    r.nearest_station && <>{r.nearest_station_walk != null && <><span className={`tone-${minutesTone(r.nearest_station_walk)}`}>{String(r.nearest_station_walk)} min</span> walk</>}
+      {r.nearest_station_walk != null && r.nearest_station_drive != null && " · "}
+      {r.nearest_station_drive != null && <><span className={`tone-${minutesTone(r.nearest_station_drive, "drive")}`}>{String(r.nearest_station_drive)} min</span> drive</>}
+      {" "}to {String(r.nearest_station)}</>,
+    ...favourites.filter((f) => r[`drive:${f.id}`] != null || r[`transit:${f.id}`] != null).map((f) => <>
+      {r[`drive:${f.id}`] != null && <><span className={`tone-${minutesTone(r[`drive:${f.id}`], "drive")}`}>{String(r[`drive:${f.id}`])} min</span> drive</>}
+      {r[`drive:${f.id}`] != null && r[`transit:${f.id}`] != null && " · "}
+      {r[`transit:${f.id}`] != null && <><span className={`tone-${minutesTone(r[`transit:${f.id}`], "transit")}`}>{String(r[`transit:${f.id}`])} min</span> public transport</>}
+      {" "}to {f.name}</>),
     r.days_on_market != null && r.sale_method && `${r.days_on_market} ${r.days_on_market === 1 ? "day" : "days"} listed`,
   ].filter(Boolean) as ReactNode[];
   const change = n("guide_change");
   // The campaign has an outcome but the house still looks active: nudge whoever looks next.
-  const staleStatus = Boolean(r.outcome) && !CLOSED.includes(r.status as never) && r.status !== "bought";
+  const staleStatus = statusOutOfStep(r.outcome as Outcome, Boolean(r.bought_by_us), r.status as Status);
   const sale = r.outcome
     ? `${display(col("outcome"), r.outcome)}${r.sold_price_aud ? ` ${money(n("sold_price_aud"))}` : ""}`
     : r.sale_at ? `${display(col("sale_method"), r.sale_method)} ${display(col("sale_at"), r.sale_at)}`
     : r.sale_method ? display(col("sale_method"), r.sale_method) : "Not listed";
   return (
-    <Link to={`/p/${r.id}`} className={`card property-card tint ${suburbClass(slots, r.suburb)} ${r.excluded || CLOSED.includes(r.status as never) ? "dim" : ""}`}
+    <Link to={`/p/${r.id}`} className={`card property-card tint ${suburbClass(slots, r.suburb)} ${r.excluded || CLOSED.includes(r.status as never) ? "dim" : ""} ${picked ? "picked" : ""}`}
+      onClick={(e) => { if (picked !== undefined) { e.preventDefault(); onPick(r.id); } }} aria-pressed={picked}
       onTouchStart={() => { timer.current = window.setTimeout(() => setAgent(true), 500); }}
       onTouchEnd={() => window.clearTimeout(timer.current)}
       onContextMenu={(e) => { if (r.agent_phone) { e.preventDefault(); setAgent(true); } }}>
@@ -221,10 +276,17 @@ function Card({ r, people, favourites, cols, slots, tagColours }: {
         <span className={n("guide_low") == null ? "muted" : "price"}>{moneyRange(n("guide_low"), n("guide_high"))}</span>
         {change != null && change !== 0 && <span className={`pill tone-${changeTone(change)}`}>guide {change > 0 ? "↑" : "↓"} {money(Math.abs(change))}</span>}
         {r.walk_away != null && <span className="pill">limit {money(n("walk_away"))}</span>}
+        {(r.budget === "over" || r.budget === "stretch") && (
+          <span className={`pill tone-${budgetTone(r.budget)}`} title="The guide against the most you can bid (Settings → Budget)">
+            {r.budget === "over" ? "Over budget" : "Stretch"}</span>
+        )}
       </div>
       {staleStatus && <div className="small tone-warn" style={{ marginTop: 4 }}>The sale's over: update the status</div>}
-      {people.some((p) => r[`v:${p.id}:post`] ?? r[`v:${p.id}:pre`]) && (
+      {Boolean(r.needs_outcome) && <div className="small tone-warn" style={{ marginTop: 4 }}>
+        {r.listing_status ? `The listing says ${String(r.listing_status).replace(/_/g, " ")}` : "The sale date has passed"}: record the outcome</div>}
+      {(r.score_avg != null || people.some((p) => r[`v:${p.id}:post`] ?? r[`v:${p.id}:pre`])) && (
       <div className="row small" style={{ marginTop: 6 }}>
+        {r.score_avg != null && <span className="pill score-pill" title="Average of everyone's weighted scores, out of 100">Score {String(r.score_avg)}</span>}
         {people.map((p) => {
           const post = r[`v:${p.id}:post`] as string | undefined, pre = r[`v:${p.id}:pre`] as string | undefined;
           const v = post ?? pre;

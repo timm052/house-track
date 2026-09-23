@@ -136,3 +136,69 @@ def test_price_history_columns(client, people):
     row = row_for(client, a, pid)
     assert (row["first_guide_low"], row["first_guide_high"]) == (900_000, 990_000)
     assert row["guide_changes"] == 1 and row["last_guide_change"] == "2026-09-30" and row["guide_change"] == -52_500
+
+
+def test_sale_method_switch_from_the_grid_and_the_house_page(client, people):
+    """Every path that changes the sale method drops the date that belonged to the old one (it used to fail on
+    the campaign's check constraint from the grid)."""
+    from .test_driveway import house
+    a = people["a"]
+    pid = house(client, a, 78)  # an auction with a date
+    cell = lambda col, v: client.post("/api/overview/cell", headers=as_(a),
+                                      json={"property_id": pid, "column": col, "value": v, "expected": None, "check": False})
+    assert cell("sale_method", "eoi").status_code == 200
+    c = client.get(f"/api/properties/{pid}").json()["campaigns"][0]
+    assert c["sale_method"] == "eoi" and c["auction_at"] is None
+    assert cell("sale_at", "2099-11-02T17:00:00+11:00").status_code == 200
+    r = client.patch(f"/api/campaigns/{c['id']}", headers=as_(a), json={"sale_method": "private_sale"})
+    assert r.status_code == 200, r.text
+    c = client.get(f"/api/properties/{pid}").json()["campaigns"][0]
+    assert c["sale_method"] == "private_sale" and c["eoi_closes_at"] is None
+    r = client.patch(f"/api/campaigns/{c['id']}", headers=as_(a), json={"sale_method": "auction", "auction_at": "2099-11-09T11:00:00+11:00"})
+    assert r.status_code == 200 and client.get(f"/api/properties/{pid}").json()["campaigns"][0]["auction_at"] is not None
+    assert cell("sale_method", None).status_code == 422
+
+
+def test_house_page_and_grid_follow_the_same_rules(client, people):
+    from .test_driveway import house
+    a, b = people["a"], people["b"]
+    pid = house(client, a, 79)
+    cell = lambda col, v: client.post("/api/overview/cell", headers=as_(b),
+                                      json={"property_id": pid, "column": col, "value": v, "expected": None, "check": False})
+    # The grid refuses what the house page's form refuses.
+    assert cell("land_m2", 0).status_code == 422
+    assert cell("beds", 3).status_code == 200
+
+    # A form save that started before B's edit is refused, rather than undoing it.
+    r = client.patch(f"/api/properties/{pid}", headers=as_(a), json={"beds": 4, "expected": {"beds": None}})
+    assert r.status_code == 409 and r.json()["detail"]["current"] == 3
+    assert client.patch(f"/api/properties/{pid}", headers=as_(a), json={"beds": 4, "expected": {"beds": 3}}).status_code == 200
+
+    # Status: same check as the grid's.
+    seen = client.get(f"/api/properties/{pid}").json()["status_history"][0]["id"]
+    assert client.post(f"/api/properties/{pid}/status", headers=as_(b), json={"status": "inspecting"}).status_code == 201
+    r = client.post(f"/api/properties/{pid}/status", headers=as_(a),
+                    json={"status": "shortlisted", "check_latest": True, "expected_latest_id": seen})
+    assert r.status_code == 409 and r.json()["detail"]["current"] == "inspecting"
+
+    # Re-opening a sale from the grid clears its result, as the house page does.
+    assert cell("outcome", "sold").status_code == 200 and cell("sold_price_aud", 1200000).status_code == 200
+    assert cell("outcome", None).status_code == 200
+    c = client.get(f"/api/properties/{pid}").json()["campaigns"][0]
+    assert c["outcome"] is None and c["sold_price_aud"] is None and c["outcome_on"] is None
+
+
+def test_tag_rename_clash_offers_a_merge(client, people):
+    a = people["a"]
+    make = lambda n: client.post("/api/properties", headers=as_(a), json={"address": {"street_number": str(n), "street": "Tag Street",
+                                 "suburb": "Mitcham", "postcode": "3132"}}).json()["id"]
+    one, two = make(1), make(2)
+    client.put(f"/api/properties/{one}/tags", headers=as_(a), json={"names": ["north facing"]})
+    client.put(f"/api/properties/{two}/tags", headers=as_(a), json={"names": ["north-facing", "pool"]})
+    tags = {t["name"]: t["id"] for t in client.get("/api/tags").json()}
+    r = client.patch(f"/api/tags/{tags['north-facing']}", headers=as_(a), json={"name": "north facing"})
+    assert r.status_code == 409 and r.json()["detail"]["merge_into"] == tags["north facing"]
+    r = client.patch(f"/api/tags/{tags['north-facing']}", headers=as_(a), json={"name": "north facing", "merge": True})
+    assert r.status_code == 200 and r.json()["id"] == tags["north facing"]
+    counts = {t["name"]: t["houses"] for t in client.get("/api/tags").json()}
+    assert counts.get("north facing") == 2 and "north-facing" not in counts

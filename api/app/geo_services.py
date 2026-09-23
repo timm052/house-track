@@ -65,8 +65,30 @@ class Valhalla:
                     raise  # server down or busy: the worker backs off and tries again
                 got = [Route(None, None)] * len(ask)  # a request it won't answer, such as a limit: one at a time
             for i, route in zip(ask, got):
-                routes[i] = route if route.duration_s is not None else self.route(origin, targets[i], mode)
+                # A matrix cell that's empty, or says 0 m between points more than 200 m apart, gets asked again alone.
+                bogus = route.distance_m == 0 and crow_m(origin, targets[i]) > 200
+                routes[i] = route if route.duration_s is not None and not bogus else self.route(origin, targets[i], mode)
         return routes
+
+    def isochrone(self, origin: tuple[float, float], minutes: int, mode: str) -> dict:
+        """The area reachable within `minutes`, as one GeoJSON polygon feature."""
+        body = {"locations": [{"lon": origin[0], "lat": origin[1]}], "costing": COSTING[mode],
+                "contours": [{"time": minutes}], "polygons": True, "denoise": 0.5, "generalize": 60}
+        feature = self._post("isochrone", body)["features"][0]
+        return {"type": "Feature", "geometry": feature["geometry"], "properties": {"minutes": minutes, "mode": mode}}
+
+    def route_path(self, origin: tuple[float, float], target: tuple[float, float], mode: str) -> tuple[Route, list[list[float]]]:
+        """A single route with the path it takes, as [lon, lat] points (for drawing on the map)."""
+        body = {"locations": [{"lon": origin[0], "lat": origin[1]}, {"lon": target[0], "lat": target[1]}],
+                "costing": COSTING[mode], "units": "kilometers", "directions_type": "none"}
+        try:
+            trip = self._post("route", body)["trip"]
+        except HTTPError as e:
+            if e.code != 400:
+                raise
+            return Route(None, None), []
+        path = [p for leg in trip["legs"] for p in decode_polyline6(leg["shape"])]
+        return Route(round(trip["summary"]["length"] * 1000), round(trip["summary"]["time"])), path
 
     def route(self, origin: tuple[float, float], target: tuple[float, float], mode: str) -> Route:
         """A single route; Route(None, None) when there's no way there (or the server won't say)."""
@@ -79,6 +101,27 @@ class Valhalla:
                 raise
             return Route(None, None)
         return Route(round(summary["length"] * 1000), round(summary["time"]))
+
+
+def decode_polyline6(encoded: str) -> list[list[float]]:
+    """Valhalla's route shapes: Google's encoded-polyline format at six decimal places. Returns [lon, lat] points."""
+    points, lat, lon, i = [], 0, 0, 0
+    while i < len(encoded):
+        deltas = []
+        for _ in range(2):
+            shift = result = 0
+            while True:
+                b = ord(encoded[i]) - 63
+                i += 1
+                result |= (b & 0x1F) << shift
+                shift += 5
+                if b < 0x20:
+                    break
+            deltas.append(~(result >> 1) if result & 1 else result >> 1)
+        lat += deltas[0]
+        lon += deltas[1]
+        points.append([lon / 1e6, lat / 1e6])
+    return points
 
 
 def parse_matrix(data: dict, n: int) -> list[Route]:
@@ -122,3 +165,77 @@ class Nominatim:
         return float(hit["lon"]), float(hit["lat"]), confidence, {
             "display_name": hit.get("display_name"), "osm_type": hit.get("osm_type"), "place_rank": hit.get("place_rank"),
         }
+
+
+# ─── public transport ──────────────────────────────────────────────────
+MELBOURNE_TZ = "Australia/Melbourne"
+TRANSIT_MODES = {"WALK": "walk", "BUS": "bus", "COACH": "coach", "TRAM": "tram", "SUBWAY": "train", "RAIL": "train",
+                 "REGIONAL_RAIL": "V/Line train", "REGIONAL_FAST_RAIL": "V/Line train", "LONG_DISTANCE": "train",
+                 "SUBURBAN": "train", "FERRY": "ferry", "METRO": "train"}
+
+
+def next_weekday_9am(now=None):
+    """9am on the next weekday (never today, so there's a timetable to plan against), Melbourne time."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo(MELBOURNE_TZ)
+    day = (now or datetime.now(tz)).astimezone(tz).date() + timedelta(days=1)
+    while day.weekday() >= 5:
+        day += timedelta(days=1)
+    return datetime(day.year, day.month, day.day, 9, 0, tzinfo=tz)
+
+
+ARRIVAL_WINDOW_H = 3
+
+
+def pick_itinerary(itineraries: list[dict], arrive_by) -> dict | None:
+    """The journey arriving in the three hours before the time that leaves latest; else the first one arriving
+    up to 90 minutes late; else none (the planner also offers journeys that arrive the evening before, which
+    aren't a commute)."""
+    from datetime import datetime, timedelta
+    def when(t: str):
+        return datetime.fromisoformat(t.replace("Z", "+00:00"))
+    earliest = arrive_by - timedelta(hours=ARRIVAL_WINDOW_H)
+    on_time = [i for i in itineraries if earliest <= when(i["endTime"]) <= arrive_by]
+    if on_time:
+        return max(on_time, key=lambda i: (when(i["startTime"]), -i["duration"]))
+    late = [i for i in itineraries if arrive_by < when(i["endTime"]) <= arrive_by + timedelta(minutes=90)]
+    return min(late, key=lambda i: when(i["endTime"]), default=None)
+
+
+def journey(it: dict) -> dict:
+    """The parts of an itinerary worth keeping: times, transfers, and each leg in a line."""
+    legs = []
+    for leg in it["legs"]:
+        mode = TRANSIT_MODES.get(leg.get("mode", ""), leg.get("mode", "").lower().replace("_", " "))
+        legs.append({"mode": mode, "name": leg.get("routeShortName") or leg.get("displayName") or None,
+                     "minutes": max(1, round(leg["duration"] / 60)),
+                     "from": (leg.get("from") or {}).get("name"), "to": (leg.get("to") or {}).get("name")})
+    return {"depart_at": it["startTime"], "arrive_at": it["endTime"], "duration_s": round(it["duration"]),
+            "transfers": it.get("transfers"), "legs": legs}
+
+
+class Transitous:
+    """The free community journey planner (transitous.org) over the published timetables. Fair use: one
+    request every two seconds, and each journey is stored and only planned again after a fortnight."""
+
+    def __init__(self, base_url: str):
+        self.base_url = base_url.rstrip("/")
+        self._last = 0.0
+
+    def plan(self, origin: tuple[float, float], target: tuple[float, float], arrive_by) -> dict | None:
+        wait = 2.0 - (time.monotonic() - self._last)
+        if wait > 0:
+            time.sleep(wait)
+        self._last = time.monotonic()
+        query = urlencode({"fromPlace": f"{origin[1]},{origin[0]}", "toPlace": f"{target[1]},{target[0]}",
+                           "time": arrive_by.isoformat(), "arriveBy": "true"})
+        try:
+            with urlopen(Request(f"{self.base_url}/api/v1/plan?{query}", headers={"User-Agent": USER_AGENT}), timeout=60) as r:
+                data = json.load(r)
+        except HTTPError as e:
+            if e.code in (400, 404, 422):
+                return None  # no journey between these points
+            raise
+        it = pick_itinerary(data.get("itineraries") or [], arrive_by)
+        return journey(it) if it else None

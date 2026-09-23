@@ -62,13 +62,15 @@ export const STATUS_COLOUR: Record<Status, string> = {
   rejected: "#9ca3af", lost: "#78716c", withdrawn: "#a8a29e", bought: "#ca8a04",
 };
 export const CLOSED: Status[] = ["rejected", "lost", "withdrawn"];
+/** Guide against the max bid: within is good, only the top over is a stretch, the bottom over is out of reach. */
+export const budgetTone = (b: unknown): Tone => (b === "within" ? "good" : b === "stretch" ? "warn" : b === "over" ? "bad" : "");
 
 // ─── tones ──────────────────────────────────────────────────────────────
 export type Tone = "good" | "warn" | "bad" | "";
 /** Walking minutes: ten or less is easy, over twenty is a trek. Driving: fifteen and thirty. */
-export const minutesTone = (m: unknown, mode: "walk" | "drive" = "walk"): Tone => {
+export const minutesTone = (m: unknown, mode: "walk" | "drive" | "transit" = "walk"): Tone => {
   if (typeof m !== "number") return "";
-  const [ok, far] = mode === "walk" ? [10, 20] : [15, 30];
+  const [ok, far] = mode === "walk" ? [10, 20] : mode === "drive" ? [15, 30] : [30, 50];
   return m <= ok ? "good" : m <= far ? "warn" : "bad";
 };
 /** A price guide going up is bad news for a buyer; down is good. */

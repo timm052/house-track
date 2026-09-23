@@ -3,14 +3,12 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import { suburbClass, useSuburbSlots } from "../colour";
+import { EVENT_LABEL } from "../format";
 
 type Event = { type: string; id: string; kind: string; state: string; starts_at: string; ends_at: string | null;
                property_id: string; address: string; suburb: string };
 
-const KIND: Record<string, string> = {
-  open: "Open for inspection", private: "Private inspection", second_look: "Second look", building_pest: "Building & pest",
-  display_suite: "Display suite", pre_settlement: "Pre-settlement", other: "Inspection", auction: "Auction", eoi: "EOI closes",
-};
+const KIND = EVENT_LABEL;
 const DAYS = 60;  // auctions and EOI closings are often set a month or more out
 const dayFmt = new Intl.DateTimeFormat("en-AU", { weekday: "long", day: "numeric", month: "long" });
 const timeFmt = new Intl.DateTimeFormat("en-AU", { hour: "numeric", minute: "2-digit" });
@@ -25,7 +23,8 @@ function dayLabel(d: Date): string {
   return when ? `${when} · ${dayFmt.format(d)}` : dayFmt.format(d);
 }
 
-export default function Calendar() {
+/** The next two months, day by day, and the phone-calendar subscription: part of the This week tab. */
+export default function CalendarSection() {
   const { data = [], isPending } = useQuery({ queryKey: ["inspections", DAYS], queryFn: () => api<Event[]>(`/api/inspections?days=${DAYS}`) });
   const slots = useSuburbSlots();
   const days = new Map<string, { date: Date; events: Event[] }>();
@@ -36,8 +35,8 @@ export default function Calendar() {
   const sales = data.filter((e) => e.type === "auction" || e.type === "eoi").length;
   const feed = `${location.host}/api/calendar.ics`;
   return (
-    <div style={{ marginTop: 12 }}>
-      <h1>Calendar</h1>
+    <section id="calendar">
+      <div className="row" style={{ marginTop: 20 }}><h2 className="grow" style={{ margin: 0 }}>Calendar</h2><Link to="/plan">Plan the inspections</Link></div>
       <p className="small muted">
         The next {DAYS / 30} months: {data.length - sales} {data.length - sales === 1 ? "inspection" : "inspections"},{" "}
         {sales} {sales === 1 ? "auction or EOI closing" : "auctions and EOI closings"}.
@@ -73,6 +72,6 @@ export default function Calendar() {
           <button onClick={() => navigator.clipboard?.writeText(`${location.protocol}//${feed}`)}>Copy link</button>
         </div>
       </div>
-    </div>
+    </section>
   );
 }

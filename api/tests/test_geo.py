@@ -188,11 +188,18 @@ def test_stations_places_and_travel(client, people, database_url):
     client.put(f"/api/properties/{pid}/location", headers=as_(a), json={"lon": 145.1220, "lat": -37.8200})
     initially_pending = client.get(f"/api/properties/{pid}").json()["travel"]["pending"]
     assert initially_pending >= 5  # 3 stations walk, work walk + drive (plus places from other tests)
-    while route_stale(FakeValhalla()):
+    from app.worker import route_station_access
+    while route_stale(FakeValhalla()) + route_station_access(FakeValhalla()):
         pass
 
     travel = client.get(f"/api/properties/{pid}").json()["travel"]
     assert travel["pending"] == 0
+    # The nearest of all the stations, whether or not it was picked on the Places screen, walking and driving.
+    nearest = travel["nearest"]
+    assert nearest["name"] == "Box Hill" and nearest["walk_s"] > nearest["drive_s"] > 0
+    row = next(r for r in client.get("/api/overview").json()["rows"] if r["id"] == pid)
+    assert row["nearest_station"] == "Box Hill" and row["nearest_station_walk"] >= row["nearest_station_drive"] >= 1
+    assert {"Box Hill", "Blackburn", "Far Away"} <= {f["properties"]["name"] for f in client.get("/api/stations").json()["features"]}
     names = [s["name"] for s in travel["stations"]]
     assert names == ["Box Hill", "Blackburn"]  # nearest, then within the 15-minute limit; Far Away hidden
     assert travel["stations"][0]["is_nearest"] and travel["stations"][0]["duration_s"] < 120
@@ -245,8 +252,146 @@ def test_valhalla_long_walks_and_empty_cells():
     v._post = post
     woodend, near, box_hill = (144.5318, -37.3612), (144.54, -37.37), (145.132, -37.808)
     assert v.matrix(woodend, [near, box_hill], "drive") == [Route(2000, 300), Route(88300, 4252)]
+
+    zero = lambda path, body: ({"sources_to_targets": [[{"distance": 0, "time": 0, "to_index": 0}]]} if path == "sources_to_targets"
+                               else {"trip": {"summary": {"length": 5.2, "time": 600}}})
+    v._post = zero
+    assert v.matrix(woodend, [box_hill], "drive") == [Route(5200, 600)]  # "0 m" across 70 km: asked again alone
+    v._post = post
     assert [c[0] for c in calls] == ["sources_to_targets", "route"]
 
     calls.clear()
     assert v.matrix(woodend, [box_hill], "walk") == [Route(None, None)]
     assert calls == []  # 70 km: not worth a walking route, and the public server refuses it
+
+
+def test_plan_legs_and_isochrone_are_asked_once(client, monkeypatch):
+    from app.routes import geo
+    calls = []
+
+    class Fake:
+        def route(self, a, b, mode):
+            calls.append(("route", a, b))
+            return Route(1000, 300)
+
+        def isochrone(self, origin, minutes, mode):
+            calls.append(("iso", origin, minutes))
+            return {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": []}, "properties": {"minutes": minutes}}
+    monkeypatch.setattr(geo, "_routing", lambda: Fake())
+    monkeypatch.setattr(geo, "_legs", {})
+    monkeypatch.setattr(geo, "_areas", {})
+    pts = [[145.1, -37.8], [145.2, -37.81], [145.1, -37.8]]
+    r = client.post("/api/plan/legs", json={"points": pts})
+    assert r.status_code == 200 and r.json()["legs"] == [{"distance_m": 1000, "duration_s": 300}] * 2
+    client.post("/api/plan/legs", json={"points": pts})
+    assert len(calls) == 2  # the second plan reused both legs
+    assert client.get("/api/isochrone", params={"lon": 145.1, "lat": -37.8, "minutes": 30}).json()["properties"]["minutes"] == 30
+    client.get("/api/isochrone", params={"lon": 145.1, "lat": -37.8, "minutes": 30})
+    assert len(calls) == 3
+    assert client.get("/api/isochrone", params={"lon": 145.1, "lat": -37.8, "minutes": 90}).status_code == 422
+
+
+def test_suburb_suggestions(client, gnaf_url):
+    from app import gnaf
+    gnaf._localities = None
+    hits = client.get("/api/address/localities", params={"q": "box"}).json()
+    assert {"suburb": "Box Hill", "postcode": "3128"} in hits and all("box" in h["suburb"].lower() for h in hits)
+    assert client.get("/api/address/localities", params={"q": "b"}).json() == []  # too short to be useful
+
+
+def test_polyline6_decoding():
+    from app.geo_services import decode_polyline6
+    # Two points, encoded at six decimal places the way Valhalla sends route shapes.
+    def enc(v):
+        v = ~(v << 1) if v < 0 else v << 1
+        out = ""
+        while v >= 0x20:
+            out += chr((0x20 | (v & 0x1F)) + 63)
+            v >>= 5
+        return out + chr(v + 63)
+    pts = [(-37.8136, 144.9631), (-37.8183, 144.9670)]
+    s, prev = "", (0, 0)
+    for lat, lon in pts:
+        la, lo = round(lat * 1e6), round(lon * 1e6)
+        s += enc(la - prev[0]) + enc(lo - prev[1])
+        prev = (la, lo)
+    assert decode_polyline6(s) == [[144.9631, -37.8136], [144.967, -37.8183]]
+
+
+def test_transit_journey_choice_and_times():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from app.geo_services import next_weekday_9am, pick_itinerary
+    mel = ZoneInfo("Australia/Melbourne")
+    # Friday afternoon plans for Monday; Monday plans for Tuesday.
+    assert next_weekday_9am(datetime(2026, 9, 25, 15, 0, tzinfo=mel)) == datetime(2026, 9, 28, 9, 0, tzinfo=mel)
+    assert next_weekday_9am(datetime(2026, 9, 28, 7, 0, tzinfo=mel)) == datetime(2026, 9, 29, 9, 0, tzinfo=mel)
+    by = datetime(2026, 9, 29, 9, 0, tzinfo=mel)
+    its = [{"startTime": "2026-09-28T22:11:00Z", "endTime": "2026-09-28T22:45:00Z", "duration": 2040},
+           {"startTime": "2026-09-28T22:26:00Z", "endTime": "2026-09-28T22:51:00Z", "duration": 1500},
+           {"startTime": "2026-09-28T23:10:00Z", "endTime": "2026-09-28T23:40:00Z", "duration": 1800}]  # arrives 9:40: late
+    assert pick_itinerary(its, by)["startTime"] == "2026-09-28T22:26:00Z"  # on time, and leaves latest
+    assert pick_itinerary(its[2:], by)["startTime"] == "2026-09-28T23:10:00Z"  # nothing on time: a little late will do
+    evening_before = {"startTime": "2026-09-28T06:00:00Z", "endTime": "2026-09-28T10:35:00Z", "duration": 16500}
+    assert pick_itinerary([evening_before, its[2]], by) is its[2]  # arriving the evening before doesn't count
+    assert pick_itinerary([evening_before], by) is None  # and on its own means no commute was found
+
+
+def test_worker_plans_public_transport_to_destinations(client, people):
+    from app.worker import route_transit
+    a = people["a"]
+
+    class FakeTransitous:
+        calls = 0
+
+        def plan(self, origin, target, arrive_by):
+            FakeTransitous.calls += 1
+            return {"depart_at": "2026-09-28T22:26:00Z", "arrive_at": "2026-09-28T22:51:00Z", "duration_s": 1500, "transfers": 1,
+                    "legs": [{"mode": "walk", "name": None, "minutes": 3, "from": None, "to": "Box Hill"},
+                             {"mode": "train", "name": "Lilydale", "minutes": 20, "from": "Box Hill", "to": "Flinders Street"}]}
+    office = client.post("/api/places", headers=as_(a), json={
+        "kind": "destination", "name": "Office", "location": {"lon": 144.9670, "lat": -37.8183}}).json()["id"]
+    pid = add(client, a, street_number="21", street="Transit St")
+    client.put(f"/api/properties/{pid}/location", headers=as_(a), json={"lon": 145.1220, "lat": -37.8200})
+    fake = FakeTransitous()
+    while route_transit(fake):
+        pass
+    [dest] = [d for d in client.get(f"/api/properties/{pid}").json()["travel"]["destinations"] if d["place_id"] == office]
+    assert dest["transit"]["duration_s"] == 1500 and dest["transit"]["legs"][1]["name"] == "Lilydale"
+    row = next(r for r in client.get("/api/overview").json()["rows"] if r["id"] == pid)
+    assert row[f"transit:{office}"] == 25
+    before = FakeTransitous.calls
+    route_transit(fake)
+    assert FakeTransitous.calls == before  # stored: not asked again until it's a fortnight old or a pin moves
+
+
+def test_place_modes_decide_what_is_routed(client, people):
+    """A place driven to only: no walking or public transport times are worked out, and turning a mode off drops its times."""
+    a = people["a"]
+    gym = client.post("/api/places", headers=as_(a), json={
+        "kind": "destination", "name": "Gym", "location": {"lon": 145.10, "lat": -37.82}, "modes": ["drive"]}).json()["id"]
+    pid = add(client, a, street_number="22", street="Modes St")
+    client.put(f"/api/properties/{pid}/location", headers=as_(a), json={"lon": 145.1220, "lat": -37.8200})
+
+    while route_stale(FakeValhalla()):
+        pass
+    assert transit_queue_for(gym) == 0  # public transport is off for this place: never asked for
+    [dest] = [d for d in client.get(f"/api/properties/{pid}").json()["travel"]["destinations"] if d["place_id"] == gym]
+    assert dest["drive_s"] and dest["walk_s"] is None and dest["transit"] is None
+    assert next(p for p in client.get("/api/places").json() if p["id"] == gym)["modes"] == ["drive"]
+
+    client.patch(f"/api/places/{gym}", headers=as_(a), json={"modes": ["walk", "drive"]})
+    while route_stale(FakeValhalla()):
+        pass
+    [dest] = [d for d in client.get(f"/api/properties/{pid}").json()["travel"]["destinations"] if d["place_id"] == gym]
+    assert dest["walk_s"] and dest["drive_s"]
+    client.patch(f"/api/places/{gym}", headers=as_(a), json={"modes": ["walk"]})
+    [dest] = [d for d in client.get(f"/api/properties/{pid}").json()["travel"]["destinations"] if d["place_id"] == gym]
+    assert dest["walk_s"] and dest["drive_s"] is None
+
+
+def transit_queue_for(place_id):
+    """How many public transport journeys to this place are waiting to be planned."""
+    from app.db import tx
+    with tx() as conn:
+        return conn.execute("SELECT count(*) AS n FROM transit_estimate_stale WHERE place_id = %s", (place_id,)).fetchone()["n"]

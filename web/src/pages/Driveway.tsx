@@ -6,7 +6,7 @@ import { Link } from "react-router-dom";
 import { api, type Stage, type Stance } from "../api";
 import { LABEL } from "../format";
 import type { OverviewPlace, OverviewRow } from "../overview/columns";
-import { newId, sendOrQueue } from "../outbox";
+import { newId, sendOrQueue, uploadFiles, uploadMessage } from "../outbox";
 import { usePeople } from "../people";
 import { CalendarDays, Camera } from "lucide-react";
 
@@ -28,7 +28,6 @@ export default function Driveway() {
   const [pos, setPos] = useState<{ lat: number; lon: number; accuracy: number } | null>(null);
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [chosen, setChosen] = useState<string | null>(null);
-  const [whose, setWhose] = useState(me?.id ?? "");
   const [note, setNote] = useState("");
   const [flash, setFlash] = useState<string | null>(null);
 
@@ -58,7 +57,7 @@ export default function Driveway() {
   const byTime = [...new Set(inspecting.map((e) => e.property_id))];
   const fallback = [...rows].sort((a, b) => (byTime.indexOf(a.id) + 1 || 1e9) - (byTime.indexOf(b.id) + 1 || 1e9));
   const current = rows.find((r) => r.id === chosen) ?? nearby[0]?.r ?? fallback[0] ?? null;
-  const personId = whose || me?.id || "";
+  const personId = me?.id ?? "";  // your own verdict, as the selected profile
   const hasPre = current ? current[`v:${personId}:pre`] != null : false;
   const [stage, setStage] = useState<Stage | null>(null);
   const activeStage: Stage = stage ?? (hasPre || (current && todays.has(current.id)) ? "post_inspection" : "pre_inspection");
@@ -92,13 +91,13 @@ export default function Driveway() {
         body: { note: null }, label: `Attended ${current.address}`, propertyId: current.id });
       setFlash(result === "sent" ? "Marked as attended" : "Attendance saved on this phone");
     } else {
-      try {
-        const now = new Date();
-        await api(`/api/properties/${current.id}/inspections`, { method: "POST", body: { kind: "private", starts_at: now.toISOString(), state: "attended" } });
-        setFlash("Inspection logged");
-      } catch {
-        setFlash("No signal: log the inspection later from the house page.");
-      }
+      // The id is made here so the attendance can follow it through the outbox, and a resend is harmless.
+      const id = newId();
+      const result = await sendOrQueue({ id, method: "POST", path: `/api/properties/${current.id}/inspections`, propertyId: current.id,
+        body: { id, kind: "private", starts_at: new Date().toISOString(), state: "attended" }, label: `Inspection at ${current.address}` });
+      await sendOrQueue({ id: newId(), method: "PUT", path: `/api/inspections/${id}/attendees/${me.id}`, propertyId: current.id,
+        body: { note: null }, label: `Attended ${current.address}` });
+      setFlash(result === "sent" ? "Inspection logged" : "Inspection saved on this phone. It sends when you're back online.");
     }
     setTimeout(() => setFlash(null), 3500);
     queryClient.invalidateQueries({ queryKey: ["inspections"] });
@@ -107,16 +106,9 @@ export default function Driveway() {
   async function photo(files: FileList | null) {
     if (!current || !files?.length) return;
     try {
-      for (const file of Array.from(files)) {
-        const form = new FormData();
-        form.append("file", file);
-        form.append("kind", "photo");
-        const res = await fetch(`/api/properties/${current.id}/attachments`, { method: "POST", body: form, headers: { "X-Person-Id": me?.id ?? "" } });
-        if (!res.ok) throw new Error();
-      }
-      setFlash(`${files.length} photo${files.length > 1 ? "s" : ""} uploaded`);
-    } catch {
-      setFlash("No signal: the photos are in your camera roll; upload them from the house page later.");
+      setFlash(uploadMessage(await uploadFiles(current.id, String(current.address), Array.from(files))));
+    } catch (e) {
+      setFlash((e as Error).message);
     }
     setTimeout(() => setFlash(null), 4000);
   }
@@ -145,14 +137,11 @@ export default function Driveway() {
             </div>
             <Link to={`/p/${current.id}`}>Open</Link>
           </div>
-          <div className="grid2">
-            <select value={personId} onChange={(e) => setWhose(e.target.value)} aria-label="Whose verdict">
-              {active.map((p) => <option key={p.id} value={p.id}>{p.display_name}'s verdict</option>)}
-            </select>
-            <select value={activeStage} onChange={(e) => setStage(e.target.value as Stage)} aria-label="Stage">
-              <option value="pre_inspection">Before inspecting</option>
-              <option value="post_inspection">After: pursue to buy?</option>
-            </select>
+          <div className="segmented" role="radiogroup" aria-label="When">
+            {(["pre_inspection", "post_inspection"] as const).map((s) => (
+              <button key={s} role="radio" aria-checked={activeStage === s} className={activeStage === s ? "on" : ""} onClick={() => setStage(s)}>
+                {s === "pre_inspection" ? "Before inspecting" : "After: pursue to buy?"}</button>
+            ))}
           </div>
           <textarea placeholder="Note: tap the microphone on your keyboard to dictate" value={note} onChange={(e) => setNote(e.target.value)} />
           <div className="stance big">

@@ -3,6 +3,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
+from psycopg import sql
 from psycopg.types.json import Jsonb
 
 from ..db import tx
@@ -41,6 +42,45 @@ def update_person(person_id: UUID, body: PersonPatch, _: Person) -> dict:
         return conn.execute(
             "SELECT id, display_name, colour, active FROM person WHERE id = %s", (person_id,)
         ).fetchone()
+
+
+# Deleting a person: what happens to each column that refers to them. Created-by and updated-by columns
+# everywhere are handed to whoever deletes them; anything not listed here stops the delete, so a new
+# reference added later can't be silently mishandled.
+REMOVE_WITH_PERSON = {("opinion", "person_id"), ("criterion_score", "person_id"), ("area", "owner_id"),
+                      ("inspection_attendee", "person_id")}  # their own verdicts, scores, areas, attendance
+CLEAR = {("place", "person_id"), ("audit_log", "person_id")}  # "Sam's work" becomes a shared place; the log keeps the rest
+HAND_OVER = {("property", "manual_location_by"), ("checklist_item", "done_by")}
+
+
+@router.delete("/persons/{person_id}", status_code=204)
+def delete_person(person_id: UUID, me: Person) -> None:
+    """Remove someone from the household (see migration 0007)."""
+    if person_id == me:
+        raise HTTPException(409, "You can't delete yourself. Switch to someone else first.")
+    with tx(me) as conn:
+        if conn.execute("SELECT 1 FROM person WHERE id = %s FOR UPDATE", (person_id,)).fetchone() is None:
+            raise not_found("Person")
+        conn.execute("SELECT set_config('app.handing_over', 'on', true)")
+        refs = conn.execute("""SELECT kcu.table_name, kcu.column_name
+                               FROM information_schema.referential_constraints rc
+                               JOIN information_schema.key_column_usage kcu ON kcu.constraint_name = rc.constraint_name
+                               JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = rc.unique_constraint_name
+                               WHERE ccu.table_name = 'person' AND kcu.table_name <> 'person'""").fetchall()
+        refs = sorted({(r["table_name"], r["column_name"]) for r in refs}, key=lambda r: ((r not in REMOVE_WITH_PERSON), r))
+        for table, column in refs:
+            target = sql.SQL("{}.{}").format(sql.Identifier(table), sql.Identifier(column))
+            if (table, column) in REMOVE_WITH_PERSON:
+                conn.execute(sql.SQL("DELETE FROM {} WHERE {} = %s").format(sql.Identifier(table), sql.Identifier(column)), (person_id,))
+            elif (table, column) in CLEAR:
+                conn.execute(sql.SQL("UPDATE {} SET {} = NULL WHERE {} = %s").format(sql.Identifier(table), sql.Identifier(column),
+                                                                                     sql.Identifier(column)), (person_id,))
+            elif column in ("created_by", "updated_by") or (table, column) in HAND_OVER:
+                conn.execute(sql.SQL("UPDATE {} SET {} = %s WHERE {} = %s").format(sql.Identifier(table), sql.Identifier(column),
+                                                                                   sql.Identifier(column)), (me, person_id))
+            else:
+                raise HTTPException(500, f"Don't know how to hand over {target.as_string(conn)} when deleting a person.")
+        conn.execute("DELETE FROM person WHERE id = %s", (person_id,))
 
 
 @router.get("/settings")

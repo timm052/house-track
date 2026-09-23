@@ -144,3 +144,36 @@ def test_cover_photo(client, people, tmp_path, monkeypatch):
     assert cover() == str(ids[0])
     client.put(f"/api/properties/{pid}/cover", headers=as_(a), json={"attachment_id": None})
     assert cover() == str(ids[0])
+
+
+def test_inspection_logged_offline_is_created_once(client, people):
+    """The Drive page queues "log an inspection now" with an id made on the phone; a resend changes nothing."""
+    a = people["a"]
+    pid = house(client, a, 14)
+    iid = str(uuid.uuid4())
+    body = {"id": iid, "kind": "private", "starts_at": "2026-09-24T10:00:00+10:00", "state": "attended"}
+    for _ in range(2):
+        r = client.post(f"/api/properties/{pid}/inspections", headers=as_(a), json=body)
+        assert r.status_code == 201 and str(r.json()["id"]) == iid
+    assert client.put(f"/api/inspections/{iid}/attendees/{a['id']}", headers=as_(a), json={"note": None}).status_code in (200, 201, 204)
+    [i] = client.get(f"/api/properties/{pid}").json()["inspections"]
+    assert i["id"] == iid and [x["person_id"] for x in i["attendees"]] == [a["id"]]
+
+
+def test_keep_a_copy_of_a_linked_document(client, people, tmp_path, monkeypatch):
+    """A linked PDF (the listing's Statement of Information, say) is downloaded once and then served from House Track."""
+    from app.routes import driveway
+    monkeypatch.setenv("BLOB_DIR", str(tmp_path))
+    pdf = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF"
+    monkeypatch.setattr(driveway, "download_file", lambda url, *a, **k: (pdf, "application/pdf"))
+    a = people["a"]
+    pid = house(client, a, 15)
+    r = client.post(f"/api/properties/{pid}/attachments", headers=as_(a), data={"kind": "other", "url": "https://docs.example/soi.pdf"})
+    aid = r.json()["id"]
+    r = client.post(f"/api/attachments/{aid}/keep-copy", headers=as_(a))
+    assert r.status_code == 200 and r.json()["mime_type"] == "application/pdf", r.text
+    f = client.get(f"/api/attachments/{aid}/file")
+    assert f.status_code == 200 and f.content == pdf and f.headers["content-type"] == "application/pdf"
+    [att] = client.get(f"/api/properties/{pid}").json()["attachments"]
+    assert att["url"] is None and att["original_name"] == "soi.pdf"
+    assert client.post(f"/api/attachments/{aid}/keep-copy", headers=as_(a)).status_code == 422

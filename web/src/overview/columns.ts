@@ -18,10 +18,13 @@ export type Column = {
 };
 
 export type OverviewRow = Record<string, unknown> & { id: string; _v: Record<string, string | null> };
-export type OverviewPlace = { id: string; kind: "station" | "destination"; name: string; person_id: string | null; is_favourite: boolean };
+export type OverviewPlace = { id: string; kind: "station" | "destination"; name: string; person_id: string | null; is_favourite: boolean;
+                              modes?: ("walk" | "drive" | "transit")[] };
 
 const SOURCE = LABEL.guideSource;
 const VERDICTS = { yes: "Yes", maybe: "Maybe", no: "No" };
+/** The guide against the most we can bid (Settings → Budget). */
+export const BUDGET = { within: "Within budget", stretch: "Stretch", over: "Over budget" };
 const enumOf = (labels: Record<string, string>) => labels;
 
 export function catalogue(persons: Person[], places: OverviewPlace[]): Column[] {
@@ -72,6 +75,7 @@ export function catalogue(persons: Person[], places: OverviewPlace[]): Column[] 
 
     { key: "guide_low", label: "Guide low", group: "Price", kind: "money", editable: true, history: true, byDefault: true, width: 90 },
     { key: "guide_high", label: "Guide high", group: "Price", kind: "money", editable: true, history: true, byDefault: true, width: 90 },
+    { key: "budget", label: "Budget", group: "Price", kind: "enum", byDefault: true, width: 95, options: enumOf(BUDGET) },
     { key: "guide_source", label: "Guide source", group: "Price", kind: "enum", editable: true, history: true, width: 150,
       options: enumOf(SOURCE) },
     { key: "guide_date", label: "Guide date", group: "Price", kind: "date", width: 90 },
@@ -105,15 +109,21 @@ export function catalogue(persons: Person[], places: OverviewPlace[]): Column[] 
   cols.push({ key: "score_avg", label: "Average score", group: "Scores", kind: "int", byDefault: true, width: 90 });
   cols.push(
     { key: "nearest_station", label: "Nearest station", group: "Getting around", kind: "text", byDefault: true, width: 120 },
-    { key: "nearest_station_walk", label: "Walk (min)", group: "Getting around", kind: "minutes", byDefault: true, width: 80 },
+    { key: "nearest_station_drive", label: "Drive to station", group: "Getting around", kind: "minutes", byDefault: true, width: 90 },
+    { key: "nearest_station_km", label: "Station km", group: "Getting around", kind: "text", width: 80 },
+    { key: "nearest_station_walk", label: "Walk to station", group: "Getting around", kind: "minutes", byDefault: true, width: 80 },
   );
   const owner = (pl: OverviewPlace) => (pl.person_id ? persons.find((p) => p.id === pl.person_id)?.display_name : null);
   for (const pl of places) {
     const name = owner(pl) ? `${owner(pl)}'s ${pl.name}` : pl.name;
-    cols.push({ key: `walk:${pl.id}`, label: `Walk to ${name}`, group: "Getting around", kind: "minutes", width: 110 });
+    // One column per way of getting there that the place has switched on (the Places tab).
+    const has = (m: "walk" | "drive" | "transit") => !pl.modes || pl.modes.includes(m);
+    if (has("walk")) cols.push({ key: `walk:${pl.id}`, label: `Walk to ${name}`, group: "Getting around", kind: "minutes", width: 110 });
     if (pl.kind === "destination") {
-      cols.push({ key: `drive:${pl.id}`, label: `Drive to ${name}`, group: "Getting around", kind: "minutes",
-                  byDefault: pl.is_favourite, width: 110 });
+      if (has("drive")) cols.push({ key: `drive:${pl.id}`, label: `Drive to ${name}`, group: "Getting around", kind: "minutes",
+                                    byDefault: pl.is_favourite, width: 110 });
+      if (has("transit")) cols.push({ key: `transit:${pl.id}`, label: `Public transport to ${name}`, group: "Getting around", kind: "minutes",
+                                      byDefault: pl.is_favourite, width: 110 });
     }
   }
   return cols;

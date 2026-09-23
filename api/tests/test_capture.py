@@ -116,8 +116,9 @@ def test_weekly_refresh_targets_and_updates(client, people, monkeypatch):
     data["props"]["pageProps"]["componentProps"]["listingSummary"].update(title="EOI $1,100,000 - $1,155,000", status="underOffer")
     r = client.post("/api/listing/refresh", headers=a, json={"property_id": pid, "url": url, "status_code": 200,
                                                               "next_data": json.dumps(data)}).json()
-    assert r["changes"][0] == "New price guide $1.1m–$1.155m" and "1 new inspection time" in r["changes"]
-    assert "2 new agents" in r["changes"] and r["flag"].startswith("Under offer")
+    assert r["changes"][0].startswith("New price guide $1.1m–$1.155m (was ")
+    assert any(ch.startswith("1 new inspection time: ") for ch in r["changes"])
+    assert "Agents: Pat Agent, Sam Seller" in r["changes"] and r["flag"].startswith("Under offer")
     again = client.post("/api/listing/refresh", headers=a, json={"property_id": pid, "url": url, "status_code": 200,
                                                                   "next_data": json.dumps(data)}).json()
     assert again["changes"] == []  # nothing new the second time
@@ -146,7 +147,7 @@ def test_update_switches_sale_method(client, people):
         "auctionSchedule": {"openingDateTime": {"isoDate": "2026-11-07T11:00:00"}}}
     got = client.post("/api/listing/refresh", headers=a, json={"property_id": pid, "url": url, "status_code": 200,
                                                                 "next_data": json.dumps(data)}).json()
-    assert "Now selling by auction" in got["changes"] and "Auction date changed" in got["changes"]
+    assert "Now selling by auction" in got["changes"] and "Auction Sat 7 Nov, 11:00 am" in got["changes"]
     c = client.get(f"/api/properties/{pid}").json()["campaigns"][0]
     assert c["sale_method"] == "auction" and c["eoi_closes_at"] is None and c["auction_at"].startswith("2026-11-07")
 
@@ -162,3 +163,52 @@ def test_land_is_read_in_square_metres():
     assert extract(URL, "", next_data=json.dumps(only_text))["land_m2"] == 10886
     assert [_area_m2(v) for v in (652, "652m²", "650.0 sqm", "1.2 ha", "2.69 acre", "1,012 m2", "about 4", None)] == \
         [652, 652, 650, 12000, 10886, 1012, None, None]
+
+
+
+def test_update_preview_and_details(client, people):
+    """The + House Track panel previews exactly what Update will do (nothing saved); Update then fixes rooms and
+    land; the weekly refresh reports a differing land size instead of overwriting it."""
+    a = people["a"]
+    pid = client.post("/api/properties", headers=as_(a), json={
+        "address": {"street_number": "7", "street": "Preview Lane", "suburb": "Woodend", "postcode": "3442"}, "land_m2": 4,
+        "campaign": {"sale_method": "eoi", "eoi_closes_at": "2099-10-20T17:00:00+11:00",
+                     "url": "https://www.domain.com.au/7-preview-lane-woodend-vic-3442-2099990077"}}).json()["id"]
+    body = {"land_m2": 10886, "beds": 4, "guide_low_aud": 2500000, "guide_high_aud": 2750000}
+    r = client.post(f"/api/properties/{pid}/listing-update?preview=true", headers=as_(a), json=body).json()
+    assert "Land: 1.09 ha (was 4 m²)" in r["changes"] and "Bedrooms: 4" in r["changes"]
+    assert any(ch.startswith("New price guide $2.5m–$2.75m") for ch in r["changes"])
+    p = client.get(f"/api/properties/{pid}").json()
+    assert p["land_m2"] == 4 and p["campaigns"][0]["price_guides"] == []  # nothing saved by the preview
+
+    assert client.post(f"/api/properties/{pid}/listing-update", headers=as_(a), json=body).json()["changes"] == r["changes"]
+    assert client.get(f"/api/properties/{pid}").json()["land_m2"] == 10886
+
+    from app.listing_apply import refresh
+    from app.db import tx
+    from app.schemas import ListingUpdateIn
+    with tx() as conn:
+        got = refresh(conn, pid, ListingUpdateIn(land_m2=900, apply_details=False))
+    assert got["differs"] == ["The listing says land 900 m²; you have 1.09 ha"] and got["changes"] == []
+    assert client.get(f"/api/properties/{pid}").json()["land_m2"] == 10886
+
+
+def test_sold_listing_asks_for_the_outcome(client, people):
+    """A sold listing's price is the sale price, never a new guide; the campaign remembers the listing said sold,
+    and the house is flagged as needing its outcome recorded."""
+    sold = {"props": {"pageProps": {"componentProps": {"listingSummary": {
+        "stats": [], "status": "sold", "title": "Sold for $1,250,000"}}}}}
+    got = extract(URL, "", next_data=json.dumps(sold))
+    assert got["listing_status"] == "sold" and got["sold_price_aud"] == 1_250_000 and "guide_low_aud" not in got
+
+    a = people["a"]
+    pid = client.post("/api/properties", headers=as_(a), json={
+        "address": {"street_number": "8", "street": "Sold Street", "suburb": "Mitcham", "postcode": "3132"},
+        "campaign": {"sale_method": "private_sale"}}).json()["id"]
+    row = lambda: next(r for r in client.get("/api/overview").json()["rows"] if r["id"] == pid)
+    assert row()["needs_outcome"] is False
+    r = client.post(f"/api/properties/{pid}/listing-update", headers=as_(a),
+                    json={"listing_status": "sold", "listing_price_text": "Sold for $1,250,000"})
+    assert r.status_code == 200 and r.json()["guide"] is False
+    got = row()
+    assert got["needs_outcome"] is True and got["listing_status"] == "sold" and got["listing_price_text"] == "Sold for $1,250,000"

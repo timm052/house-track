@@ -1,15 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type Person, type Settings as SettingsT } from "../api";
-import { usePersons } from "../people";
+import { api, ApiError, type Person } from "../api";
+import { usePeople, usePersons } from "../people";
 import { money, parseMoney } from "../format";
 import { CriteriaSettings } from "./Decide";
+import ConfirmButton from "../ConfirmButton";
 
 export default function Settings() {
   const queryClient = useQueryClient();
   const persons = usePersons();
-  const settings = useQuery({ queryKey: ["settings"], queryFn: () => api<SettingsT>("/api/settings") });
   const [name, setName] = useState("");
   const [colour, setColour] = useState("#2ca02c");
 
@@ -22,15 +22,17 @@ export default function Settings() {
     mutationFn: ({ id, body }: { id: string; body: Partial<Person> }) => api(`/api/persons/${id}`, { method: "PATCH", body }),
     onSuccess: refresh,
   });
-  const walk = useMutation({
-    mutationFn: (v: number) => api("/api/settings/walk_limit_min", { method: "PUT", body: { value: v } }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["settings"] }),
+  const { me } = usePeople();
+  const remove = useMutation({
+    mutationFn: (id: string) => api(`/api/persons/${id}`, { method: "DELETE" }),
+    // Their verdicts and areas are gone, and credits changed hands: refresh everything that shows them.
+    onSuccess: () => queryClient.invalidateQueries(),
   });
 
   return (
     <div style={{ marginTop: 12 }}>
       <h1>Settings</h1>
-      <p className="small muted">Shared by everyone in the household. <a href="#bookmarklets">Browser buttons</a></p>
+      <p className="small muted">Shared by everyone in the household. <a href="#bookmarklets">Browser buttons</a> · Travel times and stations are under <Link to="/places">Places</Link>.</p>
       <Bookmarklets />
       <div className="card stack">
         <h2>People</h2>
@@ -42,6 +44,11 @@ export default function Settings() {
             <button className="link" onClick={() => patch.mutate({ id: p.id, body: { active: !p.active } })}>
               {p.active ? "Deactivate" : "Reactivate"}
             </button>
+            {p.id !== me?.id && (
+              <ConfirmButton label="Delete" yes={`Delete ${p.display_name}`} onConfirm={() => remove.mutate(p.id)}
+                question={<>Their verdicts, scores, map areas and attendance go. Houses, prices and notes they entered stay, credited to
+                  you ({me?.display_name ?? "you"}). This can't be undone.</>} />
+            )}
           </div>
         ))}
         <div className="row">
@@ -49,23 +56,14 @@ export default function Settings() {
           <input className="grow" placeholder="Add a person" value={name} onChange={(e) => setName(e.target.value)} />
           <button disabled={!name.trim() || add.isPending} onClick={() => add.mutate()}>Add</button>
         </div>
-        {(add.error || patch.error) && <p className="error">{((add.error || patch.error) as Error).message}</p>}
+        <p className="small muted" style={{ margin: 0 }}>Deactivate hides someone but keeps their verdicts. Delete removes them for good.</p>
+        {(add.error || patch.error || remove.error) && <p className="error">{((add.error || patch.error || remove.error) as Error).message}</p>}
       </div>
 
-      <div className="card stack">
-        <h2>Stations</h2>
-        {settings.data && (
-          <label>
-            Walking limit (minutes). Each house shows its nearest station, plus others within this walk.
-            <input inputMode="numeric" defaultValue={settings.data.walk_limit_min}
-              onBlur={(e) => { const v = Number(e.target.value); if (v >= 1 && v <= 120) walk.mutate(v); }} />
-          </label>
-        )}
-        <Link to="/places"><button>Choose stations and places</button></Link>
-      </div>
       <MoneySettings />
       <LayerSettings />
       <CriteriaSettings />
+      <TagSettings />
     </div>
   );
 }
@@ -245,6 +243,53 @@ function Bookmarklets() {
         Buttons last updated {BOOKMARKLETS_UPDATED}. If you added them before then, delete the old ones and drag these again.
         They read the listing as your browser shows it, so they can break when the sites change.
       </p>
+    </div>
+  );
+}
+
+type TagRow = { id: string; name: string; colour: string; houses: number };
+
+/** Tags are shared: rename, recolour, merge or delete them here (houses get them on their page, in the grid,
+ *  or from a listing's suggestions). */
+function TagSettings() {
+  const queryClient = useQueryClient();
+  const { data = [] } = useQuery({ queryKey: ["tags"], queryFn: () => api<TagRow[]>("/api/tags") });
+  const [msg, setMsg] = useState<{ id: string; text: string; mergeInto?: string; name?: string } | null>(null);
+  const refresh = () => ["tags", "overview", "property"].forEach((k) => queryClient.invalidateQueries({ queryKey: [k] }));
+  async function patch(t: TagRow, body: Record<string, unknown>) {
+    setMsg(null);
+    try {
+      await api(`/api/tags/${t.id}`, { method: "PATCH", body });
+      refresh();
+    } catch (e) {
+      const d = e instanceof ApiError ? (e.detail as { merge_into?: string }) : undefined;
+      setMsg({ id: t.id, text: (e as Error).message, mergeInto: d?.merge_into, name: body.name as string | undefined });
+    }
+  }
+  return (
+    <div className="card stack">
+      <h2>Tags</h2>
+      {data.length === 0 && <p className="small muted" style={{ margin: 0 }}>No tags yet. Add them on a house's page or in the Grid.</p>}
+      {data.map((t) => (
+        <div key={t.id}>
+          <div className="row">
+            <input type="color" value={t.colour} aria-label={`Colour of ${t.name}`} style={{ width: 40, height: 36, padding: 2 }}
+              onChange={(e) => patch(t, { colour: e.target.value.toLowerCase() })} />
+            <input className="grow" defaultValue={t.name} aria-label="Tag name" key={t.name}
+              onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== t.name) patch(t, { name: v }); }}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+            <span className="small muted" style={{ minWidth: 70 }}>{t.houses} {t.houses === 1 ? "house" : "houses"}</span>
+            <ConfirmButton className="small-btn" label="Delete" yes={`Delete #${t.name}`}
+              question={`Remove it from ${t.houses} ${t.houses === 1 ? "house" : "houses"}?`}
+              onConfirm={() => api(`/api/tags/${t.id}`, { method: "DELETE" }).then(refresh)} />
+          </div>
+          {msg?.id === t.id && (
+            <p className="small error" style={{ margin: "4px 0 0" }}>{msg.text}{" "}
+              {msg.mergeInto && <button className="link" onClick={() => patch(t, { name: msg.name, merge: true })}>Merge #{t.name} into #{msg.name}</button>}
+            </p>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

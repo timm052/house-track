@@ -81,3 +81,17 @@ export const km = (m: number | null) => (m == null ? "" : m < 1000 ? `${Math.rou
 /** Land area: square metres, or hectares for acreage. */
 export const landArea = (m2: number) =>
   m2 >= 10_000 ? `${(m2 / 10_000).toLocaleString(undefined, { maximumFractionDigits: 2 })} ha` : `${m2.toLocaleString()} m²`;
+
+/** Inspection types: the choices when adding one. */
+export const INSPECTION_KINDS: Record<string, string> = {
+  open: "Open for inspection", private: "Private inspection", second_look: "Second look", building_pest: "Building & pest",
+  display_suite: "Display suite", pre_settlement: "Pre-settlement", other: "Other",
+};
+/** Anything on the calendar: an inspection's type, or an auction or EOI closing. */
+export const EVENT_LABEL: Record<string, string> = { ...INSPECTION_KINDS, other: "Inspection", auction: "Auction", eoi: "EOI closes" };
+
+/** The street part of an address, as the server writes it: "3/12 Smith Street", or "Lot 45 Smith Street" off the plan. */
+export function streetLine(a: { unit?: string | null; street_number?: string | null; street?: string | null; lot_number?: string | null }): string {
+  if (a.street_number) return `${a.unit ? `${a.unit}/` : ""}${a.street_number} ${a.street ?? ""}`.trim();
+  return `Lot ${a.lot_number ?? "?"} ${a.street ?? ""}`.trim();
+}

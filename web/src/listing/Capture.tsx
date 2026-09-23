@@ -3,8 +3,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, type PropertyDetail, type PropertyType, type SaleMethod } from "../api";
-import { LABEL, landArea, money, moneyRange, when } from "../format";
+import { api, type PropertyType, type SaleMethod } from "../api";
+import { when } from "../format";
 
 export type Capture = {
   url: string | null; address: string | null;
@@ -108,39 +108,37 @@ export function CaptureReview({ c, ch, set }: { c: Capture; ch: Choices; set: (c
 }
 
 // ─── already tracked: refresh the house from its listing ───────────────
+/** A tracked house's update request: everything the listing says. The server skips what's already saved and
+ *  works out what's new (see listing_apply.refresh), for the preview and the update alike. */
+function updateBody(c: Capture, ch: Choices) {
+  return {
+    ...extrasFor(c, { ...ch, inspections: true, agents: true, soi: true }),
+    guide_low_aud: c.guide_low_aud, guide_high_aud: c.guide_high_aud, sale_method: c.sale_method,
+    auction_at: c.sale_method === "auction" ? c.auction_at ?? null : null,
+    eoi_closes_at: c.sale_method === "eoi" ? c.eoi_closes_at ?? null : null,
+    beds: c.beds, baths: c.baths, car_spaces: c.car_spaces, land_m2: c.land_m2, building_m2: c.building_m2 ?? null,
+  };
+}
+
 export function ExistingUpdate({ c }: { c: Capture }) {
   const id = c.existing_property_id!;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { data: p } = useQuery({ queryKey: ["property", id], queryFn: () => api<PropertyDetail>(`/api/properties/${id}`) });
   const [ch, setCh] = useState<Choices>(() => ({ ...defaultChoices(c), photos: "all", tags: [] }));
   const [msg, setMsg] = useState<string | null>(null);
-  const live = p?.campaigns.find((x) => !x.outcome);
-  const latest = live?.price_guides[0];  // newest first
-  const guideChanged = !!c.guide_low_aud && (!latest || latest.low_aud !== c.guide_low_aud || latest.high_aud !== (c.guide_high_aud ?? c.guide_low_aud));
-  const newInspections = (c.inspections ?? []).filter((i) => !p?.inspections.some((x) => new Date(x.starts_at).getTime() === new Date(i.starts_at).getTime()));
-  const newAgents = (c.agents ?? []).filter((a) => !live?.agents.some((x) => x.name.toLowerCase() === a.name.toLowerCase()));
-  const dateAt = c.sale_method === "auction" ? c.auction_at : c.eoi_closes_at;
-  const liveAt = live && (c.sale_method === "auction" ? live.auction_at : live.eoi_closes_at);
-  const dateChanged = !!dateAt && (!liveAt || new Date(liveAt).getTime() !== new Date(dateAt).getTime());
-  const methodChanged = !!c.sale_method && !!live && live.sale_method !== c.sale_method;
+  // What Update would do, from the server doing it and rolling it back (photos aside: they download later).
+  const preview = useQuery({
+    queryKey: ["listing-preview", id, c.url],
+    queryFn: () => api<{ changes: string[] }>(`/api/properties/${id}/listing-update?preview=true`, { method: "POST", body: updateBody(c, { ...ch, photos: "none" }) }),
+    staleTime: Infinity,
+  });
+  const changes = preview.data?.changes ?? [];
   const photos = photosOf(c);
-  // Rooms and areas the listing states differently from what's saved (a mistyped or misread land size, say).
-  const DETAILS = [["beds", "Bedrooms"], ["baths", "Bathrooms"], ["car_spaces", "Car spaces"], ["land_m2", "Land"], ["building_m2", "Building"]] as const;
-  const area = (k: string, v: number) => (k === "land_m2" ? landArea(v) : k === "building_m2" ? `${v.toLocaleString()} m²` : String(v));
-  const details = p ? DETAILS.filter(([k]) => c[k] != null && c[k] !== p[k]) : [];
 
   async function update() {
     setMsg("Updating…");
     try {
-      const body = { ...extrasFor(c, { ...ch, inspections: true, agents: true }),
-                     inspections: newInspections, agents: extrasFor(c, ch).agents.filter((a) => newAgents.some((n) => n.name === a.name)),
-                     guide_low_aud: guideChanged ? c.guide_low_aud : null, guide_high_aud: guideChanged ? c.guide_high_aud : null,
-                     sale_method: methodChanged ? c.sale_method : null,
-                     auction_at: c.sale_method === "auction" && dateChanged ? c.auction_at : null,
-                     eoi_closes_at: c.sale_method === "eoi" && dateChanged ? c.eoi_closes_at : null };
-      await api(`/api/properties/${id}/listing-update`, { method: "POST", body });
-      if (details.length) await api(`/api/properties/${id}`, { method: "PATCH", body: Object.fromEntries(details.map(([k]) => [k, c[k]])) });
+      await api(`/api/properties/${id}/listing-update`, { method: "POST", body: updateBody(c, ch) });
       for (const key of [["property", id], ["overview"], ["tags"]]) queryClient.invalidateQueries({ queryKey: key });
       navigate(`/p/${id}`);
     } catch (e) {
@@ -148,47 +146,35 @@ export function ExistingUpdate({ c }: { c: Capture }) {
     }
   }
 
-  const changes = [
-    guideChanged && <li key="g"><strong>New price guide {moneyRange(c.guide_low_aud, c.guide_high_aud)}</strong>
-      {latest && <span className="muted"> (was {moneyRange(latest.low_aud, latest.high_aud)})</span>}</li>,
-    methodChanged && <li key="m"><strong>Sale method: {LABEL.method[c.sale_method!]}</strong> <span className="muted">(was {LABEL.method[live!.sale_method]})</span></li>,
-    dateChanged && <li key="d">{c.sale_method === "auction" ? "Auction" : "EOI closes"} {when(dateAt!)}{liveAt && <span className="muted"> (was {when(liveAt)})</span>}</li>,
-    newInspections.length > 0 && <li key="i">{newInspections.length} new inspection {newInspections.length === 1 ? "time" : "times"}: {newInspections.map((i) => when(i.starts_at)).join(" · ")}</li>,
-    newAgents.length > 0 && <li key="a">Agents: {newAgents.map((a) => a.name).join(", ")}</li>,
-    c.soi_url && !p?.attachments.some((x) => x.url === c.soi_url) && <li key="s">Statement of Information</li>,
-    ...details.map(([k, label]) => (
-      <li key={k}>{label}: <strong>{area(k, c[k]!)}</strong>{p![k] != null && <span className="muted"> (was {area(k, p![k]!)})</span>}</li>
-    )),
-  ].filter(Boolean);
-
   return (
     <div className="card stack capture" style={{ borderColor: "var(--accent)" }}>
       <h2>Already in House Track</h2>
       <p className="small" style={{ margin: 0 }}>This listing is <Link to={`/p/${id}`}>{c.existing_address ?? "a house you track"}</Link>.
         {c.price_text && <> The listing now says <strong>{c.price_text}</strong>.</>}</p>
-      {!p ? <p className="small muted">Checking what's new…</p> : changes.length === 0 && photos.length === 0 ? (
-        <p className="small muted" style={{ margin: 0 }}>Nothing new on the listing since you last captured it.</p>
-      ) : (
-        <>
-          {changes.length > 0 && <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>{changes}</ul>}
-          {photos.length > 0 && (
-            <div className="row small">
-              <span className="muted">Photos:</span>
-              {(["all", "main", "none"] as const).map((v) => (
-                <label key={v} className="check"><input type="radio" name="uphotos" checked={ch.photos === v} onChange={() => setCh({ ...ch, photos: v })} />
-                  {v === "main" ? "Main photo" : v === "all" ? `All ${photos.length}` : "None"}</label>
-              ))}
-              <span className="muted">(ones you already have are skipped)</span>
-            </div>
-          )}
-        </>
-      )}
+      {preview.isPending ? <p className="small muted">Checking what's new…</p>
+        : preview.isError ? <p className="error small">{(preview.error as Error).message}</p>
+        : changes.length === 0 && photos.length === 0 ? (
+          <p className="small muted" style={{ margin: 0 }}>Nothing new on the listing since you last captured it.</p>
+        ) : (
+          <>
+            {changes.length > 0 && <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>{changes.map((t) => <li key={t}>{t}</li>)}</ul>}
+            {photos.length > 0 && (
+              <div className="row small">
+                <span className="muted">Photos:</span>
+                {(["all", "main", "none"] as const).map((v) => (
+                  <label key={v} className="check"><input type="radio" name="uphotos" checked={ch.photos === v} onChange={() => setCh({ ...ch, photos: v })} />
+                    {v === "main" ? "Main photo" : v === "all" ? `All ${photos.length}` : "None"}</label>
+                ))}
+                <span className="muted">(ones you already have are skipped)</span>
+              </div>
+            )}
+          </>
+        )}
       <div className="row">
-        <button className="primary" onClick={update} disabled={!p}>Update the house</button>
+        <button className="primary" onClick={update} disabled={preview.isPending}>Update the house</button>
         <Link to={`/p/${id}`}><button>Open it</button></Link>
       </div>
       {msg && <p className="small muted" style={{ margin: 0 }}>{msg}</p>}
-      {latest && !guideChanged && c.guide_low_aud && <p className="small muted" style={{ margin: 0 }}>Guide unchanged at {money(latest.low_aud)}–{money(latest.high_aud)}.</p>}
     </div>
   );
 }

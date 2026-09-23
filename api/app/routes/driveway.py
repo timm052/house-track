@@ -27,6 +27,7 @@ MAX_UPLOAD = 50 * 1024 * 1024
 
 # ─── inspections ──────────────────────────────────────────────────────
 class InspectionIn(BaseModel):
+    id: UUID | None = None  # made on the phone, so a resend from the offline outbox is a no-op
     kind: InspectionKind = "open"
     starts_at: datetime
     ends_at: datetime | None = None
@@ -69,11 +70,12 @@ def create_inspection(property_id: UUID, body: InspectionIn, person: Person) -> 
         live = conn.execute("SELECT id FROM campaign WHERE property_id = %s AND outcome IS NULL", (property_id,)).fetchone()
         ends = body.ends_at or (body.starts_at + timedelta(minutes=30 if body.kind == "open" else 60))
         row = conn.execute(
-            """INSERT INTO inspection (property_id, campaign_id, kind, starts_at, ends_at, state, inspector, notes)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
-            (property_id, live and live["id"], body.kind, body.starts_at, ends, body.state, body.inspector, body.notes),
+            """INSERT INTO inspection (id, property_id, campaign_id, kind, starts_at, ends_at, state, inspector, notes)
+               VALUES (coalesce(%s, uuidv7()), %s, %s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (id) DO NOTHING RETURNING id""",
+            (body.id, property_id, live and live["id"], body.kind, body.starts_at, ends, body.state, body.inspector, body.notes),
         ).fetchone()
-    return {"id": row["id"]}
+    return {"id": row["id"] if row else body.id}
 
 
 @router.patch("/inspections/{inspection_id}")
@@ -253,18 +255,30 @@ class PhotoFromUrl(BaseModel):
 
 
 def download_image(url: str) -> tuple[bytes, str]:
+    return download_file(url, ("image/",), "image/*", "photo")
+
+
+MAX_DOCUMENT = 25 * 1024 * 1024
+DOCUMENT_TYPES = ("application/pdf", "image/")
+
+
+def download_file(url: str, types: tuple[str, ...] = DOCUMENT_TYPES, accept: str = "application/pdf,image/*",
+                  noun: str = "document") -> tuple[bytes, str]:
     from .decide import BROWSER_UA
+    limit = MAX_IMAGE if noun == "photo" else MAX_DOCUMENT
     try:
-        req = UrlRequest(url, headers={"User-Agent": BROWSER_UA, "Accept": "image/*"})
-        with urlopen(req, timeout=20) as r:
+        req = UrlRequest(url, headers={"User-Agent": BROWSER_UA, "Accept": accept})
+        with urlopen(req, timeout=30) as r:
             mime = (r.headers.get_content_type() or "").lower()
-            data = r.read(MAX_IMAGE + 1)
+            data = r.read(limit + 1)
     except (HTTPError, URLError, TimeoutError) as e:
-        raise HTTPException(502, f"Couldn't download the photo ({getattr(e, 'code', None) or 'no response'}).") from None
-    if not mime.startswith("image/"):
-        raise HTTPException(422, "That link isn't an image.")
-    if len(data) > MAX_IMAGE:
-        raise HTTPException(413, "That photo is over 15 MB.")
+        raise HTTPException(502, f"Couldn't download the {noun} ({getattr(e, 'code', None) or 'no response'}).") from None
+    if mime == "application/octet-stream" and data[:5] == b"%PDF-":
+        mime = "application/pdf"  # some document portals don't say what they're sending
+    if not mime.startswith(types):
+        raise HTTPException(422, "That link isn't an image." if noun == "photo" else "That link isn't a PDF or an image.")
+    if len(data) > limit:
+        raise HTTPException(413, f"That {noun} is over {limit // (1024 * 1024)} MB.")
     return data, mime
 
 
@@ -302,14 +316,19 @@ def save_photos_later(property_id: UUID, person, urls: list[str]) -> None:
 
 
 @router.post("/properties/{property_id}/listing-update")
-def listing_update(property_id: UUID, body: ListingUpdateIn, person: Person) -> dict:
+def listing_update(property_id: UUID, body: ListingUpdateIn, person: Person, preview: bool = False) -> dict:
     """A tracked house captured again with the bookmarklet: add what's new (guide, dates, inspections, agents,
-    Statement of Information, tags, photos). Safe to repeat."""
+    Statement of Information, tags, rooms and areas, photos). Safe to repeat. With ?preview=true it does the
+    same work and rolls it back, so the panel shows exactly what Update will do."""
     from .. import listing_apply
     with tx(person) as conn:
         if conn.execute("SELECT 1 FROM property WHERE id = %s", (property_id,)).fetchone() is None:
             raise not_found("Property")
-        added = listing_apply.refresh(conn, property_id, body)
+        with conn.transaction(force_rollback=preview):
+            added = listing_apply.refresh(conn, property_id, body)
+    if preview:
+        added["photos"] = len(body.photos)
+        return added
     if body.photos:
         save_photos_later(property_id, person, body.photos)
     added["photos"] = len(body.photos)
@@ -337,6 +356,27 @@ def listing_photo(property_id: UUID, person: Person) -> dict:
     if not image:
         raise HTTPException(422, "Couldn't find a photo on the listing page.")
     return save_photo(property_id, person, image, "From the listing")
+
+
+@router.post("/attachments/{attachment_id}/keep-copy")
+def keep_copy(attachment_id: UUID, person: Person) -> dict:
+    """A document saved as a link (say the Statement of Information from a listing): download it into House Track,
+    so it opens in the app's viewer, works offline, and survives the link going dead."""
+    with tx() as conn:
+        row = conn.execute("SELECT url FROM attachment WHERE id = %s", (attachment_id,)).fetchone()
+    if row is None:
+        raise not_found("Attachment")
+    if not row["url"]:
+        raise HTTPException(422, "This one is already kept in House Track.")
+    data, mime = download_file(row["url"])
+    sha = blobs.store(data)
+    if mime.startswith("image/"):
+        blobs.image_facts(data, sha)
+    name = row["url"].split("?")[0].rstrip("/").rsplit("/", 1)[-1][:200] or "document"
+    with tx(person) as conn:
+        conn.execute("""UPDATE attachment SET sha256 = %s, mime_type = %s, byte_size = %s, original_name = %s, url = NULL
+                        WHERE id = %s""", (sha, mime, len(data), name, attachment_id))
+    return {"id": attachment_id, "mime_type": mime, "byte_size": len(data)}
 
 
 class AttachmentPatch(BaseModel):

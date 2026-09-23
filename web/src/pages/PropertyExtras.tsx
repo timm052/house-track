@@ -1,10 +1,15 @@
 // Property page sections for milestone 3: inspections (with each person's notes) and photos/documents.
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
+import { FileText } from "lucide-react";
 import { api } from "../api";
-import { fromLocalInput, when } from "../format";
-import { newId, sendOrQueue } from "../outbox";
+import { fromLocalInput, INSPECTION_KINDS, when } from "../format";
+import { newId, sendOrQueue, uploadFiles, uploadMessage } from "../outbox";
 import { usePeople } from "../people";
+import ConfirmButton from "../ConfirmButton";
+import type { ViewerItem } from "../DocViewer";
+
+const DocViewer = lazy(() => import("../DocViewer"));
 
 export type Inspection = {
   id: string; kind: string; starts_at: string; ends_at: string | null; state: string; inspector: string | null;
@@ -15,10 +20,7 @@ export type Attachment = {
   url: string | null; caption: string | null; taken_at: string | null; created_at: string; created_by: string;
 };
 
-const KINDS: Record<string, string> = {
-  open: "Open for inspection", private: "Private inspection", second_look: "Second look", building_pest: "Building & pest",
-  display_suite: "Display suite", pre_settlement: "Pre-settlement", other: "Other",
-};
+const KINDS = INSPECTION_KINDS;
 // Victorian labels for the generic document kinds (region pack, PLAN.md D9).
 export const DOC_KINDS: Record<string, string> = {
   photo: "Photo", floorplan: "Floorplan", price_statement: "Statement of Information", vendor_statement: "Section 32",
@@ -120,7 +122,7 @@ function AttendeeNote({ inspectionId, initial, attended, onDone }: { inspectionI
   );
 }
 
-export function Files({ propertyId, attachments, coverId }: { propertyId: string; attachments: Attachment[]; coverId?: string | null }) {
+export function Files({ propertyId, attachments, coverId, address }: { propertyId: string; attachments: Attachment[]; coverId?: string | null; address?: string }) {
   const refresh = useRefresh(propertyId);
   const { me } = usePeople();
   const [kind, setKind] = useState("photo");
@@ -133,16 +135,11 @@ export function Files({ propertyId, attachments, coverId }: { propertyId: string
     setBusy(true);
     setError(null);
     try {
-      for (const file of Array.from(files)) {
-        const form = new FormData();
-        form.append("file", file);
-        form.append("kind", kind);
-        const res = await fetch(`/api/properties/${propertyId}/attachments`, { method: "POST", body: form, headers: { "X-Person-Id": me?.id ?? "" } });
-        if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail ?? "Upload failed");
-      }
+      const result = await uploadFiles(propertyId, address ?? "this house", Array.from(files), kind);
+      if (result.queued) setError(uploadMessage(result, kind === "photo" ? "photo" : "file"));
       refresh();
     } catch (e) {
-      setError(e instanceof TypeError ? "Uploading needs a connection. The files stay on your phone; try again later." : (e as Error).message);
+      setError((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -161,6 +158,19 @@ export function Files({ propertyId, attachments, coverId }: { propertyId: string
     Number(b.id === coverId) - Number(a.id === coverId) || Number(fromListing(b)) - Number(fromListing(a))
     || (fromListing(a) ? a.created_at.localeCompare(b.created_at) : b.created_at.localeCompare(a.created_at)));
   const docs = attachments.filter((a) => !(a.sha256 && a.mime_type?.startsWith("image/")));
+  // The viewer steps through photos, or through documents kept in House Track (links open on their own site).
+  const [viewing, setViewing] = useState<{ items: ViewerItem[]; start: number } | null>(null);
+  const photoItems: ViewerItem[] = photos.map((p) => ({ id: p.id, title: p.caption ?? p.original_name ?? "Photo", mime: p.mime_type }));
+  const fileDocs = docs.filter((d) => !d.url);
+  const docItems: ViewerItem[] = fileDocs.map((d) => ({ id: d.id, title: d.caption ?? d.original_name ?? DOC_KINDS[d.kind] ?? "Document", mime: d.mime_type }));
+  const [keeping, setKeeping] = useState<string | null>(null);
+  async function keepCopy(id: string) {
+    setKeeping(id);
+    setError(null);
+    try { await api(`/api/attachments/${id}/keep-copy`, { method: "POST" }); refresh(); }
+    catch (e) { setError((e as Error).message); }
+    finally { setKeeping(null); }
+  }
   return (
     <div className="card stack">
       <h2>Photos and documents</h2>
@@ -168,7 +178,8 @@ export function Files({ propertyId, attachments, coverId }: { propertyId: string
         <div className="thumbs">
           {photos.map((p) => (
             <div key={p.id} className={`thumb ${p.id === coverId ? "is-cover" : ""}`}>
-              <a href={`/api/attachments/${p.id}/file`} target="_blank" rel="noreferrer" title={p.caption ?? p.original_name ?? ""}>
+              <a href={`/api/attachments/${p.id}/file`} title={p.caption ?? p.original_name ?? ""}
+                onClick={(e) => { e.preventDefault(); setViewing({ items: photoItems, start: photos.indexOf(p) }); }}>
                 <img src={`/api/attachments/${p.id}/thumb`} alt={p.caption ?? DOC_KINDS[p.kind]} loading="lazy" />
               </a>
               {p.id === coverId && <span className="thumb-badge">Cover</span>}
@@ -177,22 +188,33 @@ export function Files({ propertyId, attachments, coverId }: { propertyId: string
                   <button title="Use as the cover photo" onClick={() => api(`/api/properties/${propertyId}/cover`, { method: "PUT", body: { attachment_id: p.id } }).then(refresh)}>
                     ★ Cover</button>
                 )}
-                <button title="Remove this photo" aria-label="Remove this photo"
-                  onClick={() => { if (confirm("Remove this photo?")) api(`/api/attachments/${p.id}`, { method: "DELETE" }).then(refresh); }}>✕</button>
+                <ConfirmButton className="" title="Remove this photo" label="✕" question="Remove?" yes="Remove"
+                  onConfirm={() => api(`/api/attachments/${p.id}`, { method: "DELETE" }).then(refresh)} />
               </div>
             </div>
           ))}
         </div>
       )}
       {docs.map((d) => (
-        <div key={d.id} className="row small">
+        <div key={d.id} className="row small doc-row">
           <span className="pill">{DOC_KINDS[d.kind] ?? d.kind}</span>
-          <a className="grow" href={d.url ?? `/api/attachments/${d.id}/file`} target="_blank" rel="noreferrer">
-            {d.caption ?? d.original_name ?? d.url}
-          </a>
-          <button className="link" onClick={() => api(`/api/attachments/${d.id}`, { method: "DELETE" }).then(refresh)}>Remove</button>
+          {d.url ? (
+            <>
+              <a className="grow" href={d.url} target="_blank" rel="noreferrer">{d.caption ?? d.url} ↗</a>
+              <button className="link" disabled={keeping === d.id} onClick={() => keepCopy(d.id)}
+                title="Download it into House Track so it opens here and works offline">{keeping === d.id ? "Saving…" : "Keep a copy"}</button>
+            </>
+          ) : (
+            <button className="link grow doc-open" onClick={() => setViewing({ items: docItems, start: fileDocs.indexOf(d) })}>
+              <FileText /> {d.caption ?? d.original_name ?? "Document"}</button>
+          )}
+          <ConfirmButton className="link" label="Remove" question="Remove it?" yes="Remove"
+            onConfirm={() => api(`/api/attachments/${d.id}`, { method: "DELETE" }).then(refresh)} />
         </div>
       ))}
+      {viewing && (
+        <Suspense fallback={null}><DocViewer items={viewing.items} start={viewing.start} onClose={() => setViewing(null)} /></Suspense>
+      )}
       <div className="grid2">
         <select value={kind} onChange={(e) => setKind(e.target.value)} aria-label="Kind">
           {Object.entries(DOC_KINDS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}

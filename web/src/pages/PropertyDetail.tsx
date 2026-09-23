@@ -1,32 +1,36 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  api, OUTCOMES, PROPERTY_TYPES, STATUSES,
-  type Campaign, type GuideSource, type JudgementKind, type Outcome, type PropertyDetail as Detail,
-  type PropertyType, type SaleMethod, type Stage, type Stance, type Status,
-} from "../api";
-import { day, fromLocalInput, km, LABEL, minutes, money, moneyRange, parseMoney, saleWhen, toLocalInput, when } from "../format";
+  api, PROPERTY_TYPES, STATUSES,
+  type Campaign, type GuideSource, type JudgementKind, type PropertyDetail as Detail,
+  type PropertyType, type SaleMethod, type Stage, type Stance, type Status, ApiError } from "../api";
+import { parseMoney, day, fromLocalInput, km, LABEL, minutes, money, moneyRange, toLocalInput, saleWhen, streetLine, when } from "../format";
 import { newId, sendOrQueue } from "../outbox";
 import { usePeople } from "../people";
 import { STATUS_COLOUR, changeTone, minutesTone, soonTone, suburbClass, tagStyle, useSuburbSlots, useTagColours } from "../colour";
 import { Checklist, Comparables, CostAt, PriceHistory } from "./MoneyExtras";
 import { Files, Inspections } from "./PropertyExtras";
 import { ScoresCard } from "./Decide";
-import { Bath, BedDouble, Building2, CalendarDays, CalendarPlus, Camera, Car, CircleDollarSign, CircleHelp, DollarSign, Gavel, House, ImagePlus, LandPlot, MapPin, Paperclip, PartyPopper, Scale, School, Tag, ThumbsDown, ThumbsUp, TrainFront, TriangleAlert } from "lucide-react";
+import { Bath, BedDouble, Building2, CalendarDays, CalendarPlus, Camera, Car, CircleDollarSign, CircleHelp, DollarSign, Gavel, House, ImagePlus, LandPlot, MapPin, Paperclip, PartyPopper, Scale, School, Tag, ThumbsDown, ThumbsUp, TrainFront, TramFront, Trash2, TriangleAlert } from "lucide-react";
+import ConfirmButton from "../ConfirmButton";
+import { OutcomeForm, outcomeStatus, statusOutOfStep } from "../Outcome";
 
 const MiniMap = lazy(() => import("../map/MiniMap"));
 
-/** Run a write, then refresh this property and the list. */
+/** Run a write, then refresh this property and the list. A conflict (someone else changed it first) also
+ *  refreshes, so the page shows their value next to the message. */
 function useWrite(propertyId: string) {
   const queryClient = useQueryClient();
+  const reload = () => {
+    queryClient.invalidateQueries({ queryKey: ["property", propertyId] });
+    queryClient.invalidateQueries({ queryKey: ["overview"] });
+  };
   return useMutation({
     mutationFn: ({ path, method = "POST", body }: { path: string; method?: string; body?: unknown }) =>
       api(path, { method, body }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["property", propertyId] });
-      queryClient.invalidateQueries({ queryKey: ["overview"] });
-    },
+    onSuccess: reload,
+    onError: (e) => { if (e instanceof ApiError && e.status === 409) reload(); },
   });
 }
 
@@ -78,15 +82,11 @@ export default function PropertyDetail() {
         )}
         {tab === "sale" && (
           <>
-            <PriceStats p={p} c={latest} />
-            {live ? <CampaignCard propertyId={p.id} c={live} /> : <NewCampaign p={p} />}
-            {pricePoints >= 2 && (
-              <div className="card"><h2>Price over time</h2><PriceHistory campaigns={p.campaigns} /></div>
-            )}
+            {live ? <SaleTab p={p} c={live} showChart={pricePoints >= 2} /> : <NewCampaign p={p} />}
             {past.length > 0 && (
               <details className="card">
-                <summary>Earlier campaigns ({past.length})</summary>
-                {past.map((c) => <CampaignCard key={c.id} propertyId={p.id} c={c} />)}
+                <summary><strong>Earlier campaigns</strong> <span className="muted">({past.length})</span></summary>
+                {past.map((c) => <PastCampaign key={c.id} c={c} />)}
               </details>
             )}
           </>
@@ -111,7 +111,7 @@ export default function PropertyDetail() {
         {tab === "files" && (
           <>
             {!p.attachments.some((a) => a.caption === "From the listing") && <ListingPhoto p={p} />}
-            <Files propertyId={p.id} attachments={p.attachments} coverId={p.cover_id} />
+            <Files propertyId={p.id} attachments={p.attachments} coverId={p.cover_id} address={p.address} />
           </>
         )}
       </div>
@@ -161,9 +161,14 @@ function Banner({ p }: { p: Detail }) {
 function ListingPhoto({ p, compact = false }: { p: Detail; compact?: boolean }) {
   const queryClient = useQueryClient();
   const [state, setState] = useState<{ busy: boolean; msg: string | null }>({ busy: false, msg: null });
-  const hasLink = p.campaigns.some((c) => c.links.length > 0);
-  if (!hasLink) return compact ? null : (
+  const links = p.campaigns.flatMap((c) => c.links);
+  if (!links.length) return compact ? null : (
     <p className="small muted">Add the listing link on the Price &amp; sale tab to fetch its main photo, or upload photos below.</p>
+  );
+  // Domain and realestate.com.au refuse server reads: their photos come in with the + House Track button.
+  if (links.every((l) => l.portal === "domain" || l.portal === "rea")) return compact ? null : (
+    <p className="small muted">To add the listing's photos, open the listing and click <strong>+ House Track</strong> in your bookmarks
+      bar (<Link to="/settings#bookmarklets">set it up</Link>), or upload photos below.</p>
   );
   async function fetchIt() {
     setState({ busy: true, msg: null });
@@ -185,7 +190,7 @@ function ListingPhoto({ p, compact = false }: { p: Detail; compact?: boolean }) 
 
 function Title({ p }: { p: Detail }) {
   const slots = useSuburbSlots();
-  const street = [p.unit && `${p.unit}/`, p.street_number, p.street].filter(Boolean).join(p.unit ? "" : " ").replace("/ ", "/");
+  const street = streetLine(p);
   const facts: [React.ReactNode, string, string][] = [
     [<BedDouble />, p.beds != null ? String(p.beds) : "—", p.beds === 1 ? "bed" : "beds"],
     [<Bath />, p.baths != null ? String(p.baths) : "—", p.baths === 1 ? "bath" : "baths"],
@@ -259,12 +264,30 @@ function PriceBox({ p, c }: { p: Detail; c: Campaign | null }) {
 }
 
 function Actions({ p, setTab }: { p: Detail; setTab: (t: Tab) => void }) {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  async function remove() {
+    try {
+      await api(`/api/properties/${p.id}`, { method: "DELETE" });
+      queryClient.removeQueries({ queryKey: ["property", p.id] });
+      queryClient.invalidateQueries();
+      navigate("/");
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
   return (
     <div className="card actions">
       <button onClick={() => setTab("inspections")}><CalendarPlus /> Add inspection</button>
       <button onClick={() => setTab("files")}><ImagePlus /> Add photos</button>
       <Link to={`/compare?ids=${p.id}`}><button><Scale /> Compare</button></Link>
       <Link to={`/map?pin=${p.id}`}><button><MapPin /> {p.lat == null ? "Set pin" : "Move pin"}</button></Link>
+      <div className="actions-foot">
+        <ConfirmButton label={<><Trash2 /> Delete house</>} yes="Delete it"
+          question="For mistakes and duplicates: everything recorded about it goes. Ruled it out? Set its status instead." onConfirm={remove} />
+        {error && <p className="error small">{error}</p>}
+      </div>
     </div>
   );
 }
@@ -302,7 +325,7 @@ function DetailsTable({ p }: { p: Detail }) {
 
 /** One line per thing worth knowing, each pointing at the tab with the detail. */
 function AtAGlance({ p, c, setTab }: { p: Detail; c: Campaign | null; setTab: (t: Tab) => void }) {
-  const station = p.travel.stations.find((s) => s.is_nearest) ?? p.travel.stations[0];
+  const station = p.travel.nearest;
   const schools = p.overlays.filter((o) => o.code.includes("school"));
   const flags = p.overlays.filter((o) => !o.code.includes("school") && o.effect !== "info");
   const guides = oldestFirst(c);
@@ -310,9 +333,14 @@ function AtAGlance({ p, c, setTab }: { p: Detail; c: Campaign | null; setTab: (t
   const median = [...guides].reverse().find((g) => g.statement_suburb_median_aud)?.statement_suburb_median_aud;
   const next = p.inspections.filter((i) => new Date(i.starts_at).getTime() > Date.now()).sort((a, b) => a.starts_at.localeCompare(b.starts_at))[0];
   const items: { icon: React.ReactNode; text: React.ReactNode; tab: Tab }[] = [];
-  if (station) items.push({ icon: <TrainFront />, tab: "location", text: <><span className={`tone-${minutesTone(station.duration_s / 60)}`}>{minutes(station.duration_s)}</span> walk to {station.name}</> });
+  if (station) items.push({ icon: <TrainFront />, tab: "location", text: <>
+    {station.walk_s != null && <><span className={`tone-${minutesTone(station.walk_s / 60)}`}>{minutes(station.walk_s)}</span> walk</>}
+    {station.walk_s != null && station.drive_s != null && " · "}
+    {station.drive_s != null && <><span className={`tone-${minutesTone(station.drive_s / 60, "drive")}`}>{minutes(station.drive_s)}</span> drive</>}
+    {" "}to {station.name} station</> });
   for (const d of p.travel.destinations.slice(0, 3)) {
     if (d.drive_s != null) items.push({ icon: <Car />, tab: "location", text: <><span className={`tone-${minutesTone(d.drive_s / 60, "drive")}`}>{minutes(d.drive_s)}</span> drive to {d.name}</> });
+    if (d.transit?.duration_s != null) items.push({ icon: <TramFront />, tab: "location", text: <><span className={`tone-${minutesTone(d.transit.duration_s / 60, "transit")}`}>{minutes(d.transit.duration_s)}</span> public transport to {d.name}</> });
   }
   for (const sch of schools) items.push({ icon: <School />, tab: "location", text: <>{sch.label} <span className="muted">zone</span></> });
   for (const f of flags) items.push({ icon: <TriangleAlert />, tab: "location", text: <span className={f.effect === "hard_exclude" ? "tone-bad" : "tone-warn"}>{f.label}</span> });
@@ -379,33 +407,30 @@ function Timeline({ p }: { p: Detail }) {
 }
 
 // ─── price tab ────────────────────────────────────────────────────────
-function PriceStats({ p, c }: { p: Detail; c: Campaign | null }) {
+/** What the numbers say about the guide, only the ones that are known (no rows of dashes). */
+function PriceFacts({ p, c }: { p: Detail; c: Campaign }) {
   const guides = oldestFirst(c);
   const now = guides[guides.length - 1], first = guides[0];
-  const mid = (g?: { low_aud: number; high_aud: number }) => (g ? (g.low_aud + g.high_aud) / 2 : null);
-  const change = now && first && guides.length > 1 ? mid(now)! - mid(first)! : null;
+  if (!now) return null;
+  const mid = (g: { low_aud: number; high_aud: number }) => (g.low_aud + g.high_aud) / 2;
+  const change = guides.length > 1 ? mid(now) - mid(first) : 0;
   const median = [...guides].reverse().find((g) => g.statement_suburb_median_aud)?.statement_suburb_median_aud ?? null;
-  const walkAway = [...(c?.judgements ?? [])].filter((j) => j.kind === "walk_away").sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
-  const tiles: { label: string; value: string; sub?: string; tone?: string }[] = [
-    { label: "Current guide", value: now ? moneyRange(now.low_aud, now.high_aud) : "—", sub: now ? `${LABEL.guideSource[now.source]} · ${day(now.observed_at)}` : "No guide yet" },
-    { label: "Change since first guide", value: change == null ? "—" : `${change > 0 ? "↑" : change < 0 ? "↓" : ""} ${money(Math.abs(change))}`,
-      sub: first && guides.length > 1 ? `from ${moneyRange(first.low_aud, first.high_aud)}` : "Only one guide so far", tone: change ? changeTone(change) : "" },
-    { label: "Guide per m² of land", value: now && p.land_m2 ? `$${Math.round(mid(now)! / p.land_m2).toLocaleString()}` : "—", sub: p.land_m2 ? `${Number(p.land_m2).toLocaleString()} m²` : "Land area unknown" },
-    { label: "Suburb median", value: median ? money(median) : "—",
-      sub: median && now ? `guide is ${Math.round((mid(now)! / median - 1) * 100)}% ${mid(now)! >= median ? "above" : "below"}` : "From a Statement of Information" },
-    { label: "Our walk-away", value: walkAway ? money(walkAway.amount_aud) : "—",
-      sub: walkAway && now ? `${walkAway.amount_aud >= now.high_aud ? "above" : "below"} the top of the guide by ${money(Math.abs(walkAway.amount_aud - now.high_aud))}` : "Set it under Our numbers",
-      tone: walkAway && now ? (walkAway.amount_aud >= now.high_aud ? "good" : "bad") : "" },
-  ];
-  return (
-    <div className="stat-grid" style={{ marginTop: 12 }}>
-      {tiles.map((t) => (
-        <div key={t.label} className="stat"><div className="muted small">{t.label}</div>
-          <div className={`stat-value ${t.tone ? `tone-${t.tone}` : ""}`}>{t.value}</div>{t.sub && <div className="muted small">{t.sub}</div>}</div>
-      ))}
-    </div>
-  );
+  const walkAway = [...c.judgements].filter((j) => j.kind === "walk_away").sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+  const facts: { text: React.ReactNode; tone?: string }[] = [];
+  if (change) facts.push({ tone: changeTone(change), text: <>Guide {change > 0 ? "up" : "down"} {money(Math.abs(change))} since {day(first.observed_at)} ({moneyRange(first.low_aud, first.high_aud)})</> });
+  if (median) facts.push({ text: <>{Math.abs(Math.round((mid(now) / median - 1) * 100))}% {mid(now) >= median ? "above" : "below"} the suburb median ({money(median)})</> });
+  if (p.land_m2) facts.push({ text: <>${Math.round(mid(now) / p.land_m2).toLocaleString()} per m² of land</> });
+  if (walkAway) facts.push({ tone: walkAway.amount_aud >= now.high_aud ? "good" : "bad",
+    text: <>Our walk-away {money(walkAway.amount_aud)} is {money(Math.abs(walkAway.amount_aud - now.high_aud))} {walkAway.amount_aud >= now.high_aud ? "above" : "below"} the top of the guide</> });
+  if (!facts.length) return null;
+  return <ul className="price-facts">{facts.map((f, i) => <li key={i} className={f.tone ? `tone-${f.tone}` : ""}>{f.text}</li>)}</ul>;
 }
+
+const countdown = (at: string | null) => {
+  if (!at) return null;
+  const days = Math.round((new Date(at).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 86400_000);
+  return days < 0 ? null : days === 0 ? "today" : days === 1 ? "tomorrow" : `in ${days} days`;
+};
 
 // ─── inspections tab ──────────────────────────────────────────────────
 function VerdictHistory({ p }: { p: Detail }) {
@@ -484,18 +509,21 @@ function EditProperty({ p, onDone }: { p: Detail; onDone: () => void }) {
   const s = (v: string) => (v.trim() === "" ? null : v.trim());
 
   function save() {
-    write.mutate(
-      {
-        path: `/api/properties/${p.id}`, method: "PATCH",
-        body: {
-          address: { unit: s(f.unit), street_number: s(f.street_number), street: s(f.street), suburb: s(f.suburb),
-                     postcode: s(f.postcode), plan_number: s(f.plan_number), lot_number: s(f.lot_number) },
-          property_type: f.property_type, beds: n(f.beds), baths: n(f.baths), car_spaces: n(f.car_spaces),
-          land_m2: n(f.land_m2), owners_corp_fees_aud_pa: n(f.owners_corp), notes: s(f.notes),
-        },
-      },
-      { onSuccess: onDone },
-    );
+    // Only what was changed, with what it was: the server refuses the save if someone changed any of those
+    // fields meanwhile, instead of this form quietly putting back its older copy of everything.
+    const address = { unit: s(f.unit), street_number: s(f.street_number), street: s(f.street), suburb: s(f.suburb),
+                      postcode: s(f.postcode), plan_number: s(f.plan_number), lot_number: s(f.lot_number) };
+    const fields = { property_type: f.property_type, beds: n(f.beds), baths: n(f.baths), car_spaces: n(f.car_spaces),
+                     land_m2: n(f.land_m2), owners_corp_fees_aud_pa: n(f.owners_corp), notes: s(f.notes) };
+    const was = p as unknown as Record<string, unknown>;
+    const body: Record<string, unknown> = {}, expected: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(fields)) if (v !== (was[k] ?? null)) { body[k] = v; expected[k] = was[k] ?? null; }
+    if (Object.entries(address).some(([k, v]) => v !== (was[k] ?? null))) {
+      body.address = address;
+      for (const k of Object.keys(address)) expected[k] = was[k] ?? null;
+    }
+    if (!Object.keys(body).length) { onDone(); return; }
+    write.mutate({ path: `/api/properties/${p.id}`, method: "PATCH", body: { ...body, expected } }, { onSuccess: onDone });
   }
 
   return (
@@ -536,6 +564,8 @@ function EditProperty({ p, onDone }: { p: Detail; onDone: () => void }) {
 // ─── shared status ────────────────────────────────────────────────────
 function StatusCard({ p, bare = false }: { p: Detail; bare?: boolean }) {
   const write = useWrite(p.id);
+  // The most recent campaign that has ended, when there's no live one.
+  const ended = p.campaigns.some((c) => !c.outcome) ? null : p.campaigns.find((c) => c.outcome) ?? null;
   const { byId } = usePeople();
   return (
     <div className={bare ? "status-inline" : "card"}>
@@ -543,11 +573,22 @@ function StatusCard({ p, bare = false }: { p: Detail; bare?: boolean }) {
         <span><span className="status-dot" style={{ background: STATUS_COLOUR[p.status], marginRight: 6 }} />Status (shared)</span>
         <select
           value={p.status}
-          onChange={(e) => write.mutate({ path: `/api/properties/${p.id}/status`, body: { status: e.target.value as Status } })}
+          onChange={(e) => write.mutate({ path: `/api/properties/${p.id}/status`, body: {
+            status: e.target.value as Status, check_latest: true, expected_latest_id: p.status_history[0]?.id ?? null } })}
         >
           {STATUSES.map((s) => <option key={s} value={s}>{LABEL.status[s]}</option>)}
         </select>
       </label>
+      {write.error && <p className="error small">{(write.error as Error).message}</p>}
+      {ended && statusOutOfStep(ended.outcome, ended.bought_by_us, p.status) && (
+        <p className="small tone-warn" style={{ margin: 0 }}>
+          {LABEL.outcome[ended.outcome!]}, but the status still says {LABEL.status[p.status]}.{" "}
+          <button className="link" onClick={() => write.mutate({ path: `/api/properties/${p.id}/status`, body: {
+            status: outcomeStatus(ended.outcome, ended.bought_by_us), reason: "Sale outcome recorded",
+            check_latest: true, expected_latest_id: p.status_history[0]?.id ?? null } })}>
+            Set it to {LABEL.status[outcomeStatus(ended.outcome, ended.bought_by_us)!]}</button>
+        </p>
+      )}
       {p.status_history.length > 1 && (
         <details>
           <summary>History</summary>
@@ -584,14 +625,23 @@ function WhereAndGettingAround({ p }: { p: Detail }) {
       </div>
       {p.lat != null && (
         <>
-          {(t.stations.length > 0 || t.destinations.length > 0) && (
+          {(t.nearest || t.stations.length > 0 || t.destinations.length > 0) && (
             <table className="travel">
-              <thead><tr><th>To</th><th>Walk</th><th>Drive</th><th>Distance</th></tr></thead>
+              <thead><tr><th>To</th><th>Walk</th><th>Drive</th><th>Transit</th><th>Distance</th></tr></thead>
               <tbody>
-                {t.stations.map((s) => (
+                {t.nearest && (
+                  <tr>
+                    <th><TrainFront /> <strong>{t.nearest.name}</strong><span className="muted small"> nearest station</span></th>
+                    <td className={`tone-${minutesTone(t.nearest.walk_s == null ? null : t.nearest.walk_s / 60)}`}>{t.nearest.walk_s == null ? "—" : minutes(t.nearest.walk_s)}</td>
+                    <td className={`tone-${minutesTone(t.nearest.drive_s == null ? null : t.nearest.drive_s / 60, "drive")}`}>{t.nearest.drive_s == null ? "—" : minutes(t.nearest.drive_s)}</td>
+                    <td className="muted">—</td>
+                    <td>{km(t.nearest.drive_m ?? t.nearest.walk_m)}</td>
+                  </tr>
+                )}
+                {t.stations.filter((s) => s.name !== t.nearest?.name).map((s) => (
                   <tr key={s.place_id}>
-                    <th><TrainFront /> {s.is_nearest ? <strong>{s.name}</strong> : s.name}{s.is_nearest && <span className="muted small"> nearest</span>}</th>
-                    <td className={`tone-${minutesTone(s.duration_s / 60)}`}>{minutes(s.duration_s)}</td><td className="muted">—</td><td>{km(s.distance_m)}</td>
+                    <th><TrainFront /> {s.name}<span className="muted small"> your station</span></th>
+                    <td className={`tone-${minutesTone(s.duration_s / 60)}`}>{minutes(s.duration_s)}</td><td className="muted">—</td><td className="muted">—</td><td>{km(s.distance_m)}</td>
                   </tr>
                 ))}
                 {t.destinations.map((d) => (
@@ -600,15 +650,24 @@ function WhereAndGettingAround({ p }: { p: Detail }) {
                     <td className={`tone-${minutesTone(d.walk_s == null ? null : d.walk_s / 60)}`}
                       title={d.walk_s == null && (d.drive_m ?? 0) > 25_000 ? "Too far to walk" : undefined}>{d.walk_s == null ? "—" : minutes(d.walk_s)}</td>
                     <td className={`tone-${minutesTone(d.drive_s == null ? null : d.drive_s / 60, "drive")}`}>{d.drive_s == null ? "—" : minutes(d.drive_s)}</td>
+                    <td className={`tone-${minutesTone(d.transit?.duration_s == null ? null : d.transit.duration_s / 60, "transit")}`}>
+                      {d.transit?.duration_s == null ? "—" : minutes(d.transit.duration_s)}</td>
                     <td>{d.drive_m == null ? "—" : km(d.drive_m)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
-          {t.destinations.length > 0 && <div className="small muted">Drive times assume no traffic.</div>}
+          {t.destinations.filter((d) => d.transit?.duration_s != null).map((d) => <Journey key={d.place_id} to={d.name} j={d.transit!} />)}
+          {t.destinations.filter((d) => d.transit && d.transit.duration_s == null).map((d) => (
+            <div key={d.place_id} className="small muted">No public transport journey to {d.name} arriving between 6 and 9am on a weekday was found.</div>
+          ))}
+          {t.destinations.length > 0 && (
+            <div className="small muted">Drive times assume no traffic. Public transport: the journey arriving by 9am on a weekday,
+              from <a href="https://transitous.org" target="_blank" rel="noreferrer">Transitous</a> using PTV and V/Line timetables. Check it before relying on it.</div>
+          )}
           {t.pending > 0 && <div className="small muted">Working out travel times…</div>}
-          {t.stations.length === 0 && t.destinations.length === 0 && t.pending === 0 && (
+          {!t.nearest && t.stations.length === 0 && t.destinations.length === 0 && t.pending === 0 && (
             <div className="small muted">No stations or places chosen yet. <Link to="/places">Choose some</Link></div>
           )}
         </>
@@ -639,7 +698,7 @@ function SchoolsAndPlanning({ p }: { p: Detail }) {
 // ─── per-person opinions ──────────────────────────────────────────────
 function Opinions({ p }: { p: Detail }) {
   const { active, byId, me } = usePeople();
-  const [whose, setWhose] = useState(me?.id ?? "");
+  const whose = me?.id ?? "";  // verdicts are always the selected profile's own
   const mine = p.opinions.filter((o) => o.person_id === whose);
   const [stage, setStage] = useState<Stage>(mine.some((o) => o.stage === "pre_inspection") ? "post_inspection" : "pre_inspection");
   const [note, setNote] = useState("");
@@ -690,20 +749,13 @@ function Opinions({ p }: { p: Detail }) {
       </div>
 
       <div className="stack" style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
-        <div className="grid2">
-          <label>
-            Whose opinion
-            <select value={whose} onChange={(e) => setWhose(e.target.value)}>
-              {active.map((person) => <option key={person.id} value={person.id}>{person.display_name}</option>)}
-            </select>
-          </label>
-          <label>
-            When
-            <select value={stage} onChange={(e) => setStage(e.target.value as Stage)}>
-              <option value="pre_inspection">{LABEL.stage.pre_inspection}</option>
-              <option value="post_inspection">{LABEL.stage.post_inspection} (pursue to buy?)</option>
-            </select>
-          </label>
+        <div className="small"><strong><span className="dot" style={{ background: me?.colour }} />Your verdict</strong>
+          <span className="muted"> as {me?.display_name}</span></div>
+        <div className="segmented" role="radiogroup" aria-label="When">
+          {(["pre_inspection", "post_inspection"] as const).map((s) => (
+            <button key={s} role="radio" aria-checked={stage === s} className={stage === s ? "on" : ""} onClick={() => setStage(s)}>
+              {s === "pre_inspection" ? "Before inspecting" : "After: pursue to buy?"}</button>
+          ))}
         </div>
         <textarea placeholder="Note (optional). Dictate it." value={note} onChange={(e) => setNote(e.target.value)} />
         <div className="stance">
@@ -761,105 +813,149 @@ function NewCampaign({ p }: { p: Detail }) {
   );
 }
 
-function CampaignCard({ propertyId, c }: { propertyId: string; c: Campaign }) {
-  const write = useWrite(propertyId);
+/** The Price & sale tab for a live campaign: the sale up top, the price story on the left, our side on the right. */
+function SaleTab({ p, c, showChart }: { p: Detail; c: Campaign; showChart: boolean }) {
+  const write = useWrite(p.id);
   const { byId } = usePeople();
-  const guide = c.price_guides[0];
+  const at = c.sale_method === "auction" ? c.auction_at : c.sale_method === "eoi" ? c.eoi_closes_at : null;
+  const soon = countdown(at);
+  const listedDays = c.listed_on ? Math.max(0, Math.round((Date.now() - new Date(c.listed_on).getTime()) / 86400_000)) : null;
   const latest = (k: JudgementKind) => c.judgements.find((j) => j.kind === k);
   return (
-    <div className="card stack">
-      <div className="row">
-        <h2 className="grow">{c.outcome ? `${LABEL.method[c.sale_method]} · ${LABEL.outcome[c.outcome]}` : saleWhen(c)}</h2>
-        {guide && <strong>{moneyRange(guide.low_aud, guide.high_aud)}</strong>}
+    <>
+      <div className="card sale-hero">
+        <div className="sale-hero-main">
+          <div className="section-title" style={{ marginTop: 0 }}>{LABEL.method[c.sale_method]}</div>
+          <div className="sale-when-big">{at ? saleWhen(c) : c.sale_method === "private_sale" ? "Private sale" : "No date yet"}</div>
+          <div className="row small">
+            {soon && <span className={`pill tone-${soonTone(at)}`}>{soon}</span>}
+            {listedDays != null && <span className="muted">Listed {listedDays} {listedDays === 1 ? "day" : "days"} ago</span>}
+            {c.links.map((l) => (
+              <a key={l.id} className="pill link-pill" href={l.url} target="_blank" rel="noreferrer">
+                {l.portal === "rea" ? "realestate.com.au" : l.portal === "domain" ? "domain.com.au" : new URL(l.url).hostname} ↗</a>
+            ))}
+          </div>
+          <PriceFacts p={p} c={c} />
+        </div>
+        {c.sale_method === "auction" && (
+          <div className="sale-hero-side"><Link to={`/auction/${c.id}`}><button className="primary"><Gavel /> Auction day mode</button></Link></div>
+        )}
+        <div className="sale-hero-edit">
+          <CampaignDates propertyId={p.id} c={c} />
+          <details>
+            <summary>Listing links</summary>
+            {c.links.map((l) => (
+              <div key={l.id} className="row small">
+                <a className="grow" href={l.url} target="_blank" rel="noreferrer">{l.url}</a>
+                <button className="link" onClick={() => write.mutate({ path: `/api/links/${l.id}`, method: "DELETE" })}>Remove</button>
+              </div>
+            ))}
+            <AddLink propertyId={p.id} campaignId={c.id} />
+          </details>
+          <RecordOutcome propertyId={p.id} c={c} />
+        </div>
       </div>
-      {c.outcome && (
-        <div className="small">
-          {day(c.outcome_on)}
-          {c.sold_price_aud != null && ` · sold ${money(c.sold_price_aud)}`}
-          {c.passed_in_bid_aud != null && ` · passed in at ${money(c.passed_in_bid_aud)}`}
-          {c.bought_by_us && <> · bought by us <PartyPopper /></>}
-        </div>
-      )}
-      {!c.outcome && <CampaignDates propertyId={propertyId} c={c} />}
 
-      <section>
-        <h3>Links</h3>
-        {c.links.map((l) => (
-          <div key={l.id} className="row small">
-            <a className="grow" href={l.url} target="_blank" rel="noreferrer">{l.portal === "rea" ? "realestate.com.au" : l.portal === "domain" ? "domain.com.au" : l.url}</a>
-            <button className="link" onClick={() => write.mutate({ path: `/api/links/${l.id}`, method: "DELETE" })}>Remove</button>
-          </div>
-        ))}
-        <AddLink propertyId={propertyId} campaignId={c.id} />
-      </section>
-
-      <section>
-        <h3>Price and guide history</h3>
-        <table className="history-table small">
-          <thead><tr><th>Seen</th><th>Price / guide</th><th>Change</th><th>Source</th><th>By</th></tr></thead>
-          <tbody>
-            {c.price_guides.map((g, i) => {
-              const prev = c.price_guides[i + 1];
-              const mid = (x: { low_aud: number; high_aud: number }) => (x.low_aud + x.high_aud) / 2;
-              const delta = prev ? Math.round(mid(g) - mid(prev)) : null;
-              return (
-                <tr key={g.id}>
-                  <td>{day(g.observed_at)}</td>
-                  <td><strong>{moneyRange(g.low_aud, g.high_aud)}</strong>{g.note && <div className="muted">{g.note}</div>}
-                    {g.statement_suburb_median_aud && <div className="muted">suburb median {money(g.statement_suburb_median_aud)}</div>}</td>
-                  <td className={delta == null ? "muted" : delta > 0 ? "error" : delta < 0 ? "good" : "muted"}>
-                    {delta == null ? "first" : delta === 0 ? "same" : `${delta > 0 ? "↑" : "↓"} ${money(Math.abs(delta))}`}</td>
-                  <td>{LABEL.guideSource[g.source]}</td>
-                  <td>{byId.get(g.created_by)?.display_name}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        <AddGuide propertyId={propertyId} campaignId={c.id} />
-      </section>
-
-      <section>
-        <h3>Our numbers (joint)</h3>
-        <div className="grid3 small">
-          {(["estimated_reserve", "expected_sale", "walk_away"] as const).map((k) => (
-            <div key={k}>
-              <div className="muted">{LABEL.judgement[k]}</div>
-              <strong>{money(latest(k)?.amount_aud)}</strong>
-              {c.judgements.filter((j) => j.kind === k).length > 1 && (
-                <details><summary className="small">history</summary>
-                  {c.judgements.filter((j) => j.kind === k).map((j) => (
-                    <div key={j.id} className="small">{money(j.amount_aud)} · {byId.get(j.created_by)?.display_name}, {day(j.created_at)}</div>
-                  ))}
-                </details>
-              )}
-              {latest(k) && <div className="muted">{byId.get(latest(k)!.created_by)?.display_name}, {day(latest(k)!.created_at)}</div>}
+      <div className="card">
+        <h2>Price history</h2>
+        {showChart && <PriceHistory campaigns={p.campaigns} />}
+        <GuideTable c={c} />
+        <AddGuide propertyId={p.id} campaignId={c.id} />
+      </div>
+          <div className="card">
+            <h2>Our numbers</h2>
+            <p className="small muted" style={{ marginTop: 0 }}>Shared between you both. Each change is kept.</p>
+            <div className="numbers">
+              {(["estimated_reserve", "expected_sale", "walk_away"] as const).map((k) => {
+                const j = latest(k), all = c.judgements.filter((x) => x.kind === k);
+                return (
+                  <div key={k} className="number-tile">
+                    <div className="muted small">{LABEL.judgement[k]}</div>
+                    <div className="stat-value">{j ? money(j.amount_aud) : "—"}</div>
+                    {j && <div className="muted tiny">{byId.get(j.created_by)?.display_name}, {day(j.created_at)}</div>}
+                    {all.length > 1 && (
+                      <details><summary className="tiny">{all.length - 1} earlier</summary>
+                        {all.slice(1).map((x) => <div key={x.id} className="tiny">{money(x.amount_aud)} · {byId.get(x.created_by)?.display_name}, {day(x.created_at)}</div>)}
+                      </details>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          ))}
-        </div>
-        <AddJudgement propertyId={propertyId} campaignId={c.id} />
-        <CostAt campaign={c} />
-      </section>
-
-      <section>
-        <h3>Agent</h3>
-        {c.agents.map((a) => (
-          <div key={a.id} className="small">
-            <strong>{a.name}</strong>{a.agency_name && ` · ${a.agency_name}${a.office ? ` ${a.office}` : ""}`}
-            {a.mobile && <> · <a href={`tel:${a.mobile.replace(/\s/g, "")}`}>{a.mobile}</a></>}
-            {a.email && <> · <a href={`mailto:${a.email}`}>{a.email}</a></>}
+            <AddJudgement propertyId={p.id} campaignId={c.id} />
+            <CostAt campaign={c} />
           </div>
-        ))}
-        <AddAgent propertyId={propertyId} campaignId={c.id} />
-      </section>
-
-      {!c.outcome && c.sale_method === "auction" && (
-        <Link to={`/auction/${c.id}`}><button className="primary">Auction day mode</button></Link>
-      )}
-      <Checklist campaignId={c.id} />
-      <Comparables campaignId={c.id} />
-      {!c.outcome && <RecordOutcome propertyId={propertyId} c={c} />}
+      <div className="tab-grid">
+        <div>
+          <div className="card">
+            <h2>{c.agents.length === 1 ? "Agent" : "Agents"}</h2>
+            {c.agents.length === 0 && <p className="small muted" style={{ margin: 0 }}>None recorded yet.</p>}
+            {c.agents.map((a) => (
+              <div key={a.id} className="agent-row">
+                <div><strong>{a.name}</strong>{a.is_lead && c.agents.length > 1 && <span className="pill" style={{ marginLeft: 6 }}>lead</span>}</div>
+                {a.agency_name && <div className="muted small">{a.agency_name}{a.office ? ` ${a.office}` : ""}</div>}
+                <div className="row small">
+                  {a.mobile && <a href={`tel:${a.mobile.replace(/\s/g, "")}`}>{a.mobile}</a>}
+                  {a.email && <a href={`mailto:${a.email}`}>{a.email}</a>}
+                </div>
+              </div>
+            ))}
+            <AddAgent propertyId={p.id} campaignId={c.id} />
+          </div>
+        </div>
+        <div>
+          <div className="card"><Checklist campaignId={c.id} /></div>
+          <div className="card"><Comparables campaignId={c.id} /></div>
+        </div>
+      </div>
       {write.error && <p className="error">{(write.error as Error).message}</p>}
+    </>
+  );
+}
+
+/** Every guide, newest first, with the change from the one before. */
+function GuideTable({ c }: { c: Campaign }) {
+  const { byId } = usePeople();
+  if (!c.price_guides.length) return <p className="small muted">No guide recorded yet.</p>;
+  return (
+    <table className="history-table small">
+      <thead><tr><th>Seen</th><th>Guide</th><th>Change</th><th>Source</th><th>By</th></tr></thead>
+      <tbody>
+        {c.price_guides.map((g, i) => {
+          const prev = c.price_guides[i + 1];
+          const mid = (x: { low_aud: number; high_aud: number }) => (x.low_aud + x.high_aud) / 2;
+          const delta = prev ? Math.round(mid(g) - mid(prev)) : null;
+          return (
+            <tr key={g.id}>
+              <td>{day(g.observed_at)}</td>
+              <td><strong>{moneyRange(g.low_aud, g.high_aud)}</strong>{g.note && <div className="muted">{g.note}</div>}
+                {g.statement_suburb_median_aud && <div className="muted">suburb median {money(g.statement_suburb_median_aud)}</div>}</td>
+              <td className={delta == null || delta === 0 ? "muted" : `tone-${changeTone(delta)}`}>
+                {delta == null ? "first" : delta === 0 ? "same" : `${delta > 0 ? "↑" : "↓"} ${money(Math.abs(delta))}`}</td>
+              <td>{LABEL.guideSource[g.source]}</td>
+              <td>{byId.get(g.created_by)?.display_name}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+/** An earlier campaign: how it ended and what the guides were. */
+function PastCampaign({ c }: { c: Campaign }) {
+  return (
+    <div className="past-campaign">
+      <div className="row">
+        <strong className="grow">{LABEL.method[c.sale_method]}{c.outcome && ` · ${LABEL.outcome[c.outcome]}`}</strong>
+        <span className="small muted">{day(c.outcome_on)}</span>
+      </div>
+      <div className="small">
+        {c.sold_price_aud != null && <>Sold {money(c.sold_price_aud)}</>}
+        {c.passed_in_bid_aud != null && <>Passed in at {money(c.passed_in_bid_aud)}</>}
+        {c.bought_by_us && <> · bought by us <PartyPopper /></>}
+      </div>
+      <GuideTable c={c} />
     </div>
   );
 }
@@ -1008,41 +1104,37 @@ function AddAgent({ propertyId, campaignId }: { propertyId: string; campaignId: 
 }
 
 function RecordOutcome({ propertyId, c }: { propertyId: string; c: Campaign }) {
-  const write = useWrite(propertyId);
-  const [outcome, setOutcome] = useState<Outcome>(c.sale_method === "auction" ? "sold_at_auction" : "sold");
-  const [price, setPrice] = useState("");
-  const [ours, setOurs] = useState(false);
-  const sold = outcome.startsWith("sold");
-  const aud = parseMoney(price);
+  const queryClient = useQueryClient();
+  const p = queryClient.getQueryData<Detail>(["property", propertyId]);
+  const due = !!c.listing_status || (!!(c.auction_at ?? c.eoi_closes_at) && new Date((c.auction_at ?? c.eoi_closes_at)!).getTime() < Date.now());
   return (
-    <details>
-      <summary>Record outcome</summary>
-      <div className="stack">
-        <select value={outcome} onChange={(e) => setOutcome(e.target.value as Outcome)}>
-          {OUTCOMES.map((o) => <option key={o} value={o}>{LABEL.outcome[o]}</option>)}
-        </select>
-        {(sold || (outcome === "passed_in" && c.sale_method === "auction")) && (
-          <label>{sold ? "Sold price (blank if undisclosed)" : "Passed in at"}<input value={price} onChange={(e) => setPrice(e.target.value)} /></label>
-        )}
-        {sold && <label className="check"><input type="checkbox" checked={ours} onChange={(e) => setOurs(e.target.checked)} /> We bought it</label>}
-        {write.error && <p className="error small">{(write.error as Error).message}</p>}
-        <button
-          disabled={write.isPending || (price !== "" && aud == null)}
-          onClick={() =>
-            write.mutate({
-              path: `/api/campaigns/${c.id}`, method: "PATCH",
-              body: {
-                outcome,
-                sold_price_aud: sold ? aud : null,
-                passed_in_bid_aud: outcome === "passed_in" ? aud : null,
-                bought_by_us: sold && ours,
-              },
-            })
-          }
-        >
-          Save outcome
-        </button>
-      </div>
+    <details open={due}>
+      <summary>{due ? <strong>How did it end? Record the outcome</strong> : "Record outcome"}</summary>
+      <OutcomeForm propertyId={propertyId} campaignId={c.id} saleMethod={c.sale_method} status={p?.status ?? "watching"}
+        latestStatusId={p?.status_history[0]?.id ?? null} listingStatus={c.listing_status} listingPriceText={c.listing_price_text} />
     </details>
+  );
+}
+
+const clock = new Intl.DateTimeFormat("en-AU", { hour: "numeric", minute: "2-digit" });
+const weekday = new Intl.DateTimeFormat("en-AU", { weekday: "long" });
+
+/** A public transport journey, leg by leg: "Leave 8:26 am · walk 3 min → Lilydale train 20 min → … · arrive 8:51 am". */
+function Journey({ to, j }: { to: string; j: import("../api").Transit }) {
+  const late = j.arrive_at && new Date(j.arrive_at).getTime() > new Date(j.arrive_by).getTime();
+  return (
+    <div className="journey small">
+      <div><strong>By public transport to {to}</strong> <span className="muted">· {weekday.format(new Date(j.arrive_by))}, to be there by 9am</span></div>
+      <div className="journey-legs">
+        {j.depart_at && <span className="journey-time">Leave {clock.format(new Date(j.depart_at))}</span>}
+        {j.legs.map((l, i) => (
+          <span key={i} className={`journey-leg ${l.mode === "walk" ? "walk" : ""}`}>
+            {l.mode === "walk" ? `Walk ${l.minutes} min` : `${l.name ? `${l.name} ` : ""}${l.mode} ${l.minutes} min`}
+            {l.mode !== "walk" && l.to && <span className="muted"> to {l.to}</span>}
+          </span>
+        ))}
+        {j.arrive_at && <span className={`journey-time ${late ? "tone-bad" : ""}`}>Arrive {clock.format(new Date(j.arrive_at))}{late ? " (after 9)" : ""}</span>}
+      </div>
+    </div>
   );
 }

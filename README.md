@@ -35,7 +35,7 @@ You need Docker with Compose, and a Tailscale account (free). The app is only re
    docker compose --profile setup run --rm setup
    ```
 
-   Everything else streams from free public services: the basemap (OpenFreeMap), planning overlays (Vicmap WMS for the map, plus a one-off WFS lookup per house that is saved), and walking and driving times (the FOSSGIS Valhalla server, one request per second). Re-run setup about once a quarter to pick up new addresses. Steps can be run on their own, for example `... run --rm setup gnaf`.
+   Everything else streams from free public services: the basemap (OpenFreeMap), planning overlays (Vicmap WMS for the map, plus a one-off WFS lookup per house that is saved), and walking and driving times (the FOSSGIS Valhalla server, one request per second), and public transport journeys to your places (Transitous, one request every two seconds, each journey kept for a fortnight; set `TRANSITOUS_URL=` empty in `.env` to turn it off). Re-run setup about once a quarter to pick up new addresses. Steps can be run on their own, for example `... run --rm setup gnaf`.
 
    Optional, for offline use: `... run --rm setup tiles osm` downloads a basemap extract and the OpenStreetMap network (about 1 GB more). Then start local routing with `docker compose --profile local-routing up -d` and set `VALHALLA_URL=http://valhalla:8002` in `.env`. The local basemap is only used if it covers all of Victoria, or when the device is offline.
 
@@ -118,7 +118,7 @@ When the repo goes public (planned after milestone 2): push it to GitHub, then t
 
 ## Data sources
 
-G-NAF © Geoscape Australia (Open G-NAF EULA). Map data © OpenStreetMap contributors (ODbL); basemap tiles by OpenFreeMap (or Protomaps when installed locally); stations via the Overpass API; routing by Valhalla on the FOSSGIS server. School zones © State of Victoria (Department of Education), and Vicmap Planning © State of Victoria, both via DataVic (CC BY 4.0). Geocoding fallback by Nominatim/OpenStreetMap (usage policy: at most one request per second, which the worker respects).
+G-NAF © Geoscape Australia (Open G-NAF EULA). Map data © OpenStreetMap contributors (ODbL); basemap tiles by OpenFreeMap (or Protomaps when installed locally); stations via the Overpass API; routing by Valhalla on the FOSSGIS server. Public transport journeys by Transitous (transitous.org), from PTV and V/Line timetables. School zones © State of Victoria (Department of Education), and Vicmap Planning © State of Victoria, both via DataVic (CC BY 4.0). Geocoding fallback by Nominatim/OpenStreetMap (usage policy: at most one request per second, which the worker respects).
 
 ## Licence
 

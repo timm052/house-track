@@ -94,6 +94,17 @@ class ListingUpdateIn(ListingExtras):
     sale_method: SaleMethod | None = None  # listings do switch, e.g. auction to private sale
     auction_at: datetime | None = None
     eoi_closes_at: datetime | None = None
+    beds: Count | None = None
+    baths: Count | None = None
+    car_spaces: Count | None = None
+    land_m2: Annotated[int, Field(gt=0)] | None = None
+    building_m2: Annotated[int, Field(gt=0)] | None = None
+    # Rooms and areas that differ from what's saved: applied when a person asked for the update (the
+    # + House Track button), only reported by the unattended weekly refresh.
+    apply_details: bool = True
+    # What the listing itself says now (sold, under offer, archived) and its price wording, kept on the campaign.
+    listing_status: str | None = Field(default=None, max_length=40)
+    listing_price_text: str | None = Field(default=None, max_length=300)
 
 
 class PropertyIn(BaseModel):
@@ -123,6 +134,9 @@ class PropertyPatch(BaseModel):
     owners_corp_fees_aud_pa: Annotated[int, Field(ge=0)] | None = None
     council_rates_aud_pa: Annotated[int, Field(ge=0)] | None = None
     notes: str | None = None
+    # The values the person saw when they started editing, for the fields they changed: if any of them has
+    # changed since, the save is refused (409) instead of silently undoing someone else's edit.
+    expected: dict[str, Any] | None = None
 
 
 class CampaignPatch(BaseModel):
@@ -182,6 +196,8 @@ class OpinionIn(BaseModel):
 class StatusIn(BaseModel):
     status: Status
     reason: str | None = None
+    check_latest: bool = False  # refuse if the status changed since expected_latest_id (the latest the person saw)
+    expected_latest_id: UUID | None = None
 
 
 # ─── geography (milestone 2) ──────────────────────────────────────────
@@ -216,8 +232,12 @@ class AreaPatch(BaseModel):
     owner_id: UUID | None = None
 
 
+TravelMode = Literal["walk", "drive", "transit"]
+
+
 class PlaceIn(BaseModel):
     kind: Literal["station", "destination"]
+    modes: list[TravelMode] | None = None  # destinations: which to work out (default all three)
     station_osm_id: int | None = None
     name: Annotated[str, Field(min_length=1, max_length=80)] | None = None
     location: PointIn | None = None
@@ -233,6 +253,7 @@ class PlaceIn(BaseModel):
 
 
 class PlacePatch(BaseModel):
+    modes: list[TravelMode] | None = None
     name: Annotated[str, Field(min_length=1, max_length=80)] | None = None
     location: PointIn | None = None
     person_id: UUID | None = None

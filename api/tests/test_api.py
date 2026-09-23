@@ -256,3 +256,42 @@ def test_travel_estimates_go_stale_when_a_pin_moves(client, people, sql):
 
     pin(sql, a, pid, 145.11, -37.80)
     assert ("Mitcham", "walk") in stale()
+
+
+def test_delete_a_person_hands_over_their_records(client, people):
+    """Their own verdicts and areas go; the houses, guides and statuses they entered stay, credited to whoever
+    deleted them (history tables allow only that change, only then)."""
+    a = people["a"]
+    c = client.post("/api/persons", json={"display_name": "Temp", "colour": "#123456"}).json()
+    pid = client.post("/api/properties", headers=as_(c), json={
+        "address": {"street_number": "5", "street": "Handover Road", "suburb": "Blackburn", "postcode": "3130"},
+        "campaign": {"sale_method": "private_sale"}}).json()["id"]
+    cid = client.get(f"/api/properties/{pid}").json()["campaigns"][0]["id"]
+    client.post(f"/api/campaigns/{cid}/price-guides", headers=as_(c), json={"source": "advertised", "low_aud": 900_000, "high_aud": 950_000})
+    client.post(f"/api/properties/{pid}/opinions", headers=as_(c), json={"stage": "pre_inspection", "stance": "yes"})
+    client.post(f"/api/properties/{pid}/status", headers=as_(c), json={"status": "inspecting"})
+    area = client.post("/api/areas", headers=as_(c), json={"name": "Too far", "kind": "hard_exclude",
+                "geometry": {"type": "MultiPolygon", "coordinates": [[[[145, -37.8], [145.01, -37.8], [145.01, -37.81], [145, -37.8]]]]}})
+    assert area.status_code == 201, area.text
+    assert any(x["properties"]["owner_id"] == c["id"] for x in client.get("/api/map", headers=as_(a)).json()["areas"]["features"])
+
+    assert client.delete(f"/api/persons/{a['id']}", headers=as_(a)).status_code == 409  # not yourself
+    r = client.delete(f"/api/persons/{c['id']}", headers=as_(a))
+    assert r.status_code == 204, r.text
+    assert c["id"] not in [p["id"] for p in client.get("/api/persons").json()]
+    p = client.get(f"/api/properties/{pid}").json()
+    assert p["status"] == "inspecting" and p["status_history"][0]["created_by"] == a["id"] and p["opinions"] == []
+    assert [g["created_by"] for g in p["campaigns"][0]["price_guides"]] == [a["id"]]
+    assert all(x["properties"]["owner_id"] != c["id"] for x in client.get("/api/map", headers=as_(a)).json()["areas"]["features"])
+
+
+def test_delete_a_house(client, people):
+    a = people["a"]
+    pid = client.post("/api/properties", headers=as_(a), json={
+        "address": {"street_number": "6", "street": "Mistake Mews", "suburb": "Mitcham", "postcode": "3132"},
+        "campaign": {"sale_method": "auction", "auction_at": "2099-10-17T11:00:00+11:00"}}).json()["id"]
+    client.post(f"/api/properties/{pid}/opinions", headers=as_(a), json={"stage": "pre_inspection", "stance": "no"})
+    assert client.delete(f"/api/properties/{pid}", headers=as_(a)).status_code == 204
+    assert client.get(f"/api/properties/{pid}").status_code == 404
+    assert all(r["id"] != pid for r in client.get("/api/overview").json()["rows"])
+    assert client.delete(f"/api/properties/{pid}", headers=as_(a)).status_code == 404

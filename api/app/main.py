@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 from contextlib import asynccontextmanager
 
 import psycopg
@@ -7,7 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from . import db, gnaf
-from .geo_services import Nominatim, Valhalla
+from .geo_services import Nominatim, Transitous, Valhalla
 from .routes import campaigns, decide, driveway, geo, money, overlays, overview, people, properties, tags
 from .worker import Worker
 
@@ -18,6 +19,8 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 async def lifespan(_: FastAPI):
     db.open_pool(os.environ["DATABASE_URL"])
     gnaf.configure(os.environ.get("GNAF_DATABASE_URL"))
+    # Read the suburb list in the background now, so the first suburb suggestion doesn't wait for it.
+    threading.Thread(target=lambda: gnaf.localities("warm up"), name="localities", daemon=True).start()
     worker = None
     if os.environ.get("WORKER", "1") != "0":
         # Free public routing by default; point VALHALLA_URL at a self-hosted engine to keep it local.
@@ -26,7 +29,9 @@ async def lifespan(_: FastAPI):
         nominatim_url = os.environ.get("NOMINATIM_URL", "https://nominatim.openstreetmap.org")
         worker = Worker(Valhalla(valhalla_url) if valhalla_url else None,
                         Nominatim(nominatim_url) if nominatim_url else None,
-                        lookups=os.environ.get("OVERLAY_LOOKUPS", "1") != "0")
+                        lookups=os.environ.get("OVERLAY_LOOKUPS", "1") != "0",
+                        # Public transport journeys from the free Transitous planner; TRANSITOUS_URL="" turns it off.
+                        transitous=Transitous(transit_url) if (transit_url := os.environ.get("TRANSITOUS_URL", "https://api.transitous.org")) else None)
         worker.start()
     yield
     if worker:

@@ -22,6 +22,7 @@ class TagIn(BaseModel):
 class TagPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=40)
     colour: str | None = Field(default=None, pattern=r"^#[0-9a-f]{6}$")
+    merge: bool = False  # renaming onto an existing tag: move this tag's houses to it and remove this one
 
 
 class PropertyTagsIn(BaseModel):
@@ -72,9 +73,15 @@ def create_tag(body: TagIn, person: Person) -> dict:
 def update_tag(tag_id: UUID, body: TagPatch, person: Person) -> dict:
     with tx(person) as conn:
         if body.name is not None:
-            clash = conn.execute("SELECT 1 FROM tag WHERE lower(name) = lower(%s) AND id <> %s", (clean(body.name), tag_id)).fetchone()
+            clash = conn.execute("SELECT id FROM tag WHERE lower(name) = lower(%s) AND id <> %s", (clean(body.name), tag_id)).fetchone()
+            if clash and not body.merge:
+                raise HTTPException(409, {"message": "There's already a tag with that name.", "merge_into": str(clash["id"])})
             if clash:
-                raise HTTPException(409, "There's already a tag with that name.")
+                conn.execute("""INSERT INTO property_tag (property_id, tag_id) SELECT property_id, %s FROM property_tag WHERE tag_id = %s
+                                ON CONFLICT DO NOTHING""", (clash["id"], tag_id))
+                conn.execute("DELETE FROM property_tag WHERE tag_id = %s", (tag_id,))
+                conn.execute("DELETE FROM tag WHERE id = %s", (tag_id,))
+                return conn.execute("SELECT id, name, colour FROM tag WHERE id = %s", (clash["id"],)).fetchone()
             conn.execute("UPDATE tag SET name = %s WHERE id = %s", (clean(body.name), tag_id))
         if body.colour is not None:
             conn.execute("UPDATE tag SET colour = %s WHERE id = %s", (body.colour, tag_id))

@@ -91,3 +91,21 @@ def test_all_comparables_have_a_suburb(client, people):
                 json={"address": "14 Elm Grove, Mitcham VIC 3132", "sold_price_aud": 990_000, "sold_on": "2026-07-01"})
     comps = {c["address"]: c for c in client.get("/api/comparables").json()}
     assert comps["14 Elm Grove, Mitcham VIC 3132"]["suburb"] == "Mitcham"
+
+
+def test_budget_status_on_every_row(client, people):
+    """Each house's current guide against the max bid: within, stretch (only the top is over) or over."""
+    from .conftest import as_
+    a = as_(people["a"])
+    cap = client.put("/api/costs", headers=a, json={"cash_aud": 200_000, "loan_preapproval_aud": 700_000, "first_home_buyer": True,
+                                                    "principal_residence": True, "conveyancing_aud": 2_000, "inspections_aud": 800,
+                                                    "other_aud": 3_000}).json()["max_bid"]
+    ids = {}
+    for n, (low, high) in {"within": (cap - 50_000, cap - 10_000), "stretch": (cap - 20_000, cap + 30_000), "over": (cap + 10_000, cap + 60_000)}.items():
+        pid = client.post("/api/properties", headers=a, json={"address": {"street_number": str(len(ids) + 1), "street": "Budget Way",
+                          "suburb": "Box Hill", "postcode": "3128"}, "campaign": {"sale_method": "private_sale"}}).json()["id"]
+        cid = client.get(f"/api/properties/{pid}").json()["campaigns"][0]["id"]
+        client.post(f"/api/campaigns/{cid}/price-guides", headers=a, json={"source": "advertised", "low_aud": low, "high_aud": high})
+        ids[n] = pid
+    rows = {r["id"]: r for r in client.get("/api/overview").json()["rows"]}
+    assert {n: rows[pid]["budget"] for n, pid in ids.items()} == {"within": "within", "stretch": "stretch", "over": "over"}

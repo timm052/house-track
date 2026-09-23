@@ -15,6 +15,7 @@ from .campaigns import insert_campaign, insert_link, insert_price_guide
 from .driveway import attachments_for, inspections_for, save_photos_later
 from .geo import travel_for
 from .overlays import overlays_for
+from ..overview import _conflict as conflict, _same as same
 
 
 router = APIRouter(prefix="/api")
@@ -79,7 +80,7 @@ def list_properties(person: OptionalPerson, status: Status | None = None, q: str
                    c.outcome, c.sold_price_aud,
                    g.low_aud AS guide_low_aud, g.high_aud AS guide_high_aud,
                    coalesce(o.opinions, '[]'::jsonb) AS opinions,
-                   ns.name AS nearest_station, ns.duration_s AS nearest_station_walk_s,
+                   ns.name AS nearest_station, ns.walk_s AS nearest_station_walk_s, ns.drive_s AS nearest_station_drive_s,
                    coalesce(f.excluded, false) AS excluded, coalesce(f.warned, false) AS warned
             FROM property p
             JOIN property_status s ON s.property_id = p.id
@@ -92,7 +93,7 @@ def list_properties(person: OptionalPerson, status: Status | None = None, q: str
             LEFT JOIN LATERAL (
                 SELECT jsonb_agg(jsonb_build_object('person_id', person_id, 'stage', stage, 'stance', stance)) AS opinions
                 FROM opinion_current oc WHERE oc.property_id = p.id) o ON true
-            LEFT JOIN property_station_access ns ON ns.property_id = p.id AND ns.is_nearest
+            LEFT JOIN property_nearest_station ns ON ns.property_id = p.id
             LEFT JOIN property_flags f ON f.property_id = p.id AND f.person_id = %(me)s
             WHERE (%(status)s::text IS NULL OR s.status = %(status)s)
               AND (%(pattern)s::text IS NULL OR p.address_key LIKE %(pattern)s OR lower(p.suburb) LIKE %(pattern)s)
@@ -170,7 +171,7 @@ def get_property(property_id: UUID) -> dict:
         ).fetchall()
         campaigns = conn.execute(
             "SELECT id, continues_campaign_id, sale_method, listed_on, auction_at, eoi_closes_at, outcome,"
-            " outcome_on, sold_price_aud, passed_in_bid_aud, bought_by_us, created_at FROM campaign"
+            " outcome_on, sold_price_aud, passed_in_bid_aud, bought_by_us, listing_status, listing_price_text, created_at FROM campaign"
             " WHERE property_id = %s ORDER BY created_at DESC",
             (property_id,),
         ).fetchall()
@@ -208,10 +209,27 @@ def get_property(property_id: UUID) -> dict:
     return prop
 
 
+EXPECTABLE = {"unit", "street_number", "street", "suburb", "postcode", "plan_number", "lot_number", "property_type",
+              "build_status", "beds", "baths", "car_spaces", "land_m2", "building_m2", "owners_corp_fees_aud_pa",
+              "council_rates_aud_pa", "notes"}
+
+
+def check_expected(conn: psycopg.Connection, property_id: UUID, expected: dict) -> None:
+    """The same "someone changed this since you loaded it" check the Overview grid makes, for a form save."""
+    row = conn.execute("SELECT * FROM property WHERE id = %s", (property_id,)).fetchone()
+    if row is None:
+        raise not_found("Property")
+    for field, seen in expected.items():
+        if field in EXPECTABLE and not same(row[field], seen):
+            raise conflict(field, row[field], row["updated_by"], row["updated_at"], conn)
+
+
 @router.patch("/properties/{property_id}")
 def update_property(property_id: UUID, body: PropertyPatch, person: Person) -> dict:
-    values = body.model_dump(exclude_unset=True, exclude={"address"})
+    values = body.model_dump(exclude_unset=True, exclude={"address", "expected"})
     with tx(person) as conn:
+        if body.expected:
+            check_expected(conn, property_id, body.expected)
         if body.address is not None:
             a = to_address(body.address)
             if (existing := find_duplicate(conn, a, exclude=property_id)) is not None:
@@ -223,6 +241,15 @@ def update_property(property_id: UUID, body: PropertyPatch, person: Person) -> d
         if update_columns(conn, "property", property_id, values) is None:
             raise not_found("Property")
     return {"id": property_id}
+
+
+@router.delete("/properties/{property_id}", status_code=204)
+def delete_property(property_id: UUID, person: Person) -> None:
+    """For mistakes and duplicates: the house and everything recorded about it (audited; photo files stay in the
+    blob store and backups). A house you've decided against keeps its history: set its status instead."""
+    with tx(person) as conn:
+        if conn.execute("DELETE FROM property WHERE id = %s RETURNING id", (property_id,)).fetchone() is None:
+            raise not_found("Property")
 
 
 @router.post("/properties/{property_id}/opinions", status_code=201)
@@ -263,6 +290,11 @@ def set_status(property_id: UUID, body: StatusIn, person: Person) -> dict:
     with tx(person) as conn:
         if conn.execute("SELECT 1 FROM property WHERE id = %s", (property_id,)).fetchone() is None:
             raise not_found("Property")
+        if body.check_latest:
+            latest = conn.execute("SELECT id, status, created_by, created_at FROM status_event WHERE property_id = %s"
+                                  " ORDER BY occurred_at DESC, id DESC LIMIT 1", (property_id,)).fetchone()
+            if latest and latest["id"] != body.expected_latest_id:
+                raise conflict("status", latest["status"], latest["created_by"], latest["created_at"], conn)
         return conn.execute(
             "INSERT INTO status_event (property_id, status, reason) VALUES (%s, %s, %s) RETURNING id",
             (property_id, body.status, body.reason),

@@ -19,6 +19,7 @@
     "idb-keyval": "^6.3.0",
     "lucide-react": "^1.47.0",
     "maplibre-gl": "^6.10.0",
+    "pdfjs-dist": "^6.3.289",
     "pmtiles": "^4.5.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

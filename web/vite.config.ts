@@ -18,8 +18,8 @@ export default defineConfig({
         short_name: "House Track",
         start_url: "/",
         display: "standalone",
-        background_color: "#111318",
-        theme_color: "#1d4ed8",
+        background_color: "#f4f0e8",
+        theme_color: "#f4f0e8",
         icons: [
           { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
           { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
@@ -29,7 +29,8 @@ export default defineConfig({
       workbox: {
         navigateFallback: "/index.html",
         navigateFallbackDenylist: [/^\/api\//, /^\/tiles\//],
-        globPatterns: ["**/*.{js,css,html,png,svg,webp}"],
+        // The bundled fonts, Latin only (the other scripts load on demand, if ever).
+        globPatterns: ["**/*.{js,css,html,png,svg,webp}", "**/*-latin-{wght,soft}-normal-*.woff2"],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         runtimeCaching: [
           {

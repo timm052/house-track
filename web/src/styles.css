@@ -1,44 +1,63 @@
+/* ─── design tokens ──────────────────────────────────────────────────
+   Materials of a Melbourne street: limestone paper, bluestone (the accent: links, primary buttons,
+   the current tab), red brick (the brand and small highlights). Yes / maybe / no keep green, amber and
+   red to themselves, so the accent never reads as a verdict. Fraunces for names and numbers, Figtree
+   for everything else; both are bundled, so they work offline. */
 :root {
-  --bg: #f6f7f9;
-  --surface: #ffffff;
-  --surface-2: #eef1f5;
-  --text: #16181d;
-  --muted: #5d6573;
-  --border: #d9dee6;
-  --accent: #1d4ed8;
+  --bg: #f4f0e8;
+  --surface: #fffdf9;
+  --surface-2: #efe9df;
+  --surface-3: #e6dfd2;
+  --text: #1c2326;
+  --muted: #5f676b;
+  --border: #e2dace;
+  --border-strong: #cfc5b5;
+  --accent: #1f5a70;
+  --accent-soft: #e2edf0;
   --accent-text: #ffffff;
-  --yes: #15803d;
-  --maybe: #b45309;
-  --no: #b91c1c;
-  --danger: #b91c1c;
-  --radius: 12px;
+  --brick: #b4532f;
+  --yes: #2e7d4f;
+  --maybe: #b26b10;
+  --no: #b3372b;
+  --danger: #b3372b;
+  --radius: 14px;
+  --radius-sm: 10px;
   --gap: 12px;
-  --field: #f9fafb;
-  --ring: rgba(29, 78, 216, 0.35);
-  --shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 1px 3px rgba(16, 24, 40, 0.06);
+  --field: #fffefb;
+  --ring: rgba(31, 90, 112, 0.28);
+  --shadow: 0 1px 0 rgba(60, 45, 20, 0.04), 0 1px 3px rgba(60, 45, 20, 0.06);
+  --shadow-lift: 0 2px 4px rgba(60, 45, 20, 0.05), 0 10px 24px -8px rgba(60, 45, 20, 0.18);
+  --font-body: "Figtree Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Fraunces Variable", Georgia, "Times New Roman", serif;
   color-scheme: light;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-body);
   font-size: 16px;
-  line-height: 1.4;
+  line-height: 1.45;
+  font-feature-settings: "tnum" 0;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #111318;
-    --surface: #1a1d24;
-    --surface-2: #232733;
-    --text: #e8eaef;
-    --muted: #9aa3b2;
-    --border: #2f3542;
-    --accent: #6d95ff;
-    --accent-text: #0b1020;
-    --yes: #4ade80;
-    --maybe: #fbbf24;
-    --no: #f87171;
-    --danger: #f87171;
-    --field: #14171d;
-    --ring: rgba(109, 149, 255, 0.4);
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --bg: #111416;
+    --surface: #191e20;
+    --surface-2: #22282b;
+    --surface-3: #2b3235;
+    --text: #ebe6dc;
+    --muted: #9aa2a4;
+    --border: #2c3336;
+    --border-strong: #3d4548;
+    --accent: #86c1d3;
+    --accent-soft: #1d3139;
+    --accent-text: #0b1b21;
+    --brick: #e38a63;
+    --yes: #5fc98a;
+    --maybe: #f0b44c;
+    --no: #f07d6e;
+    --danger: #f07d6e;
+    --field: #15191b;
+    --ring: rgba(134, 193, 211, 0.35);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --shadow-lift: 0 2px 4px rgba(0, 0, 0, 0.3), 0 12px 28px -10px rgba(0, 0, 0, 0.6);
     color-scheme: dark;
   }
 }
@@ -475,3 +494,107 @@ ul.cal-list li { display: flex; gap: 12px; align-items: flex-start; padding: 8px
 .cal-time { min-width: 72px; }
 .cal-sale { background: var(--accent); color: var(--accent-text); border-color: transparent; font-weight: 700; }
 .drive-photo { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; flex: none; }
+
+/* ═══ design pass: type, chrome and surfaces ════════════════════════════
+   Kept together at the end so it reads as one system and wins over the older rules above. */
+body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+h1, h2, .display { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.012em;
+  font-variation-settings: "SOFT" 50, "opsz" 48; }
+h1 { font-size: 1.7rem; }
+h2 { font-size: 1.22rem; }
+h3 { font-size: 0.98rem; font-weight: 700; }
+.card > h2:first-child, .card > .row:first-child > h2 { font-size: 1.18rem; }
+.section-title { letter-spacing: 0.09em; font-size: 0.72rem; }
+/* Numbers people compare (prices, stats) in the display face with even-width figures. */
+.price, .price-big, .stat-value, .big-number, .fact strong, .summary-line .big {
+  font-family: var(--font-display); font-variant-numeric: tabular-nums lining-nums; font-variation-settings: "SOFT" 30, "opsz" 72;
+  letter-spacing: -0.01em; }
+
+/* Top bar: frosted paper, the brand mark, and a brick underline under the current page. */
+.topbar { background: color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter: saturate(1.3) blur(12px);
+  -webkit-backdrop-filter: saturate(1.3) blur(12px); }
+.topbar .brand { display: inline-flex; align-items: center; gap: 9px; font-family: var(--font-display); font-weight: 650;
+  font-size: 1.18rem; letter-spacing: -0.015em; font-variation-settings: "SOFT" 100, "opsz" 36; }
+.brand-mark { width: 28px; height: 28px; flex: none; display: block; }
+.topbar nav a { position: relative; font-weight: 560; }
+.topbar nav a.active { background: none; color: var(--text); font-weight: 650; }
+.topbar nav a.active::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: -12px; height: 3px;
+  border-radius: 3px 3px 0 0; background: var(--brick); }
+@media (max-width: 480px) { .topbar nav a.active::after { left: 7px; right: 7px; bottom: -10px; } }
+
+/* Controls */
+button { border-radius: var(--radius-sm); background: var(--surface); border-color: var(--border-strong); font-weight: 560; }
+button:not([class]):hover:not(:disabled), .icon-btn:hover:not(:disabled), .small-btn:hover:not(:disabled) { background: var(--surface-2); }
+button.primary { box-shadow: 0 1px 0 rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.14); font-weight: 650; }
+button.link { font-weight: 560; }
+input, select, textarea { border-radius: var(--radius-sm); border-color: var(--border-strong); }
+.button-like { border-radius: var(--radius-sm); background: var(--surface); border-color: var(--border-strong); font-weight: 560; }
+.chip { background: var(--surface); font-weight: 560; font-size: 0.9rem; border-color: var(--border-strong); }
+.chip.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.pill { font-weight: 600; font-size: 0.78rem; background: var(--surface-2); }
+.tag { font-weight: 600; }
+.count-badge { background: var(--brick); color: #fff; }
+
+/* Surfaces */
+.card { box-shadow: var(--shadow); }
+.stat, .fact, .auction-stats > div { border-radius: var(--radius-sm); box-shadow: var(--shadow); }
+.stat-value { font-size: 1.55rem; font-weight: 600; }
+.sheet, .popover { border-radius: var(--radius); box-shadow: var(--shadow-lift); }
+.toast { border-radius: 999px; font-weight: 600; box-shadow: var(--shadow-lift); }
+
+/* House cards: the photo leads, the address reads like a listing, hover lifts. */
+.property-card { padding: 14px; }
+.property-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lift); border-color: var(--border-strong); }
+.property-card .address { font-family: var(--font-display); font-weight: 600; font-size: 1.08rem; letter-spacing: -0.01em;
+  font-variation-settings: "SOFT" 60, "opsz" 24; }
+.property-card .price { font-size: 1.22rem; font-weight: 650; }
+.property-card.tint { border-left-width: 4px; }
+.card-thumb { border-radius: var(--radius-sm); width: 104px; height: 104px; }
+.property-card { grid-template-columns: 104px minmax(0, 1fr); }
+@media (max-width: 480px) { .property-card { grid-template-columns: 76px minmax(0, 1fr); } .card-thumb { width: 76px; height: 76px; } }
+
+/* House page */
+.listing-title h1 { font-size: 2.1rem; line-height: 1.1; font-variation-settings: "SOFT" 60, "opsz" 96; }
+.price-big { font-size: 2rem; font-weight: 650; }
+.banner-media { border-radius: var(--radius); box-shadow: var(--shadow); }
+.fact { background: var(--surface); }
+.fact strong { font-size: 1.15rem; font-weight: 650; }
+.tabs button.on { color: var(--text); border-bottom-color: var(--brick); }
+.tab-count { font-weight: 700; }
+
+/* Calendar and lists */
+ul.cal-list li { border-radius: var(--radius-sm); }
+.cal-time { font-family: var(--font-display); font-weight: 650; font-variant-numeric: tabular-nums; }
+/* No photo yet: the brand's house, drawn in the suburb's colour on its tint. */
+.card-thumb { background: var(--sub-tint, var(--surface-2)); }
+.card-thumb svg { width: 44%; height: 44%; fill: none; stroke: var(--sub-ink, var(--muted)); stroke-width: 1.6;
+  stroke-linecap: round; stroke-linejoin: round; opacity: 0.7; }
+.listing-side { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+/* Overview grid: the app's type, and quieter headers. */
+revo-grid { font-family: var(--font-body) !important; }
+revo-grid .rgHeaderCell { color: var(--muted) !important; font-weight: 650; }
+revo-grid revogr-header { background: var(--surface) !important; }
+.overview-bar { background: color-mix(in srgb, var(--surface) 92%, transparent); }
+/* Phones: the brand tile only, so every tab and the person still fit. */
+@media (max-width: 480px) {
+  .topbar .brand { display: inline-flex; margin-right: 2px; }
+  .topbar .brand-name { display: none; }
+  .brand-mark { width: 26px; height: 26px; }
+}
+/* Line icons (Lucide): sized to the text around them, drawn at the logo's weight. */
+.lucide { width: 1.15em; height: 1.15em; stroke-width: 1.9; vertical-align: -0.2em; flex: none; }
+button:has(> .lucide), .button-like:has(> .lucide) { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+button > .lucide { vertical-align: 0; }
+.fact .fact-icon { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; font-size: 1rem;
+  background: var(--accent-soft); color: var(--accent); }
+.fact .fact-icon .lucide { vertical-align: 0; }
+ul.glance li > span:first-child { display: grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: 8px;
+  background: var(--surface-2); color: var(--accent); }
+ul.glance li > span:first-child .lucide { vertical-align: 0; }
+.tl-icon { color: var(--accent); font-size: 0.85rem; }
+.tl-icon .lucide { vertical-align: 0; }
+table.travel th .lucide { color: var(--accent); margin-right: 2px; }
+.sale-when .lucide, .price-box .lucide { color: var(--brick); }
+.big-icon { width: 40px; height: 40px; color: var(--brick); stroke-width: 1.6; }
+.banner-badge .lucide { vertical-align: -0.18em; }
+.actions button { white-space: nowrap; font-size: 0.92rem; padding-left: 8px; padding-right: 8px; }

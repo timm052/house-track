@@ -16,6 +16,7 @@ import Settings from "./pages/Settings";
 import Setup from "./pages/Setup";
 import Refresh from "./pages/Refresh";
 import { usePersons } from "./people";
+import { ArrowUpDown } from "lucide-react";
 
 // The map pulls in MapLibre and the drawing tools; load it only when opened.
 const MapPage = lazy(() => import("./pages/MapPage"));
@@ -61,7 +62,7 @@ export default function App() {
   return (
     <>
       <header className="topbar">
-        <NavLink to="/" className="brand">House Track</NavLink>
+        <NavLink to="/" className="brand" aria-label="House Track"><BrandMark /><span className="brand-name">House Track</span></NavLink>
         <nav>
           <NavLink to="/" end>Houses</NavLink>
           <NavLink to="/map">Map</NavLink>
@@ -71,7 +72,7 @@ export default function App() {
           <NavLink to="/settings">Settings</NavLink>
         </nav>
         {queued.length > 0 && (
-          <Link to="/outbox" className={`badge ${queued.some((q) => q.conflict) ? "warn" : ""}`} title="Waiting to send">⇅ {queued.length}</Link>
+          <Link to="/outbox" className={`badge ${queued.some((q) => q.conflict) ? "warn" : ""}`} title="Waiting to send"><ArrowUpDown /> {queued.length}</Link>
         )}
         <button className="link" onClick={() => choose(null)} title="Switch person">
           <span className="dot" style={{ background: me.colour }} />
@@ -103,5 +104,16 @@ export default function App() {
         </ErrorBoundary>
       </main>
     </>
+  );
+}
+
+/** A brick tile with a house drawn in one line: roof, walls, door. */
+function BrandMark() {
+  return (
+    <svg className="brand-mark" viewBox="0 0 32 32" aria-hidden>
+      <rect width="32" height="32" rx="9" fill="var(--brick)" />
+      <path d="M7.5 15.5 16 8.5l8.5 7M10.5 13.5v10h11v-10M14.2 23.5v-5h3.6v5" fill="none" stroke="var(--surface)"
+        strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }

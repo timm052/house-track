@@ -8,6 +8,7 @@ import { LABEL } from "../format";
 import type { OverviewPlace, OverviewRow } from "../overview/columns";
 import { newId, sendOrQueue } from "../outbox";
 import { usePeople } from "../people";
+import { CalendarDays, Camera } from "lucide-react";
 
 type Overview = { rows: OverviewRow[]; places: OverviewPlace[] };
 type Event = { type: string; id: string; kind: string; state: string; starts_at: string; property_id: string; address: string };
@@ -128,7 +129,7 @@ export default function Driveway() {
       <div className="chips">
         {(nearby.length ? nearby.map(({ r, d }) => ({ r, d })) : fallback.slice(0, 8).map((r) => ({ r, d: null as number | null }))).map(({ r, d }) => (
           <button key={r.id} className={`chip ${current?.id === r.id ? "on" : ""}`} onClick={() => { setChosen(r.id); setStage(null); }}>
-            {!d && upcoming.has(r.id) && "🗓 "}{String(r.address)}{d != null && ` · ${d < 1000 ? `${Math.round(d)} m` : `${(d / 1000).toFixed(1)} km`}`}
+            {!d && upcoming.has(r.id) && <><CalendarDays />{" "}</>}{String(r.address)}{d != null && ` · ${d < 1000 ? `${Math.round(d)} m` : `${(d / 1000).toFixed(1)} km`}`}
           </button>
         ))}
       </div>
@@ -165,7 +166,7 @@ export default function Driveway() {
           <div className="grid2">
             <button onClick={imHere}>{todays.has(current.id) ? "I'm here (attended)" : "Log an inspection now"}</button>
             <label className="button-like">
-              📷 Photos
+              <Camera /> Photos
               <input type="file" accept="image/*" capture="environment" multiple hidden onChange={(e) => photo(e.target.files)} />
             </label>
           </div>

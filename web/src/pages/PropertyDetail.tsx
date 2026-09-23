@@ -13,6 +13,7 @@ import { STATUS_COLOUR, changeTone, minutesTone, soonTone, suburbClass, tagStyle
 import { Checklist, Comparables, CostAt, PriceHistory } from "./MoneyExtras";
 import { Files, Inspections } from "./PropertyExtras";
 import { ScoresCard } from "./Decide";
+import { Bath, BedDouble, Building2, CalendarDays, CalendarPlus, Camera, Car, CircleDollarSign, CircleHelp, DollarSign, Gavel, House, ImagePlus, LandPlot, MapPin, Paperclip, PartyPopper, Scale, School, Tag, ThumbsDown, ThumbsUp, TrainFront, TriangleAlert } from "lucide-react";
 
 const MiniMap = lazy(() => import("../map/MiniMap"));
 
@@ -137,14 +138,14 @@ function Banner({ p }: { p: Detail }) {
       {cover && (
         <a href={`/api/attachments/${cover.id}/file`} target="_blank" rel="noreferrer" className="banner-photo">
           <img src={`/api/attachments/${cover.id}/file`} alt={cover.caption ?? "Photo of the house"} />
-          <span className="banner-badge">📷 {photos.length} {photos.length === 1 ? "photo" : "photos"}</span>
+          <span className="banner-badge"><Camera /> {photos.length} {photos.length === 1 ? "photo" : "photos"}</span>
         </a>
       )}
       {cover && hasPin && <div className="banner-map">{map}<Link className="banner-badge top" to="/map">Open the full map</Link></div>}
       {!cover && hasPin && <>{map}<Link className="banner-badge top" to="/map">Open the full map</Link><ListingPhoto p={p} compact /></>}
       {!cover && !hasPin && (
         <div className="banner-empty">
-          <span aria-hidden>📍</span>
+          <MapPin aria-hidden className="big-icon" />
           <strong style={{ fontSize: "1rem" }}>{p.geocode_status === "pending" ? "Finding it on the map…" : "Not on the map yet"}</strong>
           <div className="row" style={{ justifyContent: "center" }}>
             <Link to={`/map?pin=${p.id}`}><button className="primary">Set the pin</button></Link>
@@ -176,7 +177,7 @@ function ListingPhoto({ p, compact = false }: { p: Detail; compact?: boolean }) 
   }
   return (
     <div className={compact ? "banner-action" : "row"} style={compact ? undefined : { marginTop: 12 }}>
-      <button onClick={fetchIt} disabled={state.busy}>{state.busy ? "Fetching…" : "📷 Get the listing photo"}</button>
+      <button onClick={fetchIt} disabled={state.busy}>{state.busy ? "Fetching…" : <><Camera /> Get the listing photo</>}</button>
       {state.msg && <span className={`small ${compact ? "banner-msg" : "error"}`}>{state.msg}</span>}
     </div>
   );
@@ -185,17 +186,17 @@ function ListingPhoto({ p, compact = false }: { p: Detail; compact?: boolean }) 
 function Title({ p }: { p: Detail }) {
   const slots = useSuburbSlots();
   const street = [p.unit && `${p.unit}/`, p.street_number, p.street].filter(Boolean).join(p.unit ? "" : " ").replace("/ ", "/");
-  const facts: [string, string, string][] = [
-    ["🛏", p.beds != null ? String(p.beds) : "—", p.beds === 1 ? "bed" : "beds"],
-    ["🛁", p.baths != null ? String(p.baths) : "—", p.baths === 1 ? "bath" : "baths"],
-    ["🚗", p.car_spaces != null ? String(p.car_spaces) : "—", p.car_spaces === 1 ? "car" : "cars"],
+  const facts: [React.ReactNode, string, string][] = [
+    [<BedDouble />, p.beds != null ? String(p.beds) : "—", p.beds === 1 ? "bed" : "beds"],
+    [<Bath />, p.baths != null ? String(p.baths) : "—", p.baths === 1 ? "bath" : "baths"],
+    [<Car />, p.car_spaces != null ? String(p.car_spaces) : "—", p.car_spaces === 1 ? "car" : "cars"],
   ];
   // Unknown land is left out (like building area); acreage reads better in hectares.
   if (p.land_m2 != null) facts.push(p.land_m2 >= 10_000
-    ? ["📐", (p.land_m2 / 10_000).toLocaleString(undefined, { maximumFractionDigits: 2 }), "ha land"]
-    : ["📐", Number(p.land_m2).toLocaleString(), "m² land"]);
-  if (p.building_m2 != null) facts.push(["🏗", Number(p.building_m2).toLocaleString(), "m² building"]);
-  facts.push(["🏠", p.property_type[0].toUpperCase() + p.property_type.slice(1),
+    ? [<LandPlot />, (p.land_m2 / 10_000).toLocaleString(undefined, { maximumFractionDigits: 2 }), "ha land"]
+    : [<LandPlot />, Number(p.land_m2).toLocaleString(), "m² land"]);
+  if (p.building_m2 != null) facts.push([<Building2 />, Number(p.building_m2).toLocaleString(), "m² building"]);
+  facts.push([<House />, p.property_type[0].toUpperCase() + p.property_type.slice(1),
               p.build_status === "established" ? "established" : p.build_status.replace(/_/g, " ")]);
   return (
     <div className="listing-title">
@@ -248,7 +249,7 @@ function PriceBox({ p, c }: { p: Detail; c: Campaign | null }) {
       )}
       {c && !c.outcome && (
         <div className={`sale-when ${soon ? `tone-${soon}` : ""}`}>
-          📅 {saleWhen(c)}{listedDays != null && <span className="muted small"> · listed {listedDays} {listedDays === 1 ? "day" : "days"}</span>}
+          <CalendarDays /> {saleWhen(c)}{listedDays != null && <span className="muted small"> · listed {listedDays} {listedDays === 1 ? "day" : "days"}</span>}
         </div>
       )}
       {link && <a className="small" href={link.url} target="_blank" rel="noreferrer">View listing on {link.portal} ↗</a>}
@@ -260,10 +261,10 @@ function PriceBox({ p, c }: { p: Detail; c: Campaign | null }) {
 function Actions({ p, setTab }: { p: Detail; setTab: (t: Tab) => void }) {
   return (
     <div className="card actions">
-      <button onClick={() => setTab("inspections")}>🗓 Add inspection</button>
-      <button onClick={() => setTab("files")}>📷 Add photos</button>
-      <Link to={`/compare?ids=${p.id}`}><button>⚖ Compare</button></Link>
-      <Link to={`/map?pin=${p.id}`}><button>📍 {p.lat == null ? "Set pin" : "Move pin"}</button></Link>
+      <button onClick={() => setTab("inspections")}><CalendarPlus /> Add inspection</button>
+      <button onClick={() => setTab("files")}><ImagePlus /> Add photos</button>
+      <Link to={`/compare?ids=${p.id}`}><button><Scale /> Compare</button></Link>
+      <Link to={`/map?pin=${p.id}`}><button><MapPin /> {p.lat == null ? "Set pin" : "Move pin"}</button></Link>
     </div>
   );
 }
@@ -308,20 +309,20 @@ function AtAGlance({ p, c, setTab }: { p: Detail; c: Campaign | null; setTab: (t
   const guide = guides[guides.length - 1];
   const median = [...guides].reverse().find((g) => g.statement_suburb_median_aud)?.statement_suburb_median_aud;
   const next = p.inspections.filter((i) => new Date(i.starts_at).getTime() > Date.now()).sort((a, b) => a.starts_at.localeCompare(b.starts_at))[0];
-  const items: { icon: string; text: React.ReactNode; tab: Tab }[] = [];
-  if (station) items.push({ icon: "🚉", tab: "location", text: <><span className={`tone-${minutesTone(station.duration_s / 60)}`}>{minutes(station.duration_s)}</span> walk to {station.name}</> });
+  const items: { icon: React.ReactNode; text: React.ReactNode; tab: Tab }[] = [];
+  if (station) items.push({ icon: <TrainFront />, tab: "location", text: <><span className={`tone-${minutesTone(station.duration_s / 60)}`}>{minutes(station.duration_s)}</span> walk to {station.name}</> });
   for (const d of p.travel.destinations.slice(0, 3)) {
-    if (d.drive_s != null) items.push({ icon: "🚗", tab: "location", text: <><span className={`tone-${minutesTone(d.drive_s / 60, "drive")}`}>{minutes(d.drive_s)}</span> drive to {d.name}</> });
+    if (d.drive_s != null) items.push({ icon: <Car />, tab: "location", text: <><span className={`tone-${minutesTone(d.drive_s / 60, "drive")}`}>{minutes(d.drive_s)}</span> drive to {d.name}</> });
   }
-  for (const sch of schools) items.push({ icon: "🏫", tab: "location", text: <>{sch.label} <span className="muted">zone</span></> });
-  for (const f of flags) items.push({ icon: "⚠", tab: "location", text: <span className={f.effect === "hard_exclude" ? "tone-bad" : "tone-warn"}>{f.label}</span> });
+  for (const sch of schools) items.push({ icon: <School />, tab: "location", text: <>{sch.label} <span className="muted">zone</span></> });
+  for (const f of flags) items.push({ icon: <TriangleAlert />, tab: "location", text: <span className={f.effect === "hard_exclude" ? "tone-bad" : "tone-warn"}>{f.label}</span> });
   if (guide && median) {
     const pct = ((guide.low_aud + guide.high_aud) / 2 / median - 1) * 100;
-    items.push({ icon: "💰", tab: "sale", text: <>Guide is {Math.abs(pct).toFixed(0)}% {pct >= 0 ? "above" : "below"} the suburb median ({money(median)})</> });
+    items.push({ icon: <CircleDollarSign />, tab: "sale", text: <>Guide is {Math.abs(pct).toFixed(0)}% {pct >= 0 ? "above" : "below"} the suburb median ({money(median)})</> });
   }
-  if (next) items.push({ icon: "🗓", tab: "inspections", text: <>Next inspection {when(next.starts_at)}</> });
+  if (next) items.push({ icon: <CalendarDays />, tab: "inspections", text: <>Next inspection {when(next.starts_at)}</> });
   const photos = p.attachments.filter(isPhoto).length, docs = p.attachments.length - photos;
-  if (p.attachments.length) items.push({ icon: "📎", tab: "files", text: <>{photos} {photos === 1 ? "photo" : "photos"}, {docs} {docs === 1 ? "document" : "documents"}</> });
+  if (p.attachments.length) items.push({ icon: <Paperclip />, tab: "files", text: <>{photos} {photos === 1 ? "photo" : "photos"}, {docs} {docs === 1 ? "document" : "documents"}</> });
   return (
     <div className="card">
       <h2>At a glance</h2>
@@ -341,26 +342,26 @@ function Timeline({ p }: { p: Detail }) {
   const { byId } = usePeople();
   const [all, setAll] = useState(false);
   const who = (id: string | null | undefined) => (id ? byId.get(id)?.display_name ?? "" : "");
-  type Ev = { at: string; icon: string; text: React.ReactNode };
+  type Ev = { at: string; icon: React.ReactNode; text: React.ReactNode };
   const ev: Ev[] = [];
   for (const h of p.status_history) ev.push({ at: h.occurred_at, icon: "●", text: <>Status: <strong>{LABEL.status[h.status]}</strong> <span className="muted">· {who(h.created_by)}</span></> });
-  for (const o of p.opinions) ev.push({ at: o.recorded_at, icon: o.stance === "yes" ? "👍" : o.stance === "no" ? "👎" : "🤔",
+  for (const o of p.opinions) ev.push({ at: o.recorded_at, icon: o.stance === "yes" ? <ThumbsUp /> : o.stance === "no" ? <ThumbsDown /> : <CircleHelp />,
     text: <>{who(o.person_id)}: <span className={`pill ${o.stance}`}>{LABEL.stance[o.stance]}</span> <span className="muted">{LABEL.stage[o.stage].toLowerCase()}</span>{o.note && <> · “{o.note}”</>}</> });
   for (const c of p.campaigns) {
-    if (c.listed_on) ev.push({ at: c.listed_on, icon: "🏷", text: <>Listed · {LABEL.method[c.sale_method]}</> });
+    if (c.listed_on) ev.push({ at: c.listed_on, icon: <Tag />, text: <>Listed · {LABEL.method[c.sale_method]}</> });
     const guides = oldestFirst(c);
     guides.forEach((g, i) => {
       const prev = guides[i - 1];
       const d = prev ? (g.low_aud + g.high_aud) / 2 - (prev.low_aud + prev.high_aud) / 2 : 0;
-      ev.push({ at: g.observed_at, icon: "💲", text: <>Guide {moneyRange(g.low_aud, g.high_aud)} <span className="muted">({LABEL.guideSource[g.source]})</span>
+      ev.push({ at: g.observed_at, icon: <DollarSign />, text: <>Guide {moneyRange(g.low_aud, g.high_aud)} <span className="muted">({LABEL.guideSource[g.source]})</span>
         {d !== 0 && <span className={`tone-${changeTone(d)}`}> {d > 0 ? "↑" : "↓"} {money(Math.abs(d))}</span>}</> });
     });
-    if (c.outcome && c.outcome_on) ev.push({ at: c.outcome_on, icon: "🔨", text: <strong>{LABEL.outcome[c.outcome]}{c.sold_price_aud ? ` ${money(c.sold_price_aud)}` : ""}</strong> });
+    if (c.outcome && c.outcome_on) ev.push({ at: c.outcome_on, icon: <Gavel />, text: <strong>{LABEL.outcome[c.outcome]}{c.sold_price_aud ? ` ${money(c.sold_price_aud)}` : ""}</strong> });
   }
-  for (const i of p.inspections) ev.push({ at: i.starts_at, icon: "🗓", text: <>Inspection{i.attendees.length ? ` · ${i.attendees.map((a) => who(a.person_id)).join(", ")} went` : ""}</> });
+  for (const i of p.inspections) ev.push({ at: i.starts_at, icon: <CalendarDays />, text: <>Inspection{i.attendees.length ? ` · ${i.attendees.map((a) => who(a.person_id)).join(", ")} went` : ""}</> });
   const byDay = new Map<string, number>();
   for (const a of p.attachments) byDay.set(a.created_at.slice(0, 10), (byDay.get(a.created_at.slice(0, 10)) ?? 0) + 1);
-  for (const [d, n] of byDay) ev.push({ at: `${d}T12:00:00`, icon: "📎", text: <>{n} {n === 1 ? "file" : "files"} added</> });
+  for (const [d, n] of byDay) ev.push({ at: `${d}T12:00:00`, icon: <Paperclip />, text: <>{n} {n === 1 ? "file" : "files"} added</> });
   ev.sort((a, b) => b.at.localeCompare(a.at));
   const shown = all ? ev : ev.slice(0, 10);
   return (
@@ -589,13 +590,13 @@ function WhereAndGettingAround({ p }: { p: Detail }) {
               <tbody>
                 {t.stations.map((s) => (
                   <tr key={s.place_id}>
-                    <th>🚉 {s.is_nearest ? <strong>{s.name}</strong> : s.name}{s.is_nearest && <span className="muted small"> nearest</span>}</th>
+                    <th><TrainFront /> {s.is_nearest ? <strong>{s.name}</strong> : s.name}{s.is_nearest && <span className="muted small"> nearest</span>}</th>
                     <td className={`tone-${minutesTone(s.duration_s / 60)}`}>{minutes(s.duration_s)}</td><td className="muted">—</td><td>{km(s.distance_m)}</td>
                   </tr>
                 ))}
                 {t.destinations.map((d) => (
                   <tr key={d.place_id}>
-                    <th>📍 {d.name}{d.person_id && <span className="muted small"> ({byId.get(d.person_id)?.display_name}'s)</span>}</th>
+                    <th><MapPin /> {d.name}{d.person_id && <span className="muted small"> ({byId.get(d.person_id)?.display_name}'s)</span>}</th>
                     <td className={`tone-${minutesTone(d.walk_s == null ? null : d.walk_s / 60)}`}
                       title={d.walk_s == null && (d.drive_m ?? 0) > 25_000 ? "Too far to walk" : undefined}>{d.walk_s == null ? "—" : minutes(d.walk_s)}</td>
                     <td className={`tone-${minutesTone(d.drive_s == null ? null : d.drive_s / 60, "drive")}`}>{d.drive_s == null ? "—" : minutes(d.drive_s)}</td>
@@ -776,7 +777,7 @@ function CampaignCard({ propertyId, c }: { propertyId: string; c: Campaign }) {
           {day(c.outcome_on)}
           {c.sold_price_aud != null && ` · sold ${money(c.sold_price_aud)}`}
           {c.passed_in_bid_aud != null && ` · passed in at ${money(c.passed_in_bid_aud)}`}
-          {c.bought_by_us && " · bought by us 🎉"}
+          {c.bought_by_us && <> · bought by us <PartyPopper /></>}
         </div>
       )}
       {!c.outcome && <CampaignDates propertyId={propertyId} c={c} />}

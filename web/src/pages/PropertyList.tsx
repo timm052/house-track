@@ -11,6 +11,7 @@ import { applyView, builtInDefault, describe, useViews, type Filter, type Sort }
 import FilterPopover from "../overview/FilterPopover";
 import { usePeople } from "../people";
 import { CLOSED, STATUS_COLOUR, changeTone, minutesTone, soonTone, suburbClass, suburbSlots, tagStyle, useTagColours } from "../colour";
+import { CalendarDays, Scale } from "lucide-react";
 
 type Overview = { rows: OverviewRow[]; places: OverviewPlace[] };
 type Quick = { thisWeek: boolean; statuses: string[]; methods: string[]; myVerdicts: string[]; hideExcluded: boolean;
@@ -66,8 +67,8 @@ export default function PropertyList() {
     <>
       <div className="toolbar">
         <input className="search" type="search" placeholder="Search address, agent, notes" value={search} onChange={(e) => setSearch(e.target.value)} />
-        <Link to="/calendar"><button className="icon-btn" aria-label="Calendar" title="Calendar">📅<span className="label">Calendar</span></button></Link>
-        <Link to="/disagree"><button className="icon-btn" aria-label="Where we disagree" title="Where we disagree">⚖<span className="label">Disagreements</span></button></Link>
+        <Link to="/calendar"><button className="icon-btn" aria-label="Calendar" title="Calendar"><CalendarDays /><span className="label">Calendar</span></button></Link>
+        <Link to="/disagree"><button className="icon-btn" aria-label="Where we disagree" title="Where we disagree"><Scale /><span className="label">Disagreements</span></button></Link>
         <Link to="/add"><button className="primary">+ Add house</button></Link>
       </div>
       <div className="filter-bar">
@@ -204,7 +205,9 @@ function Card({ r, people, favourites, cols, slots, tagColours }: {
       onTouchEnd={() => window.clearTimeout(timer.current)}
       onContextMenu={(e) => { if (r.agent_phone) { e.preventDefault(); setAgent(true); } }}>
       <div className="card-thumb" aria-hidden>
-        {r.cover_id ? <img src={`/api/attachments/${String(r.cover_id)}/thumb`} alt="" loading="lazy" /> : <span>🏠</span>}
+        {r.cover_id ? <img src={`/api/attachments/${String(r.cover_id)}/thumb`} alt="" loading="lazy" /> : (
+          <svg viewBox="0 0 32 32"><path d="M7.5 15.5 16 8.5l8.5 7M10.5 13.5v10h11v-10M14.2 23.5v-5h3.6v5" /></svg>
+        )}
       </div>
       <div className="card-body">
       <div className="row">

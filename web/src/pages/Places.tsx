@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import AddressSearch from "../AddressSearch";
 import { api, type Place, type StationHit } from "../api";
 import { usePeople } from "../people";
+import { TrainFront } from "lucide-react";
 
 /** Stations picked from the region's list, and destinations like work (PLAN.md D10). */
 export default function Places() {
@@ -43,7 +44,7 @@ export default function Places() {
         <p className="muted small">Each house shows walking time to its nearest chosen station, plus any others within your walking limit (Settings).</p>
         {stations.map((s) => (
           <div key={s.id} className="row">
-            <span className="grow">🚉 {s.name}</span>
+            <span className="grow"><TrainFront /> {s.name}</span>
             <button className="link" onClick={() => remove.mutate(s.id)}>Remove</button>
           </div>
         ))}

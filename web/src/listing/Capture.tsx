@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type PropertyDetail, type PropertyType, type SaleMethod } from "../api";
-import { LABEL, money, moneyRange, when } from "../format";
+import { LABEL, landArea, money, moneyRange, when } from "../format";
 
 export type Capture = {
   url: string | null; address: string | null;
@@ -125,6 +125,10 @@ export function ExistingUpdate({ c }: { c: Capture }) {
   const dateChanged = !!dateAt && (!liveAt || new Date(liveAt).getTime() !== new Date(dateAt).getTime());
   const methodChanged = !!c.sale_method && !!live && live.sale_method !== c.sale_method;
   const photos = photosOf(c);
+  // Rooms and areas the listing states differently from what's saved (a mistyped or misread land size, say).
+  const DETAILS = [["beds", "Bedrooms"], ["baths", "Bathrooms"], ["car_spaces", "Car spaces"], ["land_m2", "Land"], ["building_m2", "Building"]] as const;
+  const area = (k: string, v: number) => (k === "land_m2" ? landArea(v) : k === "building_m2" ? `${v.toLocaleString()} m²` : String(v));
+  const details = p ? DETAILS.filter(([k]) => c[k] != null && c[k] !== p[k]) : [];
 
   async function update() {
     setMsg("Updating…");
@@ -136,6 +140,7 @@ export function ExistingUpdate({ c }: { c: Capture }) {
                      auction_at: c.sale_method === "auction" && dateChanged ? c.auction_at : null,
                      eoi_closes_at: c.sale_method === "eoi" && dateChanged ? c.eoi_closes_at : null };
       await api(`/api/properties/${id}/listing-update`, { method: "POST", body });
+      if (details.length) await api(`/api/properties/${id}`, { method: "PATCH", body: Object.fromEntries(details.map(([k]) => [k, c[k]])) });
       for (const key of [["property", id], ["overview"], ["tags"]]) queryClient.invalidateQueries({ queryKey: key });
       navigate(`/p/${id}`);
     } catch (e) {
@@ -151,6 +156,9 @@ export function ExistingUpdate({ c }: { c: Capture }) {
     newInspections.length > 0 && <li key="i">{newInspections.length} new inspection {newInspections.length === 1 ? "time" : "times"}: {newInspections.map((i) => when(i.starts_at)).join(" · ")}</li>,
     newAgents.length > 0 && <li key="a">Agents: {newAgents.map((a) => a.name).join(", ")}</li>,
     c.soi_url && !p?.attachments.some((x) => x.url === c.soi_url) && <li key="s">Statement of Information</li>,
+    ...details.map(([k, label]) => (
+      <li key={k}>{label}: <strong>{area(k, c[k]!)}</strong>{p![k] != null && <span className="muted"> (was {area(k, p![k]!)})</span>}</li>
+    )),
   ].filter(Boolean);
 
   return (

@@ -130,8 +130,10 @@ def _events(conn, days: int) -> list[dict]:
         {"days": days},
     ).fetchall()
     for r in rows:
+        suburb = r["suburb"]
         r["address"] = display(Address(**{k: r.pop(k) for k in ("unit", "street_number", "street", "suburb", "postcode",
                                                                    "plan_number", "lot_number")}))
+        r["suburb"] = suburb
     return rows
 
 
@@ -348,6 +350,25 @@ def update_attachment(attachment_id: UUID, body: AttachmentPatch, person: Person
         if update_columns(conn, "attachment", attachment_id, body.model_dump(exclude_unset=True)) is None:
             raise not_found("Attachment")
     return {"id": attachment_id}
+
+
+class CoverIn(BaseModel):
+    attachment_id: UUID | None = None  # none: back to the listing's main photo
+
+
+@router.put("/properties/{property_id}/cover")
+def set_cover(property_id: UUID, body: CoverIn, person: Person) -> dict:
+    """Choose the house's cover photo (see migration 0006 for the one used when nobody has)."""
+    with tx(person) as conn:
+        if body.attachment_id is not None and conn.execute(
+                "SELECT 1 FROM attachment WHERE id = %s AND property_id = %s AND sha256 IS NOT NULL AND mime_type LIKE 'image/%%'",
+                (body.attachment_id, property_id)).fetchone() is None:
+            raise HTTPException(422, "That isn't one of this house's photos.")
+        if conn.execute("UPDATE property SET cover_photo_id = %s WHERE id = %s RETURNING id",
+                        (body.attachment_id, property_id)).fetchone() is None:
+            raise not_found("Property")
+        cover = conn.execute("SELECT attachment_id FROM property_cover WHERE property_id = %s", (property_id,)).fetchone()
+    return {"cover_id": cover and cover["attachment_id"]}
 
 
 @router.delete("/attachments/{attachment_id}", status_code=204)

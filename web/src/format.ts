@@ -77,3 +77,7 @@ export function rooms(p: { beds: number | null; baths: number | null; car_spaces
 
 export const minutes = (s: number | null) => (s == null ? "" : `${Math.max(1, Math.round(s / 60))} min`);
 export const km = (m: number | null) => (m == null ? "" : m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`);
+
+/** Land area: square metres, or hectares for acreage. */
+export const landArea = (m2: number) =>
+  m2 >= 10_000 ? `${(m2 / 10_000).toLocaleString(undefined, { maximumFractionDigits: 2 })} ha` : `${m2.toLocaleString()} m²`;

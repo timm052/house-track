@@ -67,7 +67,8 @@ def map_data(person: OptionalPerson) -> dict:
                                 WHERE h.property_id = p.id AND h.owner_id IS DISTINCT FROM %(me)s), '[]') AS others_flags,
                       coalesce((SELECT jsonb_agg(jsonb_build_object('person_id', person_id, 'stage', stage, 'stance', stance))
                                 FROM opinion_current oc WHERE oc.property_id = p.id), '[]') AS opinions,
-                      ns.name AS nearest_station, ns.duration_s AS nearest_station_walk_s
+                      ns.name AS nearest_station, ns.duration_s AS nearest_station_walk_s,
+                      (SELECT pc.attachment_id::text FROM property_cover pc WHERE pc.property_id = p.id) AS cover_id
                FROM property p
                JOIN property_status s ON s.property_id = p.id
                LEFT JOIN property_flags f ON f.property_id = p.id AND f.person_id = %(me)s

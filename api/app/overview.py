@@ -86,6 +86,8 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
     hits = by_property("SELECT property_id, owner_id, kind, name FROM property_area_hit WHERE property_id = ANY(%s)")
     context = by_property("SELECT DISTINCT property_id, code, label FROM property_overlay_hit WHERE property_id = ANY(%s)")
     scores = by_property("SELECT property_id, person_id, score FROM property_score WHERE property_id = ANY(%s)")
+    covers = {r["property_id"]: str(r["attachment_id"]) for r in conn.execute(
+        "SELECT property_id, attachment_id FROM property_cover WHERE property_id = ANY(%s)", (ids,)).fetchall()}
     tag_rows = by_property("SELECT pt.property_id, t.name FROM property_tag pt JOIN tag t ON t.id = pt.tag_id"
                            " WHERE pt.property_id = ANY(%s) ORDER BY lower(t.name)")
     travel = by_property(
@@ -147,6 +149,7 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
             "guide_changes": max(len(guides.get(pid, [])) - 1, 0),
             "last_guide_change": (_day(guides[pid][-1]["observed_at"]) if len(guides.get(pid, [])) > 1 else None),
             "tags": [t["name"] for t in tag_rows.get(pid, [])],
+            "cover_id": covers.get(pid),
             **{k: (cj[k]["amount_aud"] if k in cj else None) for k in JUDGEMENTS},
             "sold_vs_guide_pct": (round((c["sold_price_aud"] / guide_high - 1) * 100, 1)
                                   if c and c["sold_price_aud"] and guide_high else None),

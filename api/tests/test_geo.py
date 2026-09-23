@@ -228,3 +228,25 @@ def test_valhalla_matrix_shapes():
     assert parse_matrix(rows, 2) == [Route(None, None), Route(1234, 900)]
     arrays = {"sources_to_targets": {"distances": [[0.5, None]], "durations": [[360, None]]}}
     assert parse_matrix(arrays, 2) == [Route(500, 360), Route(None, None)]
+
+
+def test_valhalla_long_walks_and_empty_cells():
+    """Walks too far are recorded as no route without asking; cells the matrix leaves empty are routed one by one."""
+    from app.geo_services import Valhalla
+    v = Valhalla("http://valhalla:8002")
+    calls = []
+
+    def post(path, body):
+        calls.append((path, body))
+        if path == "sources_to_targets":  # the second target comes back empty, as long drives do on the public server
+            return {"sources_to_targets": [[{"distance": 2.0, "time": 300, "to_index": 0},
+                                            {"distance": None, "time": None, "to_index": 1}]]}
+        return {"trip": {"summary": {"length": 88.3, "time": 4252.4}}}
+    v._post = post
+    woodend, near, box_hill = (144.5318, -37.3612), (144.54, -37.37), (145.132, -37.808)
+    assert v.matrix(woodend, [near, box_hill], "drive") == [Route(2000, 300), Route(88300, 4252)]
+    assert [c[0] for c in calls] == ["sources_to_targets", "route"]
+
+    calls.clear()
+    assert v.matrix(woodend, [box_hill], "walk") == [Route(None, None)]
+    assert calls == []  # 70 km: not worth a walking route, and the public server refuses it

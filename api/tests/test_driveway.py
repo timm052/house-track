@@ -106,3 +106,41 @@ def test_listing_photo_saved_once(client, people, tmp_path, monkeypatch):
     assert client.get(f"/api/attachments/{photo['id']}/thumb").status_code == 200
     # No listing link: a clear message rather than a failed fetch.
     assert client.post(f"/api/properties/{pid}/listing-photo", headers=as_(a)).status_code == 422
+
+
+def test_cover_photo(client, people, tmp_path, monkeypatch):
+    """The listing's main photo (saved first) is the cover until someone picks another; removing it falls back."""
+    from app.routes import driveway
+    monkeypatch.setenv("BLOB_DIR", str(tmp_path))
+
+    def image(shade: int) -> bytes:
+        buf = io.BytesIO()
+        Image.new("RGB", (64, 48), (shade, 90, 40)).save(buf, "JPEG")
+        return buf.getvalue()
+    shades = iter([10, 60, 110])
+    monkeypatch.setattr(driveway, "download_image", lambda url: (image(next(shades)), "image/jpeg"))
+    a = people["a"]
+    pid = house(client, a, 12)
+    ids = [client.post(f"/api/properties/{pid}/attachments/from-url", headers=as_(a),
+                       json={"url": f"https://rimh2.domainstatic.com.au/abc/{n}.jpg"}).json()["id"] for n in ("main", "kitchen", "yard")]
+    own = client.post(f"/api/properties/{pid}/attachments", headers=as_(a),
+                      files={"file": ("mine.jpg", image(200), "image/jpeg")}, data={"kind": "photo"}).json()["id"]
+
+    def cover():
+        detail = client.get(f"/api/properties/{pid}").json()["cover_id"]
+        row = next(r for r in client.get("/api/overview").json()["rows"] if r["id"] == pid)["cover_id"]
+        assert str(detail) == str(row)
+        return str(detail)
+    assert cover() == str(ids[0])  # the listing's main photo, not the newest
+
+    r = client.put(f"/api/properties/{pid}/cover", headers=as_(a), json={"attachment_id": own})
+    assert r.status_code == 200 and str(r.json()["cover_id"]) == str(own)
+    assert cover() == str(own)
+
+    other = house(client, a, 13)
+    assert client.put(f"/api/properties/{other}/cover", headers=as_(a), json={"attachment_id": own}).status_code == 422
+
+    client.delete(f"/api/attachments/{own}", headers=as_(a))
+    assert cover() == str(ids[0])
+    client.put(f"/api/properties/{pid}/cover", headers=as_(a), json={"attachment_id": None})
+    assert cover() == str(ids[0])

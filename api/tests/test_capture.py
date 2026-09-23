@@ -149,3 +149,16 @@ def test_update_switches_sale_method(client, people):
     assert "Now selling by auction" in got["changes"] and "Auction date changed" in got["changes"]
     c = client.get(f"/api/properties/{pid}").json()["campaigns"][0]
     assert c["sale_method"] == "auction" and c["eoi_closes_at"] is None and c["auction_at"].startswith("2026-11-07")
+
+
+def test_land_is_read_in_square_metres():
+    """Acreage: Domain's landSize is text in the agent's unit ("2.69 acre"); the numeric landArea is m²."""
+    from app.listing_capture import _area_m2
+    woodend = {"props": {"pageProps": {"layoutProps": {"digitalData": {
+        "page": {"pageInfo": {"property": {"landArea": 10886.0437698}}},
+        "pageFromGraph": {"pageInfo": {"property": {"landSize": "2.69 acre", "landArea": 10886.0437698}}}}}}}}
+    assert extract(URL, "", next_data=json.dumps(woodend))["land_m2"] == 10886
+    only_text = {"props": {"pageProps": {"layoutProps": {"digitalData": {"page": {"pageInfo": {"property": {"landSize": "2.69 acre"}}}}}}}}
+    assert extract(URL, "", next_data=json.dumps(only_text))["land_m2"] == 10886
+    assert [_area_m2(v) for v in (652, "652m²", "650.0 sqm", "1.2 ha", "2.69 acre", "1,012 m2", "about 4", None)] == \
+        [652, 652, 650, 12000, 10886, 1012, None, None]

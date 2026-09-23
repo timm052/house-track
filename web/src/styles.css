@@ -447,3 +447,31 @@ ul.refresh-list li.done .refresh-state { color: var(--yes); }
 .bm-item p { margin: 6px 0 0; }
 ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
 kbd { font: inherit; font-size: 0.8em; padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; background: var(--surface-2); }
+/* House cards lead with the cover photo (or a suburb-tinted placeholder, so the text lines up either way). */
+.property-card { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; align-items: start; }
+.card-thumb { width: 96px; height: 96px; border-radius: 8px; overflow: hidden; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--sub-ink, var(--muted)) 14%, var(--surface-2)); }
+.card-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.card-thumb span { font-size: 1.6rem; opacity: 0.35; }
+@media (max-width: 480px) { .property-card { grid-template-columns: 72px minmax(0, 1fr); gap: 10px; } .card-thumb { width: 72px; height: 72px; } }
+/* Photo tiles: choose the cover, remove. The buttons show on hover, and always on touch screens. */
+.thumb { position: relative; }
+.thumb.is-cover img { outline: 3px solid var(--accent); outline-offset: -3px; }
+.thumb-badge { position: absolute; left: 4px; top: 4px; font-size: 0.7rem; font-weight: 700; padding: 1px 6px; border-radius: 999px;
+  background: var(--accent); color: var(--accent-text); }
+.thumb-actions { position: absolute; right: 4px; bottom: 4px; display: flex; gap: 4px; opacity: 0; transition: opacity 120ms; }
+.thumb:hover .thumb-actions, .thumb:focus-within .thumb-actions { opacity: 1; }
+@media (hover: none) { .thumb-actions { opacity: 1; } }
+.thumb-actions button { min-height: 0; padding: 2px 7px; font-size: 0.72rem; border-radius: 999px; border: 0;
+  background: rgb(0 0 0 / 0.65); color: #fff; }
+.sheet-photo img { width: 100%; height: 140px; object-fit: cover; border-radius: 8px; display: block; margin-bottom: 8px; }
+.pin-hover .maplibregl-popup-content { padding: 4px 8px; font-size: 0.8rem; font-weight: 600; background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; box-shadow: var(--shadow); }
+.pin-hover .maplibregl-popup-tip { display: none; }
+/* Calendar: time, what, where; each row carries its suburb's colour, and sale days stand out. */
+ul.cal-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+ul.cal-list li { display: flex; gap: 12px; align-items: flex-start; padding: 8px 10px; border-radius: 8px;
+  background: var(--sub-tint, transparent); border-left: 4px solid var(--sub-ink, var(--border)); }
+.cal-time { min-width: 72px; }
+.cal-sale { background: var(--accent); color: var(--accent-text); border-color: transparent; font-weight: 700; }
+.drive-photo { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; flex: none; }

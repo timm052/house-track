@@ -20,8 +20,9 @@
 		root * /srv/web
 		@immutable path /assets/*
 		header @immutable Cache-Control "public, max-age=31536000, immutable"
-		# The service worker and app entry must always be revalidated so updates reach installed phones.
-		@entry path /sw.js /registerSW.js /index.html /manifest.webmanifest /
+		# Everything else (the service worker, the manifest, and index.html under every app route such as
+		# /calendar) must always be revalidated, so updates reach browsers and installed phones.
+		@entry not path /assets/*
 		header @entry Cache-Control "no-cache"
 		try_files {path} /index.html
 		file_server

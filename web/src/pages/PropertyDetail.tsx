@@ -109,8 +109,8 @@ export default function PropertyDetail() {
         )}
         {tab === "files" && (
           <>
-            <ListingPhoto p={p} />
-            <Files propertyId={p.id} attachments={p.attachments} />
+            {!p.attachments.some((a) => a.caption === "From the listing") && <ListingPhoto p={p} />}
+            <Files propertyId={p.id} attachments={p.attachments} coverId={p.cover_id} />
           </>
         )}
       </div>
@@ -129,7 +129,7 @@ const isPhoto = (a: Detail["attachments"][number]) => !!a.sha256 && !!a.mime_typ
 function Banner({ p }: { p: Detail }) {
   const photos = p.attachments.filter(isPhoto);
   const slots = useSuburbSlots();
-  const cover = photos[0];  // attachments come newest first
+  const cover = photos.find((a) => a.id === p.cover_id) ?? photos[0];
   const hasPin = p.lat != null && p.lon != null;
   const map = hasPin && <Suspense fallback={<div className="banner-empty" />}><MiniMap lon={p.lon!} lat={p.lat!} /></Suspense>;
   return (
@@ -189,8 +189,11 @@ function Title({ p }: { p: Detail }) {
     ["🛏", p.beds != null ? String(p.beds) : "—", p.beds === 1 ? "bed" : "beds"],
     ["🛁", p.baths != null ? String(p.baths) : "—", p.baths === 1 ? "bath" : "baths"],
     ["🚗", p.car_spaces != null ? String(p.car_spaces) : "—", p.car_spaces === 1 ? "car" : "cars"],
-    ["📐", p.land_m2 != null ? Number(p.land_m2).toLocaleString() : "—", "m² land"],
   ];
+  // Unknown land is left out (like building area); acreage reads better in hectares.
+  if (p.land_m2 != null) facts.push(p.land_m2 >= 10_000
+    ? ["📐", (p.land_m2 / 10_000).toLocaleString(undefined, { maximumFractionDigits: 2 }), "ha land"]
+    : ["📐", Number(p.land_m2).toLocaleString(), "m² land"]);
   if (p.building_m2 != null) facts.push(["🏗", Number(p.building_m2).toLocaleString(), "m² building"]);
   facts.push(["🏠", p.property_type[0].toUpperCase() + p.property_type.slice(1),
               p.build_status === "established" ? "established" : p.build_status.replace(/_/g, " ")]);
@@ -593,7 +596,8 @@ function WhereAndGettingAround({ p }: { p: Detail }) {
                 {t.destinations.map((d) => (
                   <tr key={d.place_id}>
                     <th>📍 {d.name}{d.person_id && <span className="muted small"> ({byId.get(d.person_id)?.display_name}'s)</span>}</th>
-                    <td className={`tone-${minutesTone(d.walk_s == null ? null : d.walk_s / 60)}`}>{d.walk_s == null ? "—" : minutes(d.walk_s)}</td>
+                    <td className={`tone-${minutesTone(d.walk_s == null ? null : d.walk_s / 60)}`}
+                      title={d.walk_s == null && (d.drive_m ?? 0) > 25_000 ? "Too far to walk" : undefined}>{d.walk_s == null ? "—" : minutes(d.walk_s)}</td>
                     <td className={`tone-${minutesTone(d.drive_s == null ? null : d.drive_s / 60, "drive")}`}>{d.drive_s == null ? "—" : minutes(d.drive_s)}</td>
                     <td>{d.drive_m == null ? "—" : km(d.drive_m)}</td>
                   </tr>

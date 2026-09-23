@@ -47,8 +47,16 @@ export default function Driveway() {
     if (!pos) return [];
     return pinned.map((r) => ({ r, d: metres(pos, r) })).sort((a, b) => a.d - b.d).slice(0, 4);
   }, [rows, pos]);
-  const todays = new Set((events.data ?? []).filter((e) => e.type === "inspection").map((e) => e.property_id));
-  const current = rows.find((r) => r.id === chosen) ?? nearby[0]?.r ?? rows[0] ?? null;
+  const inspecting = (events.data ?? []).filter((e) => e.type === "inspection");
+  // "At an inspection now": from an hour before it starts to three hours after. Tomorrow's doesn't count.
+  const nowMs = Date.now();
+  const onNow = inspecting.filter((e) => { const t = new Date(e.starts_at).getTime(); return t - 3_600_000 <= nowMs && nowMs <= t + 3 * 3_600_000; });
+  const todays = new Set(onNow.map((e) => e.property_id));
+  const upcoming = new Set(inspecting.map((e) => e.property_id));
+  // Without GPS: houses with an inspection soon first (in time order), then the rest.
+  const byTime = [...new Set(inspecting.map((e) => e.property_id))];
+  const fallback = [...rows].sort((a, b) => (byTime.indexOf(a.id) + 1 || 1e9) - (byTime.indexOf(b.id) + 1 || 1e9));
+  const current = rows.find((r) => r.id === chosen) ?? nearby[0]?.r ?? fallback[0] ?? null;
   const personId = whose || me?.id || "";
   const hasPre = current ? current[`v:${personId}:pre`] != null : false;
   const [stage, setStage] = useState<Stage | null>(null);
@@ -77,7 +85,7 @@ export default function Driveway() {
 
   async function imHere() {
     if (!current || !me) return;
-    const inspection = (events.data ?? []).find((e) => e.type === "inspection" && e.property_id === current.id);
+    const inspection = onNow.find((e) => e.property_id === current.id);
     if (inspection) {
       const result = await sendOrQueue({ id: newId(), method: "PUT", path: `/api/inspections/${inspection.id}/attendees/${me.id}`,
         body: { note: null }, label: `Attended ${current.address}`, propertyId: current.id });
@@ -118,9 +126,9 @@ export default function Driveway() {
         {pos ? `Located to ±${Math.round(pos.accuracy)} m` : gpsError ?? "Finding your location…"}
       </div>
       <div className="chips">
-        {(nearby.length ? nearby.map(({ r, d }) => ({ r, d })) : rows.slice(0, 8).map((r) => ({ r, d: null as number | null }))).map(({ r, d }) => (
+        {(nearby.length ? nearby.map(({ r, d }) => ({ r, d })) : fallback.slice(0, 8).map((r) => ({ r, d: null as number | null }))).map(({ r, d }) => (
           <button key={r.id} className={`chip ${current?.id === r.id ? "on" : ""}`} onClick={() => { setChosen(r.id); setStage(null); }}>
-            {String(r.address)}{d != null && ` · ${d < 1000 ? `${Math.round(d)} m` : `${(d / 1000).toFixed(1)} km`}`}
+            {!d && upcoming.has(r.id) && "🗓 "}{String(r.address)}{d != null && ` · ${d < 1000 ? `${Math.round(d)} m` : `${(d / 1000).toFixed(1)} km`}`}
           </button>
         ))}
       </div>
@@ -128,8 +136,12 @@ export default function Driveway() {
         <p className="muted">No houses yet. Add one first.</p>
       ) : (
         <div className="card stack">
-          <div className="row">
-            <h1 className="grow" style={{ margin: 0 }}>{String(current.address)}</h1>
+          <div className="row" style={{ alignItems: "center" }}>
+            {Boolean(current.cover_id) && <img className="drive-photo" src={`/api/attachments/${String(current.cover_id)}/thumb`} alt="" />}
+            <div className="grow">
+              <h1 style={{ margin: 0 }}>{String(current.address)}</h1>
+              <div className="muted small">{String(current.suburb)}</div>
+            </div>
             <Link to={`/p/${current.id}`}>Open</Link>
           </div>
           <div className="grid2">

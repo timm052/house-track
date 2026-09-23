@@ -87,6 +87,20 @@ def _int(v: Any) -> int | None:
         return None
 
 
+AREA_UNITS = {"ha": 10_000, "hectare": 10_000, "hectares": 10_000, "acre": 4046.86, "acres": 4046.86, "ac": 4046.86,
+              "m²": 1, "m2": 1, "sqm": 1, "m": 1, "": 1}
+
+
+def _area_m2(v: Any) -> int | None:
+    """An area in square metres from a number or text with a unit: 652, "652m²", "2.69 acre", "1.2 ha"."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return round(v)
+    m = re.fullmatch(r"\s*(\d[\d,]*(?:\.\d+)?)\s*([a-z²2]*)\.?\s*", str(v or "").lower())
+    if not m or m[2] not in AREA_UNITS:
+        return None
+    return round(float(m[1].replace(",", "")) * AREA_UNITS[m[2]])
+
+
 def _local(iso: Any) -> str | None:
     """Portal times are Melbourne wall-clock without an offset; return an aware ISO string."""
     if isinstance(iso, dict):
@@ -204,8 +218,12 @@ def extract(url: str, html: str = "", next_data: str | None = None, argonaut: st
         v = _first(tree, *keys, kind=(int, float, str))
         if (n := _int(v)) is not None and n <= 50:
             out[field] = n
-    land = _first(tree, "landSize", "landArea") or next((s.get("value") for _, s in _walk(tree) if s.get("key") == "landArea"), None)
-    if (n := _int(land)) and 20 <= n <= 5_000_000:
+    # Domain gives land in square metres as a number (landAreaSqm, landArea, the stats' landArea); landSize is
+    # display text in the agent's unit ("2.69 acre"), so it's only a fallback, read with its unit.
+    land = (_first(tree, "landAreaSqm", "landArea", kind=(int, float))
+            or next((s.get("value") for _, s in _walk(tree) if s.get("key") == "landArea"), None))
+    n = round(land) if isinstance(land, (int, float)) else _area_m2(_first(tree, "landSize", "landArea"))
+    if n and 20 <= n <= 5_000_000:
         out["land_m2"] = n
     if (n := _int(_first(tree, "buildingArea", "buildingSize"))) and 10 <= n <= 100_000:
         out["building_m2"] = n

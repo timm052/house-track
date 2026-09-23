@@ -31,6 +31,8 @@ function useRefresh(propertyId: string) {
   return () => {
     queryClient.invalidateQueries({ queryKey: ["property", propertyId] });
     queryClient.invalidateQueries({ queryKey: ["inspections"] });
+    queryClient.invalidateQueries({ queryKey: ["overview"] });  // cover photos show on the cards and the map
+    queryClient.invalidateQueries({ queryKey: ["map"] });
   };
 }
 
@@ -118,7 +120,7 @@ function AttendeeNote({ inspectionId, initial, attended, onDone }: { inspectionI
   );
 }
 
-export function Files({ propertyId, attachments }: { propertyId: string; attachments: Attachment[] }) {
+export function Files({ propertyId, attachments, coverId }: { propertyId: string; attachments: Attachment[]; coverId?: string | null }) {
   const refresh = useRefresh(propertyId);
   const { me } = usePeople();
   const [kind, setKind] = useState("photo");
@@ -153,7 +155,11 @@ export function Files({ propertyId, attachments }: { propertyId: string; attachm
     if (res.ok) { setUrl(""); refresh(); } else setError((await res.json().catch(() => null))?.detail ?? "Couldn't add the link");
   }
 
-  const photos = attachments.filter((a) => a.sha256 && a.mime_type?.startsWith("image/"));
+  // The cover first, then the listing's photos in the listing's order, then everyone's own, newest first.
+  const fromListing = (a: Attachment) => a.caption === "From the listing";
+  const photos = attachments.filter((a) => a.sha256 && a.mime_type?.startsWith("image/")).sort((a, b) =>
+    Number(b.id === coverId) - Number(a.id === coverId) || Number(fromListing(b)) - Number(fromListing(a))
+    || (fromListing(a) ? a.created_at.localeCompare(b.created_at) : b.created_at.localeCompare(a.created_at)));
   const docs = attachments.filter((a) => !(a.sha256 && a.mime_type?.startsWith("image/")));
   return (
     <div className="card stack">
@@ -161,9 +167,20 @@ export function Files({ propertyId, attachments }: { propertyId: string; attachm
       {photos.length > 0 && (
         <div className="thumbs">
           {photos.map((p) => (
-            <a key={p.id} href={`/api/attachments/${p.id}/file`} target="_blank" rel="noreferrer" title={p.caption ?? p.original_name ?? ""}>
-              <img src={`/api/attachments/${p.id}/thumb`} alt={p.caption ?? DOC_KINDS[p.kind]} loading="lazy" />
-            </a>
+            <div key={p.id} className={`thumb ${p.id === coverId ? "is-cover" : ""}`}>
+              <a href={`/api/attachments/${p.id}/file`} target="_blank" rel="noreferrer" title={p.caption ?? p.original_name ?? ""}>
+                <img src={`/api/attachments/${p.id}/thumb`} alt={p.caption ?? DOC_KINDS[p.kind]} loading="lazy" />
+              </a>
+              {p.id === coverId && <span className="thumb-badge">Cover</span>}
+              <div className="thumb-actions">
+                {p.id !== coverId && (
+                  <button title="Use as the cover photo" onClick={() => api(`/api/properties/${propertyId}/cover`, { method: "PUT", body: { attachment_id: p.id } }).then(refresh)}>
+                    ★ Cover</button>
+                )}
+                <button title="Remove this photo" aria-label="Remove this photo"
+                  onClick={() => { if (confirm("Remove this photo?")) api(`/api/attachments/${p.id}`, { method: "DELETE" }).then(refresh); }}>✕</button>
+              </div>
+            </div>
           ))}
         </div>
       )}

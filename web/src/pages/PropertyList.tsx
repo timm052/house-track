@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Fragment, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
-import { LABEL, money, moneyRange } from "../format";
+import { LABEL, landArea, money, moneyRange } from "../format";
 import { STATUSES } from "../api";
 import { catalogue, display, type Column, type OverviewPlace, type OverviewRow } from "../overview/columns";
 import { applyView, builtInDefault, describe, useViews, type Filter, type Sort } from "../overview/views";
@@ -68,7 +68,6 @@ export default function PropertyList() {
         <input className="search" type="search" placeholder="Search address, agent, notes" value={search} onChange={(e) => setSearch(e.target.value)} />
         <Link to="/calendar"><button className="icon-btn" aria-label="Calendar" title="Calendar">📅<span className="label">Calendar</span></button></Link>
         <Link to="/disagree"><button className="icon-btn" aria-label="Where we disagree" title="Where we disagree">⚖<span className="label">Disagreements</span></button></Link>
-        <Link to="/trends"><button className="icon-btn" aria-label="Trends" title="Trends">📈<span className="label">Trends</span></button></Link>
         <Link to="/add"><button className="primary">+ Add house</button></Link>
       </div>
       <div className="filter-bar">
@@ -173,7 +172,8 @@ export default function PropertyList() {
   );
 }
 
-/** Four lines: address and status; rooms and travel; sale and price; verdicts. Long-press shows the agent. */
+/** The cover photo, then: address and status; rooms and travel; sale and price; verdicts (once there are any).
+ *  Long-press shows the agent. */
 function Card({ r, people, favourites, cols, slots, tagColours }: {
   r: OverviewRow; people: { id: string; display_name: string; colour: string }[]; favourites: OverviewPlace[]; cols: Column[];
   slots: Map<string, number>; tagColours: Map<string, string>;
@@ -184,7 +184,7 @@ function Card({ r, people, favourites, cols, slots, tagColours }: {
   const n = (k: string) => (r[k] as number | null) ?? null;
   const line2 = [
     [r.beds != null && `${r.beds} bed`, r.baths != null && `${r.baths} bath`, r.car_spaces != null && `${r.car_spaces} car`].filter(Boolean).join(" "),
-    r.land_m2 != null && `${Number(r.land_m2).toLocaleString()} m² land`,
+    r.land_m2 != null && `${landArea(Number(r.land_m2))} land`,
     r.property_type !== "house" && display(col("property_type"), r.property_type),
     r.nearest_station && <><span className={`tone-${minutesTone(r.nearest_station_walk)}`}>{String(r.nearest_station_walk)} min</span> walk to {String(r.nearest_station)}</>,
     ...favourites.filter((f) => r[`drive:${f.id}`] != null).map((f) =>
@@ -192,6 +192,8 @@ function Card({ r, people, favourites, cols, slots, tagColours }: {
     r.days_on_market != null && r.sale_method && `${r.days_on_market} ${r.days_on_market === 1 ? "day" : "days"} listed`,
   ].filter(Boolean) as ReactNode[];
   const change = n("guide_change");
+  // The campaign has an outcome but the house still looks active: nudge whoever looks next.
+  const staleStatus = Boolean(r.outcome) && !CLOSED.includes(r.status as never) && r.status !== "bought";
   const sale = r.outcome
     ? `${display(col("outcome"), r.outcome)}${r.sold_price_aud ? ` ${money(n("sold_price_aud"))}` : ""}`
     : r.sale_at ? `${display(col("sale_method"), r.sale_method)} ${display(col("sale_at"), r.sale_at)}`
@@ -201,6 +203,10 @@ function Card({ r, people, favourites, cols, slots, tagColours }: {
       onTouchStart={() => { timer.current = window.setTimeout(() => setAgent(true), 500); }}
       onTouchEnd={() => window.clearTimeout(timer.current)}
       onContextMenu={(e) => { if (r.agent_phone) { e.preventDefault(); setAgent(true); } }}>
+      <div className="card-thumb" aria-hidden>
+        {r.cover_id ? <img src={`/api/attachments/${String(r.cover_id)}/thumb`} alt="" loading="lazy" /> : <span>🏠</span>}
+      </div>
+      <div className="card-body">
       <div className="row">
         <span className="address grow">{String(r.address)}, <span className="suburb-name">{String(r.suburb)}</span></span>
         {Boolean(r.excluded) && <span className="pill no">Excluded</span>}
@@ -213,8 +219,10 @@ function Card({ r, people, favourites, cols, slots, tagColours }: {
         {change != null && change !== 0 && <span className={`pill tone-${changeTone(change)}`}>guide {change > 0 ? "↑" : "↓"} {money(Math.abs(change))}</span>}
         {r.walk_away != null && <span className="pill">limit {money(n("walk_away"))}</span>}
       </div>
+      {staleStatus && <div className="small tone-warn" style={{ marginTop: 4 }}>The sale's over: update the status</div>}
+      {people.some((p) => r[`v:${p.id}:post`] ?? r[`v:${p.id}:pre`]) && (
       <div className="row small" style={{ marginTop: 6 }}>
-        {people.some((p) => r[`v:${p.id}:post`] ?? r[`v:${p.id}:pre`]) ? people.map((p) => {
+        {people.map((p) => {
           const post = r[`v:${p.id}:post`] as string | undefined, pre = r[`v:${p.id}:pre`] as string | undefined;
           const v = post ?? pre;
           return v ? (
@@ -223,8 +231,9 @@ function Card({ r, people, favourites, cols, slots, tagColours }: {
               <span className={`pill ${v}`} title={post ? "After inspecting" : "Before inspecting"}>{LABEL.stance[v as "yes"]}{!post && <span className="muted"> · pre</span>}</span>
             </span>
           ) : null;
-        }) : <span className="muted">No verdicts yet</span>}
+        })}
       </div>
+      )}
       {((r.tags as string[] | undefined) ?? []).length > 0 && (
         <div style={{ marginTop: 4 }}>{(r.tags as string[]).map((t) => <span key={t} className="tag" style={tagStyle(tagColours, t)}>#{t}</span>)}</div>
       )}
@@ -233,6 +242,7 @@ function Card({ r, people, favourites, cols, slots, tagColours }: {
           {String(r.agent_name ?? "Agent")}: <a href={`tel:${String(r.agent_phone).replace(/\s/g, "")}`}>{String(r.agent_phone)}</a>
         </div>
       )}
+      </div>
     </Link>
   );
 }

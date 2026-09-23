@@ -2,13 +2,25 @@
 and Nominatim (free public geocoding fallback, PLAN.md decision 6)."""
 
 import json
+import math
 import time
 from dataclasses import dataclass
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 USER_AGENT = "HouseTrack/0.2 (self-hosted house-hunting app)"
 COSTING = {"walk": "pedestrian", "drive": "auto"}
+# Beyond this straight-line distance a walk isn't worth asking about (and the public server refuses walks
+# over 30 km, which used to stall the worker on the same request forever): recorded as "no route".
+MAX_WALK_M = 25_000
+
+
+def crow_m(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """Straight-line distance in metres between two (lon, lat) points."""
+    lon1, lat1, lon2, lat2 = map(math.radians, (*a, *b))
+    h = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
+    return 2 * 6_371_000 * math.asin(math.sqrt(h))
 
 
 @dataclass
@@ -26,23 +38,47 @@ class Valhalla:
         self.pause = 0.0 if any(h in self.base_url for h in ("localhost", "valhalla:", "127.0.0.1")) else 1.0
         self._last = 0.0
 
-    def matrix(self, origin: tuple[float, float], targets: list[tuple[float, float]], mode: str) -> list[Route]:
-        """One origin to many targets. Points are (lon, lat). Unroutable pairs come back as None."""
-        body = {
-            "sources": [{"lon": origin[0], "lat": origin[1]}],
-            "targets": [{"lon": lon, "lat": lat} for lon, lat in targets],
-            "costing": COSTING[mode],
-            "units": "kilometers",
-        }
+    def _post(self, path: str, body: dict) -> dict:
         wait = self.pause - (time.monotonic() - self._last)
         if wait > 0:
             time.sleep(wait)
         self._last = time.monotonic()
-        req = Request(f"{self.base_url}/sources_to_targets", data=json.dumps(body).encode(),
+        req = Request(f"{self.base_url}/{path}", data=json.dumps(body).encode(),
                       headers={"Content-Type": "application/json", "User-Agent": USER_AGENT}, method="POST")
         with urlopen(req, timeout=30) as r:
-            data = json.load(r)
-        return parse_matrix(data, len(targets))
+            return json.load(r)
+
+    def matrix(self, origin: tuple[float, float], targets: list[tuple[float, float]], mode: str) -> list[Route]:
+        """One origin to many targets. Points are (lon, lat). Unroutable pairs come back as Route(None, None).
+        Walks too far to matter aren't asked for, and pairs the matrix leaves empty (it gives up on long
+        drives on the public server) are asked for again one at a time."""
+        routes = [Route(None, None)] * len(targets)
+        ask = [i for i, t in enumerate(targets) if mode != "walk" or crow_m(origin, t) <= MAX_WALK_M]
+        if ask:
+            body = {"sources": [{"lon": origin[0], "lat": origin[1]}],
+                    "targets": [{"lon": targets[i][0], "lat": targets[i][1]} for i in ask],
+                    "costing": COSTING[mode], "units": "kilometers"}
+            try:
+                got = parse_matrix(self._post("sources_to_targets", body), len(ask))
+            except HTTPError as e:
+                if e.code != 400:
+                    raise  # server down or busy: the worker backs off and tries again
+                got = [Route(None, None)] * len(ask)  # a request it won't answer, such as a limit: one at a time
+            for i, route in zip(ask, got):
+                routes[i] = route if route.duration_s is not None else self.route(origin, targets[i], mode)
+        return routes
+
+    def route(self, origin: tuple[float, float], target: tuple[float, float], mode: str) -> Route:
+        """A single route; Route(None, None) when there's no way there (or the server won't say)."""
+        body = {"locations": [{"lon": origin[0], "lat": origin[1]}, {"lon": target[0], "lat": target[1]}],
+                "costing": COSTING[mode], "units": "kilometers", "directions_type": "none"}
+        try:
+            summary = self._post("route", body)["trip"]["summary"]
+        except HTTPError as e:
+            if e.code != 400:
+                raise
+            return Route(None, None)
+        return Route(round(summary["length"] * 1000), round(summary["time"]))
 
 
 def parse_matrix(data: dict, n: int) -> list[Route]:

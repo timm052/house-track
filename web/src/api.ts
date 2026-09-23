@@ -106,6 +106,7 @@ export type PropertyDetail = PropertyBase & {
   attachments: import("./pages/PropertyExtras").Attachment[];
   overlays: { code: string; title: string; effect: "info" | "soft_warn" | "hard_exclude"; label: string }[];
   tags: string[];
+  cover_id: string | null;
 };
 
 export type Settings = { walk_limit_min: number };
@@ -170,7 +171,7 @@ export type MapProperty = {
   plan_number: string | null; lot_number: string | null; manual_pin: boolean; status: Status;
   excluded: boolean; warned: boolean; reasons: string[]; others_flags: Flag[];
   opinions: { person_id: string; stage: Stage; stance: Stance }[];
-  nearest_station: string | null; nearest_station_walk_s: number | null;
+  nearest_station: string | null; nearest_station_walk_s: number | null; cover_id: string | null;
 };
 export type MapArea = { id: string; owner_id: string; name: string; kind: AreaKind; reason: string | null };
 export type MapPlace = { id: string; kind: "station" | "destination"; name: string; person_id: string | null; station_osm_id: number | null; is_favourite: boolean };

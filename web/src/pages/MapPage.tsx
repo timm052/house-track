@@ -128,6 +128,7 @@ export default function MapPage() {
         ...f,
         properties: {
           id: f.properties.id,
+          label: addressOf(f.properties),
           colour: STATUS_COLOUR[f.properties.status],
           dim: f.properties.excluded || ["rejected", "lost", "withdrawn"].includes(f.properties.status),
           ring: f.properties.others_flags.length ? byId.get(f.properties.others_flags[0].owner_id)?.colour ?? "#888" : "",
@@ -196,7 +197,23 @@ export default function MapPage() {
       }
     };
     map.on("click", onClick);
-    return () => { map.off("click", onClick); };
+    // Pins say which house they are on hover, and look clickable.
+    const hover = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 12, className: "pin-hover" });
+    const onEnter = (e: maplibregl.MapLayerMouseEvent) => {
+      const f = e.features?.[0];
+      if (!f || modeRef.current.drawing) return;
+      map.getCanvas().style.cursor = "pointer";
+      hover.setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number]).setText(String(f.properties.label)).addTo(map);
+    };
+    const onLeave = () => { map.getCanvas().style.cursor = ""; hover.remove(); };
+    map.on("mousemove", "props-circle", onEnter);
+    map.on("mouseleave", "props-circle", onLeave);
+    return () => {
+      map.off("click", onClick);
+      map.off("mousemove", "props-circle", onEnter);
+      map.off("mouseleave", "props-circle", onLeave);
+      hover.remove();
+    };
   }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── drawing & editing areas ─────────────────────────────────────────
@@ -362,6 +379,9 @@ function PropertySheet({ p, onClose }: { p: MapProperty; onClose: () => void }) 
   const { byId } = usePeople();
   return (
     <div className="sheet">
+      {p.cover_id && (
+        <Link to={`/p/${p.id}`} className="sheet-photo"><img src={`/api/attachments/${p.cover_id}/thumb`} alt="" /></Link>
+      )}
       <div className="row">
         <strong className="grow">{addressOf(p)}</strong>
         <span className="pill status-pill"><span className="status-dot" style={{ background: STATUS_COLOUR[p.status] }} />{LABEL.status[p.status]}</span>

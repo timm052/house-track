@@ -286,6 +286,9 @@ export default function QuickAdd() {
           <label>Building area (m²)<input inputMode="decimal" value={building} onChange={(e) => setBuilding(e.target.value)} /></label>
         </div>
         {(Number.isNaN(area(land)) || Number.isNaN(area(building))) && <p className="error small">Areas look like 652, 652 m² or 0.25 ha.</p>}
+        {/^\d+(\.\d+)?$/.test(land.trim()) && Number(land) > 0 && Number(land) < 50 && (
+          <p className="small tone-warn">{land.trim()} m² is tiny. For acres or hectares, type “{land.trim()} acres” or “{land.trim()} ha”.</p>
+        )}
       </div>
 
       <div className="card stack">

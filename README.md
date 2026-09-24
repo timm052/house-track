@@ -61,6 +61,8 @@ docker compose stop api && docker compose --profile ops run --rm restore house-2
 
 ## Unraid
 
+To install without building (or on a server with no copy of the source), use a release bundle: see [deploy/INSTALL.md](deploy/INSTALL.md).
+
 Put `DATA_DIR` on a cache-pool path such as `/mnt/cache/appdata/housetrack`; PostgreSQL is slow through `/mnt/user`. Put `BACKUP_DIR` on an array share. Run the stack with the Compose Manager plugin. The stack brings its own Tailscale sidecar, so Unraid's built-in Tailscale integration isn't needed for this app. Plan for about 4 GB in `DATA_DIR` after setup (downloads cache and G-NAF); add about 2 GB, plus 2 GB of RAM, if you run local tiles and Valhalla.
 
 ## Develop

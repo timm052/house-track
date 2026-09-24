@@ -85,6 +85,7 @@ class ListingExtras(BaseModel):
     soi_url: Annotated[str, Field(pattern=r"^https?://", max_length=2000)] | None = None
     tags: list[Annotated[str, Field(max_length=40)]] = Field(default_factory=list, max_length=20)
     photos: list[Annotated[str, Field(pattern=r"^https?://", max_length=2000)]] = Field(default_factory=list, max_length=30)
+    floorplans: list[Annotated[str, Field(pattern=r"^https?://", max_length=2000)]] = Field(default_factory=list, max_length=5)
 
 
 class ListingUpdateIn(ListingExtras):
@@ -102,6 +103,7 @@ class ListingUpdateIn(ListingExtras):
     # Rooms and areas that differ from what's saved: applied when a person asked for the update (the
     # + House Track button), only reported by the unattended weekly refresh.
     apply_details: bool = True
+    fill_missing: bool = False  # without apply_details: still fill in rooms and areas we have nothing for
     # What the listing itself says now (sold, under offer, archived) and its price wording, kept on the campaign.
     listing_status: str | None = Field(default=None, max_length=40)
     listing_price_text: str | None = Field(default=None, max_length=300)

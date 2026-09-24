@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api } from "../api";
+import { api, whilePending } from "../api";
 import { LABEL, landArea, money, moneyRange } from "../format";
 import { STATUSES } from "../api";
 import { catalogue, display, type Column, type OverviewPlace, type OverviewRow } from "../overview/columns";
@@ -16,14 +16,14 @@ import { useNeeds } from "./ThisWeek";
 import { statusOutOfStep } from "../Outcome";
 import type { Outcome, Status } from "../api";
 
-type Overview = { rows: OverviewRow[]; places: OverviewPlace[] };
+type Overview = { rows: OverviewRow[]; places: OverviewPlace[]; pending?: number };
 type Quick = { thisWeek: boolean; statuses: string[]; methods: string[]; myVerdicts: string[]; hideExcluded: boolean;
                suburbs: string[]; tags: string[]; affordable: boolean };
 const NO_QUICK: Quick = { thisWeek: false, statuses: [], methods: [], myVerdicts: [], hideExcluded: false, suburbs: [], tags: [], affordable: false };
 
 export default function PropertyList() {
   const { all: persons, active, me } = usePeople();
-  const { data, isPending, isError } = useQuery({ queryKey: ["overview"], queryFn: () => api<Overview>("/api/overview") });
+  const { data, isPending, isError } = useQuery({ queryKey: ["overview"], queryFn: () => api<Overview>("/api/overview"), refetchInterval: whilePending });
   const views = useViews();
   const cols = useMemo(() => catalogue(persons, data?.places ?? []), [persons, data?.places]);
   const favourites = (data?.places ?? []).filter((p) => p.kind === "destination" && p.is_favourite);
@@ -275,7 +275,7 @@ function Card({ r, people, favourites, cols, slots, tagColours, picked, onPick }
         <span className={`grow ${!r.outcome ? `tone-${soonTone(r.sale_at)}` : ""}`}>{sale}</span>
         <span className={n("guide_low") == null ? "muted" : "price"}>{moneyRange(n("guide_low"), n("guide_high"))}</span>
         {change != null && change !== 0 && <span className={`pill tone-${changeTone(change)}`}>guide {change > 0 ? "↑" : "↓"} {money(Math.abs(change))}</span>}
-        {r.walk_away != null && <span className="pill">limit {money(n("walk_away"))}</span>}
+        {r.walk_away != null && <span className="pill">our max {money(n("walk_away"))}</span>}
         {(r.budget === "over" || r.budget === "stretch") && (
           <span className={`pill tone-${budgetTone(r.budget)}`} title="The guide against the most you can bid (Settings → Budget)">
             {r.budget === "over" ? "Over budget" : "Stretch"}</span>

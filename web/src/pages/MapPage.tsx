@@ -6,20 +6,20 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { TerraDraw, TerraDrawPolygonMode, TerraDrawSelectMode } from "terra-draw";
 import { TerraDrawMapLibreGLAdapter } from "terra-draw-maplibre-gl-adapter";
-import { STATUSES, api, type AreaKind, type MapArea, type MapData, type MapProperty } from "../api";
-import { km, LABEL, minutes, streetLine } from "../format";
+import { STATUSES, api, whilePending, type AreaKind, type MapArea, type MapData, type MapProperty } from "../api";
+import { LABEL, streetLine } from "../format";
 import { basemapStyle } from "../map/basemap";
 import { colourFor, syncOverlays, type OverlayLayer } from "../map/overlays";
 import { usePeople } from "../people";
-import { STATUS_COLOUR, minutesTone, useDarkMode } from "../colour";
+import { STATUS_COLOUR, useDarkMode } from "../colour";
+import { isDark as pageIsDark } from "../theme";
+import HouseSidePanel, { comparableLabel, type StationRoute, useComparables } from "../map/HouseSidePanel";
 
 const MELBOURNE: [number, number] = [145.0, -37.81];
 type Filter = "all" | "mine" | "either";
-type RouteLeg = { distance_m: number | null; duration_s: number | null; geometry: GeoJSON.LineString | null };
-type StationRoute = { station: { name: string; lon: number; lat: number }; walk: RouteLeg; drive: RouteLeg };
+
 type Selected = { kind: "property"; p: MapProperty } | { kind: "area"; a: MapArea } | null;
 
-const dark = () => window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
 
 const addressOf = (p: Pick<MapProperty, "unit" | "street_number" | "street" | "suburb" | "lot_number">) => `${streetLine(p)}, ${p.suburb}`;
 
@@ -46,7 +46,8 @@ export default function MapPage() {
   const [error, setError] = useState<string | null>(null);
   const [showLayers, setShowLayers] = useState(false);
   const [showCommute, setShowCommute] = useState(false);
-  const [commute, setCommute] = useState<{ placeId: string; minutes: number; mode: "drive" | "walk" } | null>(null);
+  // From: "house:<id>" (a house on the map) or "place:<id>" (a saved place or station).
+  const [commute, setCommute] = useState<{ from: string; minutes: number; mode: "drive" | "walk" } | null>(null);
   const [commuteMsg, setCommuteMsg] = useState<string | null>(null);
   const [enabled, setEnabled] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem("housetrack.map.overlays") ?? "[]"); } catch { return []; }
@@ -67,7 +68,7 @@ export default function MapPage() {
         modes: params.get("modes")?.split(",").filter(Boolean) ?? null }
     : null;
 
-  const { data } = useQuery({ queryKey: ["map"], queryFn: () => api<MapData>("/api/map") });
+  const { data } = useQuery({ queryKey: ["map"], queryFn: () => api<MapData>("/api/map"), refetchInterval: whilePending });
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["map"] });
     queryClient.invalidateQueries({ queryKey: ["overview"] });
@@ -77,7 +78,7 @@ export default function MapPage() {
   useEffect(() => {
     let map: maplibregl.Map | null = null;
     let cancelled = false;
-    basemapStyle(dark()).then(({ style }) => {
+    basemapStyle(pageIsDark()).then(({ style }) => {
       if (cancelled || !container.current) return;
       map = new maplibregl.Map({ container: container.current, style, center: MELBOURNE, zoom: 10, attributionControl: { compact: true } });
       mapRef.current = map;
@@ -169,8 +170,12 @@ export default function MapPage() {
 
   // ─── the selected house's route to its nearest station ───────────────
   const selectedId = selected?.kind === "property" ? selected.p.id : null;
+  // The selected house as the map has it now (its travel times refresh after a pin moves), and its route for
+  // where the pin and nearest station are now.
+  const selectedNow = data?.properties.features.find((f) => f.properties.id === selectedId);
   const stationRoute = useQuery({
-    queryKey: ["station-route", selectedId], enabled: !!selectedId, staleTime: 3600_000, retry: false,
+    queryKey: ["station-route", selectedId, selectedNow?.geometry.coordinates.join(","), selectedNow?.properties.nearest_station],
+    enabled: !!selectedId && !!selectedNow?.properties.nearest_station, staleTime: 3600_000, retry: false,
     queryFn: () => api<StationRoute>(`/api/properties/${selectedId}/station-route`),
   });
   useEffect(() => {
@@ -184,26 +189,70 @@ export default function MapPage() {
     if (lines.length && map) {
       const bounds = new maplibregl.LngLatBounds();
       lines.forEach((f) => f.geometry.coordinates.forEach((c) => bounds.extend(c as [number, number])));
-      map.fitBounds(bounds, { padding: { top: 60, left: 60, right: 60, bottom: 260 }, maxZoom: 16, duration: 500 });
+      const wide = window.innerWidth >= 800;
+      map.fitBounds(bounds, { padding: wide ? { top: 60, left: 60, right: 440, bottom: 90 } : { top: 60, left: 40, right: 40, bottom: window.innerHeight * 0.55 },
+                              maxZoom: 16, duration: 500 });
     }
   }, [ready, selectedId, stationRoute.data]);
 
+  // ─── the selected house's comparable sales (not houses we track: only shown while it's selected) ───
+  const comparables = useComparables(selectedId);
+  useEffect(() => {
+    const map = mapRef.current;
+    const source = ready && map ? (map.getSource("comparables") as GeoJSONSource | undefined) : undefined;
+    if (!source) return;
+    const placed = selectedId && selectedNow ? (comparables.data ?? []).filter((x) => x.lon != null && x.lat != null) : [];
+    const home = selectedNow?.geometry.coordinates as [number, number] | undefined;
+    source.setData({ type: "FeatureCollection", features: placed.flatMap((x) => [
+      { type: "Feature" as const, geometry: { type: "Point" as const, coordinates: [x.lon!, x.lat!] },
+        properties: { label: comparableLabel(x), address: x.address } },
+      ...(home ? [{ type: "Feature" as const, geometry: { type: "LineString" as const, coordinates: [home, [x.lon!, x.lat!]] }, properties: {} }] : []),
+    ]) });
+    // Bring any that are off screen into view, with the house.
+    if (map && home && placed.length) {
+      const view = map.getBounds();
+      if (placed.some((x) => !view.contains([x.lon!, x.lat!]))) {
+        const bounds = new maplibregl.LngLatBounds(home, home);
+        placed.forEach((x) => bounds.extend([x.lon!, x.lat!]));
+        const wide = window.innerWidth >= 800;
+        map.fitBounds(bounds, { padding: wide ? { top: 80, left: 80, right: 460, bottom: 100 } : { top: 60, left: 40, right: 40, bottom: window.innerHeight * 0.55 },
+                                maxZoom: 16, duration: 500 });
+      }
+    }
+  }, [ready, selectedId, selectedNow?.geometry.coordinates.join(","), comparables.data]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ─── commute area ────────────────────────────────────────────────────
   const commutePlaces = (data?.places.features ?? []) as unknown as { geometry: { coordinates: [number, number] }; properties: { id: string; name: string; kind: string } }[];
-  const commutePlace = commute ? commutePlaces.find((f) => f.properties.id === commute.placeId) : undefined;
+  // Where a commute area can start: the selected house first, then saved places.
+  const commuteFrom = [
+    ...(selected?.kind === "property" ? [{ value: `house:${selected.p.id}`, label: `This house (${addressOf(selected.p)})` }] : []),
+    ...(commute?.from.startsWith("house:") && commute.from !== `house:${selected?.kind === "property" ? selected.p.id : ""}`
+      ? [{ value: commute.from, label: `House: ${(() => { const f = data?.properties.features.find((x) => `house:${x.properties.id}` === commute.from); return f ? addressOf(f.properties) : "earlier pick"; })()}` }] : []),
+    ...commutePlaces.map((f) => ({ value: `place:${f.properties.id}`, label: `${f.properties.name}${f.properties.kind === "station" ? " (station)" : ""}` })),
+  ];
+  const commuteOrigin: { coords: [number, number]; name: string } | null = (() => {
+    if (!commute) return null;
+    const [kind, id] = commute.from.split(":");
+    if (kind === "house") {
+      const f = data?.properties.features.find((x) => x.properties.id === id);
+      return f ? { coords: f.geometry.coordinates as [number, number], name: addressOf(f.properties) } : null;
+    }
+    const f = commutePlaces.find((x) => x.properties.id === id);
+    return f ? { coords: f.geometry.coordinates, name: f.properties.name } : null;
+  })();
   useEffect(() => {
     const map = mapRef.current;
     const source = ready && map ? (map.getSource("commute") as GeoJSONSource | undefined) : undefined;
     if (!source) return;
-    if (!commute || !commutePlace) { source.setData({ type: "FeatureCollection", features: [] }); return; }
+    if (!commute || !commuteOrigin) { source.setData({ type: "FeatureCollection", features: [] }); return; }
     let cancelled = false;
-    const [lon, lat] = commutePlace.geometry.coordinates;
+    const [lon, lat] = commuteOrigin.coords;
     setCommuteMsg("Working out the area…");
     api<GeoJSON.Feature>(`/api/isochrone?lon=${lon}&lat=${lat}&minutes=${commute.minutes}&mode=${commute.mode}`)
       .then((f) => { if (!cancelled) { source.setData({ type: "FeatureCollection", features: [f] }); setCommuteMsg(null); } })
       .catch((e) => { if (!cancelled) setCommuteMsg((e as Error).message); });
     return () => { cancelled = true; };
-  }, [ready, commute, commutePlace]);
+  }, [ready, commute, commuteOrigin?.coords.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── clicks ──────────────────────────────────────────────────────────
   const modeRef = useRef({ pinFor, pickPlace, drawing: false });
@@ -243,6 +292,7 @@ export default function MapPage() {
       if (prop) {
         const p = current?.properties.features.find((f) => f.properties.id === prop.properties.id)?.properties;
         setSelected(p ? { kind: "property", p } : null);
+        setShowLayers(false);
       } else if (area) {
         const a = current?.areas.features.find((f) => f.properties.id === area.properties.id)?.properties;
         setSelected(a ? { kind: "area", a } : null);
@@ -347,7 +397,7 @@ export default function MapPage() {
   }, [isDark]);
 
   return (
-    <div className="map-page">
+    <div className={`map-page ${selected?.kind === "property" ? "side-open" : ""} ${showCommute || showLayers ? "panel-open" : ""}`}>
       <div ref={container} className="map" />
 
       <div className="map-top">
@@ -373,32 +423,18 @@ export default function MapPage() {
         )}
       </div>
 
-      {!pinFor && !pickPlace && !drawKind && !editing && !newShape && (
-        <div className="map-tools">
-          <select value={filter} onChange={(e) => setFilter(e.target.value as Filter)} aria-label="Filter">
-            <option value="all">Show all</option>
-            <option value="mine">Hide my exclusions</option>
-            <option value="either">Hide anyone's exclusions</option>
-          </select>
-          {(overlayList.data?.length ?? 0) > 0 && <button onClick={() => setShowLayers(!showLayers)}>Layers{enabled.length ? ` (${enabled.length})` : ""}</button>}
-          <button className={commute ? "on-accent" : ""} onClick={() => setShowCommute(!showCommute)}>
-            {commute && commutePlace ? `${commute.minutes} min ${commute.mode} · ${commutePlace.properties.name}` : "Commute"}</button>
-          <button onClick={() => startDrawing("hard_exclude")}>Exclude area</button>
-          <button onClick={() => startDrawing("soft_warn")}>Warn area</button>
-          {unpinned > 0 && <span className="small muted">{unpinned} without a pin</span>}
-        </div>
-      )}
-
+      {/* The open panel sits above the tools, so neither covers the other. */}
+      <div className="map-bottom">
       {showCommute && (
         <div className="sheet stack">
           <div className="row"><strong className="grow">Commute area</strong><button className="link" onClick={() => setShowCommute(false)}>Done</button></div>
-          <p className="small muted" style={{ margin: 0 }}>Shades everywhere you can get to from a place within the time (driving assumes no traffic).</p>
-          {commutePlaces.length === 0 ? <p className="small">Add places first: <Link to="/places">Stations and places</Link></p> : (
+          <p className="small muted" style={{ margin: 0 }}>Shades everywhere you can get to within the time, from a house or a place (driving assumes no traffic).</p>
+          {commuteFrom.length === 0 ? <p className="small" style={{ margin: 0 }}>Select a house on the map, or add places on the <Link to="/places">Places</Link> tab.</p> : (
             <>
-              <select value={commute?.placeId ?? ""} aria-label="From"
-                onChange={(e) => setCommute(e.target.value ? { minutes: 30, mode: "drive", ...commute, placeId: e.target.value } : null)}>
-                <option value="">Pick a place…</option>
-                {commutePlaces.map((f) => <option key={f.properties.id} value={f.properties.id}>{f.properties.name}{f.properties.kind === "station" ? " (station)" : ""}</option>)}
+              <select value={commute?.from ?? ""} aria-label="From"
+                onChange={(e) => setCommute(e.target.value ? { minutes: 30, mode: "drive", ...commute, from: e.target.value } : null)}>
+                <option value="">Where from?</option>
+                {commuteFrom.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
               {commute && (
                 <>
@@ -438,10 +474,33 @@ export default function MapPage() {
         </div>
       )}
       {newShape && <NewAreaSheet shape={newShape} kind={drawKind ?? "hard_exclude"} onDone={() => { setNewShape(null); refresh(); }} />}
-      {selected?.kind === "property" && <PropertySheet p={selected.p} route={stationRoute.data} routeError={stationRoute.error as Error | null} onClose={() => setSelected(null)} />}
       {selected?.kind === "area" && (
         <AreaSheet a={selected.a} mine={selected.a.owner_id === me?.id} owner={byId.get(selected.a.owner_id)?.display_name ?? "Someone"}
                    onEdit={() => startEditing(selected.a)} onChanged={() => { setSelected(null); refresh(); }} onClose={() => setSelected(null)} />
+      )}
+      {!pinFor && !pickPlace && !drawKind && !editing && !newShape && (
+        <div className="map-tools">
+          <select value={filter} onChange={(e) => setFilter(e.target.value as Filter)} aria-label="Filter">
+            <option value="all">Show all</option>
+            <option value="mine">Hide my exclusions</option>
+            <option value="either">Hide anyone's exclusions</option>
+          </select>
+          {(overlayList.data?.length ?? 0) > 0 && <button onClick={() => { setShowLayers(!showLayers); setShowCommute(false); }}>Layers{enabled.length ? ` (${enabled.length})` : ""}</button>}
+          <button className={commute ? "on-accent" : ""} onClick={() => {
+            // Opening it with a house selected starts from that house.
+            if (!showCommute && !commute && selected?.kind === "property") setCommute({ from: `house:${selected.p.id}`, minutes: 30, mode: "drive" });
+            setShowCommute(!showCommute); setShowLayers(false);
+          }}>
+            {commute && commuteOrigin ? `${commute.minutes} min ${commute.mode} from ${commuteOrigin.name.split(",")[0]}` : "Commute"}</button>
+          <button onClick={() => startDrawing("hard_exclude")}>Exclude area</button>
+          <button onClick={() => startDrawing("soft_warn")}>Warn area</button>
+          {unpinned > 0 && <span className="small muted">{unpinned} without a pin</span>}
+        </div>
+      )}
+      </div>
+      {selected?.kind === "property" && (
+        <HouseSidePanel p={selectedNow?.properties ?? selected.p} route={stationRoute.data} routeError={stationRoute.error as Error | null}
+          onClose={() => setSelected(null)} />
       )}
     </div>
   );
@@ -488,6 +547,17 @@ function addLayers(map: maplibregl.Map) {
   map.addLayer({ id: "places-label", type: "symbol", source: "places",
     layout: { "text-field": ["get", "name"], "text-size": 11, "text-offset": [0, 1.2], "text-anchor": "top", "text-font": ["Noto Sans Regular"] },
     paint: { "text-color": "#111827", "text-halo-color": "#fff", "text-halo-width": 1.2 } });
+  // The selected house's comparable sales: hollow brick markers with the price, tied to the house by a faint line,
+  // so they never read as houses we track.
+  map.addSource("comparables", { type: "geojson", data: empty });
+  map.addLayer({ id: "comparables-tie", type: "line", source: "comparables", filter: ["==", ["geometry-type"], "LineString"],
+    paint: { "line-color": "#d9774f", "line-width": 1.8, "line-opacity": 0.85, "line-dasharray": [2, 2] } });
+  map.addLayer({ id: "comparables-circle", type: "circle", source: "comparables", filter: ["==", ["geometry-type"], "Point"],
+    paint: { "circle-radius": 6, "circle-color": "#ffffff", "circle-stroke-color": "#b4532f", "circle-stroke-width": 2.5 } });
+  map.addLayer({ id: "comparables-label", type: "symbol", source: "comparables", filter: ["==", ["geometry-type"], "Point"],
+    layout: { "text-field": ["get", "label"], "text-size": 11, "text-offset": [0, 1.1], "text-anchor": "top", "text-font": ["Noto Sans Regular"],
+              "text-allow-overlap": true },
+    paint: { "text-color": "#8a3a1f", "text-halo-color": "#fff", "text-halo-width": 1.4 } });
   map.addLayer({ id: "props-ring", type: "circle", source: "properties", filter: ["!=", ["get", "ring"], ""],
     paint: { "circle-radius": 12, "circle-color": "transparent", "circle-stroke-color": ["get", "ring"], "circle-stroke-width": 2.5 } });
   map.addLayer({ id: "props-circle", type: "circle", source: "properties",
@@ -496,46 +566,6 @@ function addLayers(map: maplibregl.Map) {
 }
 
 // ─── bottom sheets ────────────────────────────────────────────────────
-function PropertySheet({ p, route, routeError, onClose }: { p: MapProperty; route?: StationRoute; routeError?: Error | null; onClose: () => void }) {
-  const { byId } = usePeople();
-  return (
-    <div className="sheet">
-      {p.cover_id && (
-        <Link to={`/p/${p.id}`} className="sheet-photo"><img src={`/api/attachments/${p.cover_id}/thumb`} alt="" /></Link>
-      )}
-      <div className="row">
-        <strong className="grow">{addressOf(p)}</strong>
-        <span className="pill status-pill"><span className="status-dot" style={{ background: STATUS_COLOUR[p.status] }} />{LABEL.status[p.status]}</span>
-        <button className="link" onClick={onClose} aria-label="Close">✕</button>
-      </div>
-      {p.score_avg != null && <div className="small"><span className="pill score-pill">Score {p.score_avg}</span></div>}
-      {p.nearest_station && (
-        <div className="station-route small">
-          <div className="muted">To {route?.station.name ?? p.nearest_station} station</div>
-          <div className="row">
-            <span><span className="route-key walk" />Walk <strong className={`tone-${minutesTone((route?.walk.duration_s ?? p.nearest_station_walk_s ?? null) == null ? null : (route?.walk.duration_s ?? p.nearest_station_walk_s!) / 60)}`}>
-              {minutes(route?.walk.duration_s ?? p.nearest_station_walk_s) || "—"}</strong>{route?.walk.distance_m != null && <span className="muted"> · {km(route.walk.distance_m)}</span>}</span>
-            <span><span className="route-key drive" />Drive <strong className={`tone-${minutesTone((route?.drive.duration_s ?? p.nearest_station_drive_s ?? null) == null ? null : (route?.drive.duration_s ?? p.nearest_station_drive_s!) / 60, "drive")}`}>
-              {minutes(route?.drive.duration_s ?? p.nearest_station_drive_s ?? null) || "—"}</strong>{route?.drive.distance_m != null && <span className="muted"> · {km(route.drive.distance_m)}</span>}</span>
-          </div>
-          {routeError && <div className="muted">Couldn't draw the route: {routeError.message}</div>}
-        </div>
-      )}
-      {p.excluded && <div className="small error">Excluded by you: {p.reasons.join(", ")}</div>}
-      {!p.excluded && p.warned && <div className="small" style={{ color: "var(--maybe)" }}>Warning: {p.reasons.join(", ")}</div>}
-      {p.others_flags.map((f, i) => (
-        <div key={i} className="small muted">
-          <span className="dot" style={{ background: byId.get(f.owner_id)?.colour }} />
-          {byId.get(f.owner_id)?.display_name} {f.kind === "hard_exclude" ? "excludes" : "warns about"} this: {f.name}
-        </div>
-      ))}
-      <div className="row" style={{ marginTop: 8 }}>
-        <Link to={`/p/${p.id}`}><button className="primary">Open</button></Link>
-        <Link to={`/map?pin=${p.id}`}><button>Move pin</button></Link>
-      </div>
-    </div>
-  );
-}
 
 function NewAreaSheet({ shape, kind: initialKind, onDone }: { shape: GeoJSON.Polygon; kind: AreaKind; onDone: () => void }) {
   const { active, me } = usePeople();

@@ -125,9 +125,10 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
     tag_rows = by_property("SELECT pt.property_id, t.name FROM property_tag pt JOIN tag t ON t.id = pt.tag_id"
                            " WHERE pt.property_id = ANY(%s) ORDER BY lower(t.name)")
     travel = by_property(
-        """SELECT t.property_id, t.place_id, t.mode, t.duration_s FROM travel_estimate t
+        """SELECT t.property_id, t.place_id, t.mode, t.duration_s, t.peak_s FROM travel_estimate t
            JOIN place pl ON pl.id = t.place_id AND pl.archived_at IS NULL WHERE t.property_id = ANY(%s)""")
-    transit = by_property("SELECT property_id, place_id, duration_s FROM transit_estimate WHERE property_id = ANY(%s) AND duration_s IS NOT NULL")
+    transit = by_property("SELECT property_id, place_id, duration_s, home_duration_s FROM transit_estimate"
+                          " WHERE property_id = ANY(%s) AND duration_s IS NOT NULL")
     nearest = {r["property_id"]: r for r in conn.execute(
         "SELECT property_id, name, walk_s, walk_m, drive_s FROM property_nearest_station WHERE property_id = ANY(%s)",
         (ids,)).fetchall()}
@@ -223,9 +224,13 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
         row["score_avg"] = round(sum(int(s["score"]) for s in person_scores) / len(person_scores)) if person_scores else None
         for t in transit.get(pid, []):
             row[f"transit:{t['place_id']}"] = _mins(t["duration_s"])
+            row[f"transit_home:{t['place_id']}"] = _mins(t["home_duration_s"])
         for t in travel.get(pid, []):
             if t["duration_s"] is not None:
                 row[f"{t['mode']}:{t['place_id']}"] = round(t["duration_s"] / 60)
+            if t["peak_s"] is not None:  # a drive is a commute: its peak-hour figure is the one shown, sorted and filtered
+                row[f"drive_free:{t['place_id']}"] = row.get(f"drive:{t['place_id']}")
+                row[f"drive:{t['place_id']}"] = round(t["peak_s"] / 60)
         row["_v"] = v
         rows.append(row)
     return rows

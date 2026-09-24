@@ -186,7 +186,10 @@ export type MapData = {
   areas: FC<MapArea, GeoJSON.MultiPolygon>;
   places: FC<MapPlace, GeoJSON.Point>;
   unpinned: number;
+  pending?: number;  // travel times still being worked out (a pin or place moved)
 };
+/** While travel times are being worked out, check again every few seconds so new times appear on their own. */
+export const whilePending = (q: { state: { data?: { pending?: number } } }) => (q.state.data?.pending ? 4000 : false);
 
 export type AddressHit = {
   pid: string; display: string; unit: string | null; street_number: string | null; street: string | null;
@@ -202,10 +205,15 @@ export type Travel = {
   /** Stations picked on the Places screen. */
   stations: { place_id: string; name: string; distance_m: number; duration_s: number; is_nearest: boolean; within_limit: boolean }[];
   destinations: { place_id: string; name: string; person_id: string | null; walk_m: number | null; walk_s: number | null; drive_m: number | null; drive_s: number | null;
-                  transit?: Transit | null }[];
+                  /** The drive in peak hour (arriving at 9, leaving at 5), estimated from the road types it uses. */
+                  drive_peak_s?: number | null; transit?: Transit | null }[];
+  /** The government primary and Year 7 schools the house is zoned for: the walk, and the drive when the walk is over 35 minutes. */
+  schools?: { level: "primary" | "secondary"; name: string; walk_m: number | null; walk_s: number | null; drive_m: number | null; drive_s: number | null }[];
   pending: number;
 };
 
-/** A public transport journey (from Transitous), planned to arrive by 9am on a weekday. */
+export type TransitLeg = { mode: string; name: string | null; minutes: number; from: string | null; to: string | null; at?: string | null };
+/** A public transport journey (from Transitous), planned to arrive by 9am on a weekday, and the trip home leaving at 5pm. */
 export type Transit = { duration_s: number | null; depart_at: string | null; arrive_at: string | null; arrive_by: string; transfers: number | null;
-                        legs: { mode: string; name: string | null; minutes: number; from: string | null; to: string | null }[] };
+                        legs: TransitLeg[];
+                        home?: { duration_s: number; depart_at: string | null; arrive_at: string | null; transfers: number | null; legs: TransitLeg[] } | null };

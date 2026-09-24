@@ -16,7 +16,8 @@ import Settings from "./pages/Settings";
 import Setup from "./pages/Setup";
 import Refresh from "./pages/Refresh";
 import { usePersons } from "./people";
-import { ArrowUpDown, CalendarDays, DoorOpen, House, Map as MapIcon, MapPin, Settings as SettingsIcon, Sheet, TrendingUp } from "lucide-react";
+import { ArrowUpDown, CalendarDays, DoorOpen, House, Map as MapIcon, MapPin, Monitor, Moon, Settings as SettingsIcon, Sheet, Sun, TrendingUp } from "lucide-react";
+import { setTheme, useThemeChoice, type ThemeChoice } from "./theme";
 import Plan from "./pages/Plan";
 
 // The map pulls in MapLibre and the drawing tools; load it only when opened.
@@ -86,6 +87,7 @@ export default function App() {
         {queued.length > 0 && (
           <Link to="/outbox" className={`badge ${queued.some((q) => q.conflict) ? "warn" : ""}`} title="Waiting to send"><ArrowUpDown /> {queued.length}</Link>
         )}
+        <ThemeSwitch />
         <button className="link" onClick={() => choose(null)} title="Switch person">
           <span className="dot" style={{ background: me.colour }} />
           <span className="person-name">{me.display_name}</span>
@@ -130,5 +132,20 @@ function BrandMark() {
       <path d="M7.5 15.5 16 8.5l8.5 7M10.5 13.5v10h11v-10M14.2 23.5v-5h3.6v5" fill="none" stroke="var(--surface)"
         strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
+  );
+}
+
+const NEXT_THEME: Record<ThemeChoice, ThemeChoice> = { auto: "light", light: "dark", dark: "auto" };
+const THEME_LABEL: Record<ThemeChoice, string> = { auto: "Light or dark: following this device", light: "Light", dark: "Dark" };
+
+/** Auto (follow the device), light, dark: one button that steps through them, remembered on this device. */
+function ThemeSwitch() {
+  const choice = useThemeChoice();
+  const icon = choice === "light" ? <Sun /> : choice === "dark" ? <Moon /> : <Monitor />;
+  return (
+    <button className="link theme-switch" onClick={() => setTheme(NEXT_THEME[choice])}
+      title={`${THEME_LABEL[choice]}. Click for ${THEME_LABEL[NEXT_THEME[choice]].toLowerCase()}.`} aria-label={`Theme: ${THEME_LABEL[choice]}`}>
+      {icon}
+    </button>
   );
 }

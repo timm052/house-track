@@ -12,6 +12,7 @@ import zipfile
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
@@ -179,9 +180,61 @@ def replace_layer(conn: psycopg.Connection, code: str, title: str, effect: str, 
     return count, n
 
 
-def load_schools(database_url: str, bbox: Bbox, download_dir: Path, school_zip: Path | None = None) -> None:
+def load_schools(database_url: str, bbox: Bbox, download_dir: Path, school_zip: Path | None = None,
+                 locations_csv: Path | None = None) -> None:
     with psycopg.connect(database_url) as conn:
         zones = school_features(school_zip or school_zone_zip(download_dir))
         for code, (title, features) in zones.items():
             _, n = replace_layer(conn, code, title, "info", "DataVic: Victorian Government School Zones", features, "School_Name", bbox)
             print(f"schools: {title}: {n} pieces", flush=True)
+        try:
+            n = load_school_locations(conn, locations_csv or school_locations_csv(download_dir), bbox)
+            print(f"schools: {n} school locations", flush=True)
+        except (OSError, RuntimeError, ValueError) as e:  # the zones still work without them; only travel times wait
+            print(f"schools: couldn't load school locations ({e}); travel times to schools are skipped", flush=True)
+
+
+def school_locations_csv(download_dir: Path, year: int | None = None) -> Path:
+    """DataVic's list of every school with its position (published yearly; the newest one found is used)."""
+    from datetime import date
+    this = year or date.today().year
+    for y in (this, this - 1, this - 2):
+        path = download_dir / f"school_locations_{y}.csv"
+        if path.exists():
+            return path
+        try:
+            resources = _get_json(CKAN + f"school-locations-{y}")["result"]["resources"]
+        except (HTTPError, URLError):
+            continue
+        csv_url = next((r["url"] for r in resources if (r.get("format") or "").upper() == "CSV"), None)
+        if csv_url:
+            download_dir.mkdir(parents=True, exist_ok=True)
+            with urlopen(Request(csv_url, headers={"User-Agent": USER_AGENT}), timeout=120) as r:
+                path.write_bytes(r.read())
+            return path
+    raise RuntimeError("Couldn't find a school locations dataset on DataVic.")
+
+
+def load_school_locations(conn: psycopg.Connection, csv_path: Path, bbox: Bbox) -> int:
+    """Open schools inside the search area, replacing what was there."""
+    import csv
+    import io
+    text = csv_path.read_bytes().decode("utf-8-sig", errors="replace")
+    rows = []
+    for r in csv.DictReader(io.StringIO(text)):
+        try:
+            lon, lat, no = float(r["X"]), float(r["Y"]), int(r["School_No"])
+        except (KeyError, ValueError):
+            continue
+        if r.get("School_Status", "O") != "O" or not (bbox[0] <= lon <= bbox[2] and bbox[1] <= lat <= bbox[3]):
+            continue
+        rows.append((no, r["School_Name"].strip(), r.get("School_Type") or None, r.get("Education_Sector") or "Government", lon, lat))
+    if not rows:
+        raise ValueError("no schools in the file")
+    with conn.transaction():
+        conn.execute("DELETE FROM school")
+        with conn.cursor() as cur:
+            cur.executemany("""INSERT INTO school (school_no, name, school_type, sector, location)
+                               VALUES (%s, %s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326))
+                               ON CONFLICT (school_no) DO NOTHING""", rows)
+    return len(rows)

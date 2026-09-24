@@ -90,7 +90,7 @@ export function CriteriaSettings() {
 }
 
 const COMPARE_ROWS = ["suburb", "property_type", "beds", "baths", "car_spaces", "land_m2", "status", "sale_method", "sale_at", "guide_low",
-  "guide_high", "estimated_reserve", "walk_away", "days_on_market", "school_primary", "school_secondary", "planning",
+  "guide_high", "expected_sale", "walk_away", "days_on_market", "school_primary", "school_secondary", "planning",
   "nearest_station", "nearest_station_walk", "owners_corp_fees_aud_pa", "agent_name", "notes"];
 
 export function Compare() {

@@ -89,6 +89,7 @@ def map_data(person: OptionalPerson) -> dict:
             {"me": person},
         ).fetchall()
         unpinned = conn.execute("SELECT count(*) AS n FROM property WHERE location IS NULL").fetchone()["n"]
+        pending = routing_pending(conn)
         areas = conn.execute(
             """SELECT id, owner_id, name, kind, reason, ST_AsGeoJSON(geom)::json AS geometry, updated_at
                FROM area WHERE archived_at IS NULL ORDER BY created_at"""
@@ -103,7 +104,7 @@ def map_data(person: OptionalPerson) -> dict:
                 "features": [_feature(r.pop("geometry"), {**r, "id": str(r["id"])}) for r in rows]}
 
     return {"properties": collection(props), "areas": collection(areas), "places": collection(places),
-            "unpinned": unpinned}
+            "unpinned": unpinned, "pending": pending}
 
 
 # ─── areas ────────────────────────────────────────────────────────────
@@ -250,6 +251,20 @@ def archive_place(place_id: UUID, person: Person) -> None:
         conn.execute("UPDATE place SET archived_at = now() WHERE id = %s", (place_id,))
 
 
+ROUTING_PENDING = """SELECT (SELECT count(*) FROM travel_estimate_stale {w}) + (SELECT count(*) FROM station_access_stale {w})
+                          + (SELECT count(*) FROM transit_estimate_stale {w})
+                          + (SELECT count(*) FROM ({peak}) x {w})
+                          + (SELECT count(*) FROM school_access_stale {w}) AS n"""
+
+
+def routing_pending(conn: psycopg.Connection, property_id: UUID | None = None) -> int:
+    """Travel times still to be worked out (after a pin or a place moves, or a mode is switched on): screens that show
+    them check again until this is zero."""
+    where = "WHERE property_id = %(p)s" if property_id else ""
+    from ..worker import PEAK_PENDING
+    return conn.execute(ROUTING_PENDING.format(w=where, peak=PEAK_PENDING), {"p": property_id}).fetchone()["n"]
+
+
 def travel_for(conn: psycopg.Connection, property_id: UUID) -> dict:
     """Stations to show (nearest + within the walk limit) and every destination's walk/drive figures."""
     stations = conn.execute(
@@ -264,8 +279,12 @@ def travel_for(conn: psycopg.Connection, property_id: UUID) -> dict:
                   max(t.duration_s) FILTER (WHERE t.mode = 'walk') AS walk_s,
                   max(t.distance_m) FILTER (WHERE t.mode = 'drive') AS drive_m,
                   max(t.duration_s) FILTER (WHERE t.mode = 'drive') AS drive_s,
+                  max(t.peak_s) FILTER (WHERE t.mode = 'drive') AS drive_peak_s,
                   (SELECT jsonb_build_object('duration_s', x.duration_s, 'depart_at', x.depart_at, 'arrive_at', x.arrive_at,
-                                             'arrive_by', x.arrive_by, 'transfers', x.transfers, 'legs', x.legs)
+                                             'arrive_by', x.arrive_by, 'transfers', x.transfers, 'legs', x.legs,
+                                             'home', CASE WHEN x.home_duration_s IS NOT NULL THEN jsonb_build_object(
+                                               'duration_s', x.home_duration_s, 'depart_at', x.home_depart_at,
+                                               'arrive_at', x.home_arrive_at, 'transfers', x.home_transfers, 'legs', x.home_legs) END)
                    FROM transit_estimate x WHERE x.property_id = %(p)s AND x.place_id = pl.id) AS transit
            FROM place pl
            LEFT JOIN travel_estimate t ON t.place_id = pl.id AND t.property_id = %(p)s
@@ -273,12 +292,14 @@ def travel_for(conn: psycopg.Connection, property_id: UUID) -> dict:
            GROUP BY pl.id ORDER BY pl.name""",
         {"p": property_id},
     ).fetchall()
-    pending = conn.execute("""SELECT (SELECT count(*) FROM travel_estimate_stale WHERE property_id = %(p)s)
-                                     + (SELECT count(*) FROM station_access_stale WHERE property_id = %(p)s) AS n""",
-                           {"p": property_id}).fetchone()["n"]
+    pending = routing_pending(conn, property_id)
     nearest = conn.execute("""SELECT station_osm_id, name, walk_m, walk_s, drive_m, drive_s FROM property_nearest_station
                               WHERE property_id = %s""", (property_id,)).fetchone()
-    return {"nearest": nearest, "stations": stations, "destinations": destinations, "pending": pending}
+    schools = conn.execute(
+        """SELECT z.level, z.name, a.walk_m, a.walk_s, a.drive_m, a.drive_s
+           FROM property_zoned_school z LEFT JOIN school_access a ON a.property_id = z.property_id AND a.school_no = z.school_no
+           WHERE z.property_id = %s ORDER BY z.level""", (property_id,)).fetchall()
+    return {"nearest": nearest, "stations": stations, "destinations": destinations, "schools": schools, "pending": pending}
 
 
 

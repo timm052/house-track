@@ -121,23 +121,61 @@ def _method(v: Any) -> str | None:
     return METHODS.get(key) or METHODS.get(key.replace(" ", "")) or next((m for k, m in METHODS.items() if k in key), None)
 
 
-def _photos(raw: str, listing_id: str | None) -> list[str]:
-    """Full-size photo URLs in listing order. Domain's image names start with the listing id and the photo number,
-    which also keeps out photos of the other listings the page shows."""
+BUCKET = "https://bucket-api.domain.com.au/v1/bucket/image/"
+
+
+def _bucket(url: str) -> str | None:
+    """Domain's resized image URL -> the full-size original ("…/fit-in/1920x1080/filters:…/2020775315_4_1_…-w2000-h1500"
+    -> bucket-api/…/2020775315_4_1_…-w2000-h1500)."""
+    if url.startswith(BUCKET):
+        return url
+    if "domainstatic.com.au" in url:
+        name = url.rstrip("/").rsplit("/", 1)[-1]
+        if re.match(r"\d+_\d+_\d+_", name):
+            return BUCKET + name
+    return None
+
+
+def _media(tree: Any, raw: str, listing_id: str | None) -> tuple[list[str], list[str]]:
+    """(photos, floor plans) as full-size URLs, in the listing's own gallery order. Domain lists them in the listing's
+    largeMedia ([{url, type: photo|floorplan|video}]); failing that, image names start with the listing id and photo
+    number, which also keeps out photos of other listings the page shows. Floor plan images are named …_<n>_3_…."""
+    photos: list[str] = []
+    plans: list[str] = []
+    for _, n in _walk(tree):
+        media = n.get("largeMedia") or n.get("media")
+        if not isinstance(media, list) or not media or not all(isinstance(m, dict) for m in media):
+            continue
+        for m in media:
+            kind, url = str(m.get("type") or m.get("category") or "").lower(), m.get("url")
+            if not isinstance(url, str) or kind not in ("photo", "image", "floorplan", "floor_plan"):
+                continue
+            full = _bucket(url) or url
+            if listing_id and full.startswith(BUCKET) and not full[len(BUCKET):].startswith(listing_id + "_"):
+                continue
+            target = plans if "floor" in kind else photos
+            if full not in target:
+                target.append(full)
+        if photos or plans:
+            return photos[:MAX_PHOTOS], plans[:5]
+
     seen: dict[int, str] = {}
-    for m in re.finditer(r"https://bucket-api\.domain\.com\.au/v1/bucket/image/(\d+)_(\d+)_\d+_[\w-]+", raw):
+    for m in re.finditer(r"https://bucket-api\.domain\.com\.au/v1/bucket/image/(\d+)_(\d+)_(\d+)_[\w-]+", raw):
         if listing_id is None or m[1] == listing_id:
-            seen.setdefault(int(m[2]), m[0])
-    if seen:
-        return [seen[k] for k in sorted(seen)][:MAX_PHOTOS]
+            if m[3] == "3":
+                if m[0] not in plans:
+                    plans.append(m[0])
+            else:
+                seen.setdefault(int(m[2]), m[0])
+    if seen or plans:
+        return [seen[k] for k in sorted(seen)][:MAX_PHOTOS], plans[:5]
     # realestate.com.au and others: templated or plain image URLs under a media/images key
     urls = re.findall(r'"(?:templatedUrl|url|uri|src)"\s*:\s*"(https://i\d?\.realestate\.com\.au/[^"]+?)"', raw)
-    out: list[str] = []
     for u in urls:
         u = u.replace("{size}", "1144x888-format=webp")
-        if u not in out:
-            out.append(u)
-    return out[:MAX_PHOTOS]
+        if u not in photos:
+            photos.append(u)
+    return photos[:MAX_PHOTOS], []
 
 
 def _agents(tree: Any) -> list[dict]:
@@ -268,10 +306,11 @@ def extract(url: str, html: str = "", next_data: str | None = None, argonaut: st
     out["inspections"] = _inspections(tree)
     soi = re.search(r'"(https://[^"]*(?:soi|statement[-_]?of[-_]?information)[^"]*\.pdf)"', raw, re.I)
     out["soi_url"] = soi[1] if soi else None
-    out["photos"] = _photos(raw, listing_id)
-    out["image_url"] = out.get("image_url") or image or (out["photos"][0] if out["photos"] else None)
-    if out["image_url"] and out["photos"] and out["image_url"] not in out["photos"]:
-        out["photos"] = [out["image_url"], *out["photos"]][:MAX_PHOTOS]
+    out["photos"], out["floorplans"] = _media(tree, raw, listing_id)
+    # The gallery's first photo is the listing's main one; the page's og:image is only a fallback.
+    out["image_url"] = (out["photos"][0] if out["photos"] else None) or out.get("image_url") or image
+    if out["image_url"] and not out["photos"]:
+        out["photos"] = [out["image_url"]]
     features = [f.get("name") if isinstance(f, dict) else f for _, n in _walk(tree) for k in ("features", "structuredFeatures")
                 for f in (n.get(k) if isinstance(n.get(k), list) else [])]
     out["features"] = [f for f in dict.fromkeys(features) if isinstance(f, str)][:30]

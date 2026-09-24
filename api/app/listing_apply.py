@@ -91,7 +91,7 @@ def refresh(conn: psycopg.Connection, property_id: UUID, body: ListingUpdateIn) 
         listed = getattr(body, field)
         if listed is not None and prop and listed != prop[field]:
             was = f" (was {detail(field, prop[field])})" if prop[field] is not None else ""
-            if body.apply_details:
+            if body.apply_details or (body.fill_missing and prop[field] is None):
                 added["details"].append(field)
                 changes.append(f"{label}: {detail(field, listed)}{was}")
             else:

@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router-dom";
-import { api, ApiError, type Address } from "../api";
+import { api, ApiError, whilePending, type Address } from "../api";
 import { catalogue, display, editText, parseInput, type Column, type OverviewPlace, type OverviewRow } from "../overview/columns";
 import { applyView, builtInDefault, describe, toCsv, useViews, type Sort, type View } from "../overview/views";
 import FilterPopover from "../overview/FilterPopover";
@@ -16,7 +16,7 @@ import { CLOSED, STATUS_COLOUR, budgetTone, changeTone, minutesTone, soonTone, s
 import type { Status } from "../api";
 import ConfirmButton from "../ConfirmButton";
 
-type Overview = { rows: OverviewRow[]; places: OverviewPlace[] };
+type Overview = { rows: OverviewRow[]; places: OverviewPlace[]; pending?: number };
 type CellState =
   | { kind: "saving" } | { kind: "saved" } | { kind: "error"; message: string }
   | { kind: "conflict"; mine: unknown; theirs: unknown; by: string | null; at: string | null };
@@ -77,7 +77,7 @@ export default function Overview() {
   const { data, refetch } = useQuery({
     queryKey: ["overview"],
     queryFn: () => api<Overview>("/api/overview"),
-    refetchInterval: 30_000,
+    refetchInterval: (q) => whilePending(q) || 30_000,
     refetchOnWindowFocus: true,
   });
 
@@ -220,7 +220,7 @@ export default function Overview() {
     (m.excluded || CLOSED.includes(m.status as Status)) ? "dim" : "",
   ];
   const toneOf = (col: Column, v: unknown): Tone =>
-    col.kind === "minutes" ? minutesTone(v, col.key.startsWith("drive:") || col.key === "nearest_station_drive" ? "drive" : col.key.startsWith("transit:") ? "transit" : "walk") : col.key === "guide_change" ? changeTone(v) : col.key === "sale_at" ? soonTone(v) : col.key === "budget" ? budgetTone(v) : "";
+    col.kind === "minutes" ? minutesTone(v, col.key.startsWith("drive") || col.key === "nearest_station_drive" ? "drive" : col.key.startsWith("transit") ? "transit" : "walk") : col.key === "guide_change" ? changeTone(v) : col.key === "sale_at" ? soonTone(v) : col.key === "budget" ? budgetTone(v) : "";
 
   const gridColumns: ColumnRegular[] = useMemo(() => {
     const open: ColumnRegular = {

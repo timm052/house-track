@@ -16,9 +16,9 @@ export function PriceHistory({ campaigns }: { campaigns: Campaign[] }) {
   const sold = campaigns.filter((c) => c.sold_price_aud && c.outcome_on).map((c) => ({ v: c.sold_price_aud!, t: new Date(c.outcome_on!).getTime() }));
   const passed = campaigns.filter((c) => c.passed_in_bid_aud && c.outcome_on).map((c) => ({ v: c.passed_in_bid_aud!, t: new Date(c.outcome_on!).getTime() }));
   const live = campaigns.find((c) => !c.outcome) ?? campaigns[0];
-  const figures = (["estimated_reserve", "walk_away"] as const)
+  const figures = (["expected_sale", "walk_away"] as const)
     .map((k) => ({ k, v: live?.judgements.find((j) => j.kind === k)?.amount_aud }))
-    .filter((f): f is { k: "estimated_reserve" | "walk_away"; v: number } => f.v != null);
+    .filter((f): f is { k: "expected_sale" | "walk_away"; v: number } => f.v != null);
   if (guides.length + sold.length < 1) return null;
 
   const values = [...guides.flatMap((g) => [g.low_aud, g.high_aud]), ...sold.map((s) => s.v), ...passed.map((p) => p.v), ...figures.map((f) => f.v)];
@@ -34,7 +34,7 @@ export function PriceHistory({ campaigns }: { campaigns: Campaign[] }) {
         {figures.map((f) => (
           <g key={f.k}>
             <line x1={P} x2={W - P} y1={y(f.v)} y2={y(f.v)} className={`fig ${f.k}`} />
-            <text x={W - P} y={y(f.v) - 3} textAnchor="end" className="chart-label">{f.k === "walk_away" ? "limit" : "our reserve"} {money(f.v)}</text>
+            <text x={W - P} y={y(f.v) - 3} textAnchor="end" className="chart-label">{f.k === "walk_away" ? "our max" : "worth"} {money(f.v)}</text>
           </g>
         ))}
         {guides.map((g) => (

@@ -144,8 +144,8 @@ def create_property(body: PropertyIn, person: Person) -> dict:
             campaign_id = None
         if body.listing is not None:
             listing_apply.apply(conn, property_id, campaign_id, body.listing)
-    if body.listing is not None and body.listing.photos:
-        save_photos_later(property_id, person, body.listing.photos)
+    if body.listing is not None and (body.listing.photos or body.listing.floorplans):
+        save_photos_later(property_id, person, body.listing.photos, body.listing.floorplans)
     return {"id": property_id}
 
 

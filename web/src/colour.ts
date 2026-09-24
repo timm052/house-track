@@ -5,7 +5,7 @@
 //   tags     — the colour stored with each tag.
 // Colour is never the only signal: the suburb name, status label or value is always shown next to it.
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useSyncExternalStore } from "react";
+import { useMemo } from "react";
 import { api, type Status } from "./api";
 
 // ─── suburbs ────────────────────────────────────────────────────────────
@@ -23,7 +23,7 @@ export const SUBURB_SLOTS = HUES.length;
   const classes = HUES.map((_, i) => `.sub-${i} { --sub-tint: var(--sub-${i}-tint); --sub-ink: var(--sub-${i}-ink); }`).join("\n");
   const el = document.createElement("style");
   el.id = "suburb-colours";
-  el.textContent = `:root { ${light} }\n@media (prefers-color-scheme: dark) { :root { ${dark} } }\n${classes}`;
+  el.textContent = `:root { ${light} }\n:root[data-theme="dark"] { ${dark} }\n${classes}`;
   document.head.appendChild(el);
 })();
 
@@ -95,12 +95,6 @@ export const tagStyle = (colours: Map<string, string>, name: string) => {
 };
 
 // ─── light / dark ───────────────────────────────────────────────────────
-// Components that pick colours in code (the grid's theme, the map's basemap) must follow the system setting
-// live, not just read it once, or switching modes leaves them on the old palette.
-const darkQuery = typeof window !== "undefined" ? window.matchMedia?.("(prefers-color-scheme: dark)") : undefined;
-export function useDarkMode(): boolean {
-  return useSyncExternalStore(
-    (onChange) => { darkQuery?.addEventListener("change", onChange); return () => darkQuery?.removeEventListener("change", onChange); },
-    () => darkQuery?.matches ?? false,
-  );
-}
+// Components that pick colours in code (the grid's theme, the map's basemap) follow the page's theme live
+// (theme.ts), or switching modes leaves them on the old palette.
+export { useDarkMode } from "./theme";

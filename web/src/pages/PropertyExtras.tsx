@@ -23,7 +23,7 @@ export type Attachment = {
 const KINDS = INSPECTION_KINDS;
 // Victorian labels for the generic document kinds (region pack, PLAN.md D9).
 export const DOC_KINDS: Record<string, string> = {
-  photo: "Photo", floorplan: "Floorplan", price_statement: "Statement of Information", vendor_statement: "Section 32",
+  photo: "Photo", floorplan: "Floor plan", price_statement: "Statement of Information", vendor_statement: "Section 32",
   contract: "Contract", building_report: "Building report", pest_report: "Pest report", strata_report: "Strata report",
   strata_certificate: "Owners corporation certificate", plans_specs: "Plans & specs", other: "Other",
 };
@@ -154,10 +154,12 @@ export function Files({ propertyId, attachments, coverId, address }: { propertyI
 
   // The cover first, then the listing's photos in the listing's order, then everyone's own, newest first.
   const fromListing = (a: Attachment) => a.caption === "From the listing";
-  const photos = attachments.filter((a) => a.sha256 && a.mime_type?.startsWith("image/")).sort((a, b) =>
+  // Floor plans are images but belong with the documents (they open in the viewer, never the cover).
+  const isPhoto = (a: Attachment) => a.kind === "photo" && !!a.sha256 && !!a.mime_type?.startsWith("image/");
+  const photos = attachments.filter(isPhoto).sort((a, b) =>
     Number(b.id === coverId) - Number(a.id === coverId) || Number(fromListing(b)) - Number(fromListing(a))
     || (fromListing(a) ? a.created_at.localeCompare(b.created_at) : b.created_at.localeCompare(a.created_at)));
-  const docs = attachments.filter((a) => !(a.sha256 && a.mime_type?.startsWith("image/")));
+  const docs = attachments.filter((a) => !isPhoto(a)).sort((a, b) => Number(b.kind === "floorplan") - Number(a.kind === "floorplan"));
   // The viewer steps through photos, or through documents kept in House Track (links open on their own site).
   const [viewing, setViewing] = useState<{ items: ViewerItem[]; start: number } | null>(null);
   const photoItems: ViewerItem[] = photos.map((p) => ({ id: p.id, title: p.caption ?? p.original_name ?? "Photo", mime: p.mime_type }));

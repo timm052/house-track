@@ -17,16 +17,16 @@ export type Capture = {
   lat?: number | null; lon?: number | null;
   agents?: { name: string; mobile: string | null; email: string | null; agency_name: string | null }[];
   inspections?: { starts_at: string; ends_at: string }[];
-  soi_url?: string | null; photos?: string[]; image_url?: string | null;
+  soi_url?: string | null; photos?: string[]; floorplans?: string[]; image_url?: string | null;
   existing_property_id?: string | null; existing_address?: string | null;
 };
 
-export type Choices = { photos: "main" | "all" | "none"; agents: boolean; inspections: boolean; soi: boolean; pin: boolean; tags: string[]; notes: boolean };
+export type Choices = { photos: "main" | "all" | "none"; floorplans: boolean; agents: boolean; inspections: boolean; soi: boolean; pin: boolean; tags: string[]; notes: boolean };
 
 export const photosOf = (c: Capture) => (c.photos?.length ? c.photos : c.image_url ? [c.image_url] : []);
 
 export function defaultChoices(c: Capture): Choices {
-  return { photos: photosOf(c).length ? "main" : "none", agents: true, inspections: true, soi: true, pin: true,
+  return { photos: photosOf(c).length ? "all" : "none", floorplans: true, agents: true, inspections: true, soi: true, pin: true,
            tags: c.suggested_tags ?? [], notes: false };
 }
 
@@ -40,6 +40,7 @@ export function extrasFor(c: Capture, ch: Choices) {
     soi_url: ch.soi ? c.soi_url ?? null : null,
     tags: ch.tags,
     photos: ch.photos === "all" ? photos : ch.photos === "main" ? photos.slice(0, 1) : [],
+    floorplans: ch.floorplans ? c.floorplans ?? [] : [],
   };
 }
 
@@ -74,6 +75,10 @@ export function CaptureReview({ c, ch, set }: { c: Capture; ch: Choices; set: (c
             ))}
           </div>
         </div>
+      )}
+      {(c.floorplans?.length ?? 0) > 0 && (
+        <label className="check"><input type="checkbox" checked={ch.floorplans} onChange={(e) => set({ ...ch, floorplans: e.target.checked })} />
+          The floor plan</label>
       )}
 
       {(c.agents?.length ?? 0) > 0 && (
@@ -129,7 +134,7 @@ export function ExistingUpdate({ c }: { c: Capture }) {
   // What Update would do, from the server doing it and rolling it back (photos aside: they download later).
   const preview = useQuery({
     queryKey: ["listing-preview", id, c.url],
-    queryFn: () => api<{ changes: string[] }>(`/api/properties/${id}/listing-update?preview=true`, { method: "POST", body: updateBody(c, { ...ch, photos: "none" }) }),
+    queryFn: () => api<{ changes: string[] }>(`/api/properties/${id}/listing-update?preview=true`, { method: "POST", body: updateBody(c, { ...ch, photos: "none", floorplans: false }) }),
     staleTime: Infinity,
   });
   const changes = preview.data?.changes ?? [];
@@ -167,6 +172,10 @@ export function ExistingUpdate({ c }: { c: Capture }) {
                 ))}
                 <span className="muted">(ones you already have are skipped)</span>
               </div>
+            )}
+            {(c.floorplans?.length ?? 0) > 0 && (
+              <label className="check small"><input type="checkbox" checked={ch.floorplans} onChange={(e) => setCh({ ...ch, floorplans: e.target.checked })} />
+                The floor plan</label>
             )}
           </>
         )}

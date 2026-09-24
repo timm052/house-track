@@ -23,6 +23,11 @@ export default function Refresh() {
   const targets = useQuery({ queryKey: ["refresh-targets"], queryFn: () => api<Target[]>("/api/listing/targets") });
   const [rows, setRows] = useState<Row[] | null>(null);
   const [finished, setFinished] = useState(false);
+  // Fill in what a house is missing (rooms, land, photos, floor plan) from its listing; never overwrites. Per device.
+  const [fill, setFillState] = useState(() => { try { return localStorage.getItem("housetrack.refresh.fill") !== "0"; } catch { return true; } });
+  const fillRef = useRef(fill);
+  fillRef.current = fill;
+  const setFill = (v: boolean) => { setFillState(v); try { localStorage.setItem("housetrack.refresh.fill", v ? "1" : "0"); } catch { /* this visit only */ } };
   const started = useRef(false);
   const domainOrigin = useRef<string | null>(null);
   // Launched by the bookmarklet (?run=1). Some browsers hide window.opener across sites, so don't rely on it.
@@ -56,7 +61,8 @@ export default function Refresh() {
         try {
           result = await api<Result>("/api/listing/refresh", { method: "POST", body: {
             property_id: d.id, url: d.url, status_code: typeof d.status === "number" ? d.status : null,
-            next_data: typeof d.next_data === "string" ? d.next_data : null, image: typeof d.image === "string" ? d.image : null } });
+            next_data: typeof d.next_data === "string" ? d.next_data : null, image: typeof d.image === "string" ? d.image : null,
+            fill_missing: fillRef.current } });
           if (d.error) result = { changes: [], error: `Couldn't load it from Domain: ${d.error}` };
         } catch (err) {
           result = { changes: [], error: (err as Error).message };
@@ -83,7 +89,9 @@ export default function Refresh() {
       {!opened && (
         <div className="card stack">
           <p style={{ margin: 0 }}>Checks every active house's Domain listing and records what changed: new price guides, auction or EOI dates,
-            inspection times, agents and the Statement of Information. Photos and tags are left alone.</p>
+            inspection times, agents and the Statement of Information. Rooms and areas that differ are reported, not changed.</p>
+          <label className="check"><input type="checkbox" checked={fill} onChange={(e) => setFill(e.target.checked)} />
+            Fill in what's missing: rooms, land and building size you haven't entered, and the photos and floor plan if a house has none</label>
           <ol className="small" style={{ margin: 0, paddingLeft: 18 }}>
             <li>Drag the button below to your bookmarks bar (once).</li>
             <li>Open any page on domain.com.au and click it. This page opens and shows progress.</li>

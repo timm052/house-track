@@ -1,6 +1,8 @@
 import json
 import zipfile
 
+import pytest
+
 from app import worker
 from app.db import tx
 from app.setup import overlays
@@ -8,6 +10,14 @@ from app.setup import overlays
 from .conftest import as_
 
 BOX = (144.0, -39.0, 146.5, -37.0)
+
+
+@pytest.fixture(autouse=True)
+def offline_school_locations(monkeypatch):
+    """Tests give their own school locations file; never DataVic's."""
+    def refuse(*args, **kwargs):
+        raise RuntimeError("no school locations in tests")
+    monkeypatch.setattr(overlays, "school_locations_csv", refuse)
 
 
 def square(lon, lat, d=0.01):
@@ -20,7 +30,7 @@ def school_zip(tmp_path):
     primary = {"type": "FeatureCollection", "features": [
         {"type": "Feature", "properties": {"School_Name": "Box Hill North Primary School"}, "geometry": square(145.20, -37.80)}]}
     year7 = {"type": "FeatureCollection", "features": [
-        {"type": "Feature", "properties": {"School_Name": "Box Hill High School"}, "geometry": square(145.20, -37.80, 0.05)}]}
+        {"type": "Feature", "properties": {"School_Name": "Box Hill High School", "ENTITY_CODE": 1900201}, "geometry": square(145.20, -37.80, 0.05)}]}
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr("Primary_Integrated_2026.geojson", json.dumps(primary))
         zf.writestr("Secondary_Integrated_Year7_2026.geojson", json.dumps(year7))
@@ -94,3 +104,27 @@ def test_school_zones_local_and_planning_looked_up_once(client, people, database
     assert client.patch("/api/overlays/vic_flood", headers=as_(a), json={"effect": "hard_exclude"}).status_code == 200
     assert next(x for x in client.get("/api/overview", headers=as_(people["b"])).json()["rows"] if x["id"] == pid)["excluded"]
     client.patch("/api/overlays/vic_flood", headers=as_(a), json={"effect": "soft_warn"})
+
+
+def test_walk_to_the_zoned_schools(client, people, database_url, tmp_path):
+    """The zoned schools are found by name in the school locations; the walk is worked out, and the drive only
+    when the walk is over 35 minutes."""
+    from .test_geo import FakeValhalla
+    csv = tmp_path / "locations.csv"
+    csv.write_text("Education_Sector,Entity_Type,School_No,School_Name,School_Type,School_Status,X,Y\n"
+                   "Government,1,9001,Box Hill North Primary School,Primary,O,145.2030,-37.8010\n"
+                   "Government,1,9002,Box Hill Secondary College,Secondary,O,145.2400,-37.8400\n"
+                   "Catholic,2,9003,Somewhere Else College,Secondary,O,145.2000,-37.8000\n", encoding="utf-8")
+    overlays.load_schools(database_url, BOX, tmp_path, school_zip(tmp_path), csv)
+    a = people["a"]
+    pid = client.post("/api/properties", headers=as_(a), json={
+        "address": {"street_number": "2", "street": "School Rd", "suburb": "Box Hill North", "postcode": "3129"}}).json()["id"]
+    client.put(f"/api/properties/{pid}/location", headers=as_(a), json={"lon": 145.2004, "lat": -37.8004})
+    assert client.get(f"/api/properties/{pid}").json()["travel"]["pending"] >= 2
+    while worker.route_school_access(FakeValhalla()):
+        pass
+    schools = {s["level"]: s for s in client.get(f"/api/properties/{pid}").json()["travel"]["schools"]}
+    assert schools["primary"]["name"] == "Box Hill North Primary School"
+    assert schools["primary"]["walk_s"] < 35 * 60 and schools["primary"]["drive_s"] is None  # close: no drive needed
+    assert schools["secondary"]["name"] == "Box Hill Secondary College"  # renamed since the zones: found by its number
+    assert schools["secondary"]["walk_s"] > 35 * 60 and schools["secondary"]["drive_s"] > 0  # 5.5 km: the drive too

@@ -11,6 +11,7 @@ dependencies = [
     "python-multipart>=0.0.32",
     "pillow>=12.3.0",
     "tzdata>=2026.4",
+    "pypdf>=6.19.0",
 ]
 
 [dependency-groups]

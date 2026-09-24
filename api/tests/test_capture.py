@@ -56,6 +56,20 @@ def test_extract_reads_the_whole_listing_and_ignores_the_others():
         assert tag in got["suggested_tags"], tag
 
 
+def test_photos_follow_the_listing_gallery_and_floor_plans_are_kept_apart():
+    """Domain's own gallery order (largeMedia), not photo-number order; resized URLs become the full-size original."""
+    data = json.loads(NEXT_DATA)
+    resized = "https://rimh2.domainstatic.com.au/abc=/fit-in/1920x1080/filters:format(jpeg)/2029990001_{n}_1_260922_062323-w2048-h1365"
+    plan = "https://rimh2.domainstatic.com.au/xyz=/fit-in/1920x1080/2029990001_9_3_260922_062323-w1600-h1200"
+    data["props"]["pageProps"]["componentProps"]["rootGraphQuery"]["listingByIdV2"]["largeMedia"] = [
+        {"url": resized.format(n=4), "type": "photo"}, {"url": resized.format(n=1), "type": "photo"},
+        {"url": plan, "type": "floorplan"}, {"url": "https://youtube.com/x", "type": "youtube"}]
+    got = extract(URL, HEAD, next_data=json.dumps(data))
+    assert got["photos"] == [IMG.format(n=4), IMG.format(n=1)]
+    assert got["floorplans"] == ["https://bucket-api.domain.com.au/v1/bucket/image/2029990001_9_3_260922_062323-w1600-h1200"]
+    assert got["image_url"] == IMG.format(n=4)  # the gallery's first photo is the cover
+
+
 def test_auction_date_from_the_schedule():
     data = json.loads(NEXT_DATA)
     cp = data["props"]["pageProps"]["componentProps"]
@@ -69,8 +83,8 @@ def test_auction_date_from_the_schedule():
 def test_capture_then_save_then_capture_again(client, people, monkeypatch):
     from app.routes import driveway
     saved: list[str] = []
-    monkeypatch.setattr(driveway, "save_photos_later", lambda pid, person, urls: saved.extend(urls))
-    monkeypatch.setattr("app.routes.properties.save_photos_later", lambda pid, person, urls: saved.extend(urls))
+    monkeypatch.setattr(driveway, "save_photos_later", lambda pid, person, urls, plans=(): saved.extend(urls))
+    monkeypatch.setattr("app.routes.properties.save_photos_later", lambda pid, person, urls, plans=(): saved.extend(urls))
     a = as_(people["a"])
     got = client.post("/api/listing/parse", headers=a, json={"url": URL, "html": HEAD, "next_data": NEXT_DATA}).json()
     assert got["existing_property_id"] is None and got["agents"]
@@ -102,7 +116,9 @@ def test_capture_then_save_then_capture_again(client, people, monkeypatch):
 
 
 def test_weekly_refresh_targets_and_updates(client, people, monkeypatch):
-    monkeypatch.setattr("app.routes.properties.save_photos_later", lambda pid, person, urls: None)
+    monkeypatch.setattr("app.routes.properties.save_photos_later", lambda pid, person, urls, plans=(): None)
+    fetched: list[str] = []
+    monkeypatch.setattr("app.routes.driveway.save_photos_later", lambda pid, person, urls, plans=(): fetched.extend(urls))
     a = as_(people["a"])
     url = "https://www.domain.com.au/9-refresh-road-mitcham-vic-3132-2029990009"
     pid = client.post("/api/properties", headers=a, json={
@@ -114,14 +130,20 @@ def test_weekly_refresh_targets_and_updates(client, people, monkeypatch):
 
     data = json.loads(NEXT_DATA)
     data["props"]["pageProps"]["componentProps"]["listingSummary"].update(title="EOI $1,100,000 - $1,155,000", status="underOffer")
+    mine_img = "https://bucket-api.domain.com.au/v1/bucket/image/2029990009_{n}_1_260922_062323-w2048-h1365"
+    data["props"]["pageProps"]["componentProps"]["rootGraphQuery"]["listingByIdV2"]["largeMedia"] = [
+        {"url": mine_img.format(n=2), "type": "photo"}, {"url": mine_img.format(n=1), "type": "photo"}]
     r = client.post("/api/listing/refresh", headers=a, json={"property_id": pid, "url": url, "status_code": 200,
                                                               "next_data": json.dumps(data)}).json()
-    assert r["changes"][0].startswith("New price guide $1.1m–$1.155m (was ")
+    assert any(ch.startswith("New price guide $1.1m–$1.155m (was ") for ch in r["changes"])
+    # What we had nothing for is filled in (rooms, land, photos); nothing we had is overwritten.
+    assert "Bedrooms: 3" in r["changes"] and "Land: 650 m²" in r["changes"] and "2 photos from the listing" in r["changes"]
+    assert fetched == [mine_img.format(n=2), mine_img.format(n=1)]  # in the listing's order
     assert any(ch.startswith("1 new inspection time: ") for ch in r["changes"])
     assert "Agents: Pat Agent, Sam Seller" in r["changes"] and r["flag"].startswith("Under offer")
     again = client.post("/api/listing/refresh", headers=a, json={"property_id": pid, "url": url, "status_code": 200,
                                                                   "next_data": json.dumps(data)}).json()
-    assert again["changes"] == []  # nothing new the second time
+    assert again["changes"] == ["2 photos from the listing"]  # nothing else new (the stub above never saves the photos)
     assert [t for t in client.get("/api/listing/targets").json() if t["id"] == pid][0]["last_checked_at"] is not None
     gone = client.post("/api/listing/refresh", headers=a, json={"property_id": pid, "url": url, "status_code": 404}).json()
     assert gone["flag"] == "The listing has been taken down."

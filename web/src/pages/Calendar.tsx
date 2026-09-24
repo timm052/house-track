@@ -1,7 +1,10 @@
 // Upcoming inspections, auctions and EOI closings, with the phone-calendar subscription (milestone 3).
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { X } from "lucide-react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
+import ConfirmButton from "../ConfirmButton";
 import { suburbClass, useSuburbSlots } from "../colour";
 import { EVENT_LABEL } from "../format";
 
@@ -27,6 +30,18 @@ function dayLabel(d: Date): string {
 export default function CalendarSection() {
   const { data = [], isPending } = useQuery({ queryKey: ["inspections", DAYS], queryFn: () => api<Event[]>(`/api/inspections?days=${DAYS}`) });
   const slots = useSuburbSlots();
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  /** Taking an inspection off the list: it's cancelled (kept on the house's page), not deleted. */
+  async function remove(e: Event) {
+    setError(null);
+    try {
+      await api(`/api/inspections/${e.id}`, { method: "PATCH", body: { state: "cancelled" } });
+      for (const key of [["inspections"], ["overview"], ["property", e.property_id]]) queryClient.invalidateQueries({ queryKey: key });
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
   const days = new Map<string, { date: Date; events: Event[] }>();
   for (const e of data) {
     const d = new Date(e.starts_at), k = dayKey(d);
@@ -42,6 +57,7 @@ export default function CalendarSection() {
         {sales} {sales === 1 ? "auction or EOI closing" : "auctions and EOI closings"}.
       </p>
       {isPending && <p className="muted">Loading…</p>}
+      {error && <p className="error small">{error}</p>}
       {!isPending && data.length === 0 && <div className="card empty">Nothing coming up. Add inspections from a house's page.</div>}
       {[...days.values()].map(({ date, events }) => (
         <div key={dayKey(date)} className="card">
@@ -58,6 +74,10 @@ export default function CalendarSection() {
                     <br /><Link to={`/p/${e.property_id}`}>{e.address}</Link>
                   </span>
                   <a className="small" href={`/api/events/${e.type}/${e.id}.ics`} title="Download this one event">+ Calendar</a>
+                  {e.type === "inspection" && (
+                    <ConfirmButton className="link icon-btn" title="Not going: take it off the list" label={<X aria-label="Remove" />}
+                      question="Not going?" yes="Remove" onConfirm={() => remove(e)} />
+                  )}
                 </li>
               );
             })}

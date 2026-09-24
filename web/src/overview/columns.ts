@@ -85,9 +85,8 @@ export function catalogue(persons: Person[], places: OverviewPlace[]): Column[] 
     { key: "first_guide_high", label: "First guide high", group: "Price", kind: "money", width: 100 },
     { key: "guide_changes", label: "Price changes", group: "Price", kind: "int", byDefault: true, width: 90 },
     { key: "last_guide_change", label: "Last price change", group: "Price", kind: "date", width: 110 },
-    { key: "estimated_reserve", label: "Our reserve", group: "Price", kind: "money", editable: true, history: true, byDefault: true, width: 95 },
-    { key: "expected_sale", label: "Expected sale", group: "Price", kind: "money", editable: true, history: true, byDefault: true, width: 100 },
-    { key: "walk_away", label: "Walk-away", group: "Price", kind: "money", editable: true, history: true, byDefault: true, width: 90 },
+    { key: "expected_sale", label: "We think it's worth", group: "Price", kind: "money", editable: true, history: true, byDefault: true, width: 120 },
+    { key: "walk_away", label: "Our max", group: "Price", kind: "money", editable: true, history: true, byDefault: true, width: 90 },
     { key: "sold_vs_guide_pct", label: "Sold vs guide", group: "Price", kind: "pct", width: 95 },
     { key: "guide_per_m2", label: "Guide/m² land", group: "Price", kind: "money", width: 100 },
   ];
@@ -120,10 +119,17 @@ export function catalogue(persons: Person[], places: OverviewPlace[]): Column[] 
     const has = (m: "walk" | "drive" | "transit") => !pl.modes || pl.modes.includes(m);
     if (has("walk")) cols.push({ key: `walk:${pl.id}`, label: `Walk to ${name}`, group: "Getting around", kind: "minutes", width: 110 });
     if (pl.kind === "destination") {
-      if (has("drive")) cols.push({ key: `drive:${pl.id}`, label: `Drive to ${name}`, group: "Getting around", kind: "minutes",
-                                    byDefault: pl.is_favourite, width: 110 });
-      if (has("transit")) cols.push({ key: `transit:${pl.id}`, label: `Public transport to ${name}`, group: "Getting around", kind: "minutes",
-                                      byDefault: pl.is_favourite, width: 110 });
+      if (has("drive")) {
+        // Peak hour (there by 9, home at 5), estimated from the road types; the no-traffic time is there if wanted.
+        cols.push({ key: `drive:${pl.id}`, label: `Drive to ${name} (peak)`, group: "Getting around", kind: "minutes",
+                    byDefault: pl.is_favourite, width: 120 });
+        cols.push({ key: `drive_free:${pl.id}`, label: `Drive to ${name} (no traffic)`, group: "Getting around", kind: "minutes", width: 120 });
+      }
+      if (has("transit")) {
+        cols.push({ key: `transit:${pl.id}`, label: `Public transport to ${name}`, group: "Getting around", kind: "minutes",
+                    byDefault: pl.is_favourite, width: 110 });
+        cols.push({ key: `transit_home:${pl.id}`, label: `Public transport home from ${name}`, group: "Getting around", kind: "minutes", width: 120 });
+      }
     }
   }
   return cols;

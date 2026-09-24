@@ -156,8 +156,9 @@ def comparables(campaign_id: UUID) -> dict:
     with tx() as conn:
         c = _campaign(conn, campaign_id)
         entered = conn.execute(
-            "SELECT id, source, address, sold_price_aud, sold_on, beds, baths, car_spaces, land_m2, note"
-            " FROM comparable_sale WHERE campaign_id = %s ORDER BY sold_on DESC NULLS LAST", (campaign_id,)).fetchall()
+            """SELECT id, source, address, sold_price_aud, sold_on, beds, baths, car_spaces, land_m2, note, sale_method, attachment_id,
+                      ST_X(location) AS lon, ST_Y(location) AS lat
+               FROM comparable_sale WHERE campaign_id = %s ORDER BY sold_on DESC NULLS LAST""", (campaign_id,)).fetchall()
         tracked = conn.execute(
             """SELECT p.id AS property_id, p.unit, p.street_number, p.street, p.suburb, p.postcode, p.plan_number,
                       p.lot_number, p.beds, p.baths, p.car_spaces, p.land_m2, oc.sold_price_aud, oc.outcome_on AS sold_on,
@@ -178,13 +179,17 @@ def comparables(campaign_id: UUID) -> dict:
 
 @router.post("/campaigns/{campaign_id}/comparables", status_code=201)
 def add_comparable(campaign_id: UUID, body: ComparableIn, person: Person) -> dict:
+    from ..worker import locate_comparable
+    hit = locate_comparable(body.address.strip())  # so it shows on the map beside the house
     with tx(person) as conn:
         _campaign(conn, campaign_id)
         return conn.execute(
             """INSERT INTO comparable_sale (campaign_id, source, address, sold_price_aud, sold_on, beds, baths, car_spaces,
-                                            land_m2, note) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                                            land_m2, note, location)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                       CASE WHEN %s::float8 IS NULL THEN NULL ELSE ST_SetSRID(ST_MakePoint(%s, %s), 4326) END) RETURNING id""",
             (campaign_id, body.source, body.address.strip(), body.sold_price_aud, body.sold_on, body.beds, body.baths,
-             body.car_spaces, body.land_m2, body.note)).fetchone()
+             body.car_spaces, body.land_m2, body.note, hit and hit["lon"], hit and hit["lon"], hit and hit["lat"])).fetchone()
 
 
 @router.delete("/comparables/{comparable_id}", status_code=204)

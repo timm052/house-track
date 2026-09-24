@@ -21,7 +21,9 @@ def overview(person: OptionalPerson) -> dict:
         places = conn.execute(
             "SELECT id, kind, name, person_id, is_favourite, modes FROM place WHERE archived_at IS NULL ORDER BY kind, name"
         ).fetchall()
-    return {"rows": rows, "places": places}
+        from .geo import routing_pending
+        pending = routing_pending(conn)
+    return {"rows": rows, "places": places, "pending": pending}
 
 
 @router.get("/overview/rows/{property_id}")

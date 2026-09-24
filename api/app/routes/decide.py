@@ -180,6 +180,7 @@ class RefreshIn(BaseModel):
     status_code: int | None = None
     next_data: str | None = Field(default=None, max_length=4_000_000)
     image: str | None = Field(default=None, max_length=2000)
+    fill_missing: bool = True  # fill in rooms and areas we have nothing for, and photos and floor plans if there are none
 
 
 @router.post("/listing/refresh")
@@ -203,10 +204,23 @@ def refresh_one(body: RefreshIn, person: Person) -> dict:
         eoi_closes_at=got.get("eoi_closes_at") if method == "eoi" else None,
         inspections=got.get("inspections") or [], agents=got.get("agents") or [], soi_url=got.get("soi_url"),
         **{f: got.get(f) for f, _ in listing_apply.DETAILS}, apply_details=False,  # unattended: report, don't overwrite
+        fill_missing=body.fill_missing,
         listing_status=got.get("listing_status"), listing_price_text=got.get("price_text"),
     )
     with tx(person) as conn:
         added = listing_apply.refresh(conn, body.property_id, update)
+        have = conn.execute("""SELECT count(*) FILTER (WHERE kind = 'photo') AS photos, count(*) FILTER (WHERE kind = 'floorplan') AS plans
+                               FROM attachment WHERE property_id = %s AND sha256 IS NOT NULL""", (body.property_id,)).fetchone()
+    if body.fill_missing:
+        from .driveway import save_photos_later
+        photos = got.get("photos") or [] if not have["photos"] else []
+        plans = got.get("floorplans") or [] if not have["plans"] else []
+        if photos or plans:
+            save_photos_later(body.property_id, person, photos, plans)
+            if photos:
+                added["changes"].append(f"{len(photos)} {'photo' if len(photos) == 1 else 'photos'} from the listing")
+            if plans:
+                added["changes"].append("Floor plan from the listing")
     status = (got.get("listing_status") or "").replace("_", "").lower()
     flag = OFF_MARKET.get(status)
     return {"property_id": str(body.property_id), "changes": added["changes"], "differs": added["differs"],

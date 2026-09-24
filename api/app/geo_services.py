@@ -23,6 +23,25 @@ def crow_m(a: tuple[float, float], b: tuple[float, float]) -> float:
     return 2 * 6_371_000 * math.asin(math.sqrt(h))
 
 
+# Peak hour (arriving at 9, leaving at 5): how much slower each kind of road gets. Big roads carry the commute
+# and clog; side streets barely change. An estimate: the free routing engines have no live or historic traffic.
+PEAK_FACTOR = {"motorway": 1.8, "trunk": 1.6, "primary": 1.5, "secondary": 1.35, "tertiary": 1.2}
+PEAK_OTHER = 1.05
+
+
+def peak_factor(edges: list[dict]) -> float:
+    """The route's slow-down in peak hour: each stretch's free-flow time weighted by its road type's factor."""
+    free = peak = 0.0
+    for e in edges:
+        length, speed = e.get("length"), e.get("speed")
+        if not length or not speed:
+            continue
+        t = length / speed  # km / km/h: only the proportions matter
+        free += t
+        peak += t * PEAK_FACTOR.get(e.get("road_class") or "", PEAK_OTHER)
+    return peak / free if free else 1.0
+
+
 @dataclass
 class Route:
     distance_m: int | None
@@ -89,6 +108,24 @@ class Valhalla:
             return Route(None, None), []
         path = [p for leg in trip["legs"] for p in decode_polyline6(leg["shape"])]
         return Route(round(trip["summary"]["length"] * 1000), round(trip["summary"]["time"])), path
+
+    def drive_peak(self, origin: tuple[float, float], target: tuple[float, float]) -> int | None:
+        """The drive in peak hour, in seconds: the route's own time, slowed by the road types it uses."""
+        body = {"locations": [{"lon": origin[0], "lat": origin[1]}, {"lon": target[0], "lat": target[1]}],
+                "costing": "auto", "units": "kilometers", "directions_type": "none"}
+        try:
+            trip = self._post("route", body)["trip"]
+            edges = []
+            for leg in trip["legs"]:
+                got = self._post("trace_attributes", {"encoded_polyline": leg["shape"], "shape_match": "map_snap", "costing": "auto",
+                                                      "filters": {"attributes": ["edge.road_class", "edge.length", "edge.speed"],
+                                                                  "action": "include"}})
+                edges += got.get("edges", [])
+        except HTTPError as e:
+            if e.code != 400:
+                raise
+            return None
+        return round(trip["summary"]["time"] * peak_factor(edges))
 
     def route(self, origin: tuple[float, float], target: tuple[float, float], mode: str) -> Route:
         """A single route; Route(None, None) when there's no way there (or the server won't say)."""
@@ -174,6 +211,96 @@ TRANSIT_MODES = {"WALK": "walk", "BUS": "bus", "COACH": "coach", "TRAM": "tram",
                  "SUBURBAN": "train", "FERRY": "ferry", "METRO": "train"}
 
 
+def pick_departure(itineraries: list[dict], depart_at) -> dict | None:
+    """The journey home: the first to arrive of those leaving at or after the time (within two hours)."""
+    from datetime import datetime, timedelta
+    def when(t: str):
+        return datetime.fromisoformat(t.replace("Z", "+00:00"))
+    ok = [i for i in itineraries if depart_at <= when(i["startTime"]) <= depart_at + timedelta(hours=2)]
+    return min(ok, key=lambda i: (when(i["endTime"]), i["duration"]), default=None)
+
+
+SHORT_RIDE_S = 10 * 60  # a ride shorter than this is walked instead: no waiting for a tram to go two stops
+
+
+def has_short_ride(it: dict) -> bool:
+    return any(leg.get("mode") != "WALK" and leg.get("duration", 0) < SHORT_RIDE_S for leg in it.get("legs", []))
+
+
+WALKABLE_RIDE_M = 1500   # a short ride this close (as the crow flies) is walked instead
+WALK_M_PER_S = 1.3       # about 4.7 km/h
+WALK_DETOUR = 1.3        # streets aren't straight lines
+
+
+def _when(t: str):
+    from datetime import datetime
+    return datetime.fromisoformat(t.replace("Z", "+00:00"))
+
+
+def _iso(dt) -> str:
+    from datetime import timezone
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _point(p: dict | None) -> tuple[float, float] | None:
+    return (p["lon"], p["lat"]) if p and p.get("lon") is not None and p.get("lat") is not None else None
+
+
+def walk_short_rides(it: dict, arrive_by=None, depart_at=None) -> dict:
+    """The first or last ride of a journey, if it's under 10 minutes and walkable (1.5 km), walked instead: along with
+    the walks either side of it, as one walk. A walk at the start ends when the next ride leaves; one at the end
+    starts when the last ride arrives. Only if it still gets there by 9 (or leaves after 5)."""
+    from datetime import timedelta
+    legs = list(it["legs"])
+    changed = False
+    for end in ("last", "first"):
+        rides = [i for i, leg in enumerate(legs) if leg.get("mode") != "WALK"]
+        if not rides:
+            break
+        i = rides[-1] if end == "last" else rides[0]
+        ride = legs[i]
+        a_pt, b_pt = _point(ride.get("from")), _point(ride.get("to"))
+        if ride.get("duration", SHORT_RIDE_S) >= SHORT_RIDE_S or not a_pt or not b_pt or crow_m(a_pt, b_pt) > WALKABLE_RIDE_M:
+            continue
+        a = i - 1 if i > 0 and legs[i - 1].get("mode") == "WALK" else i
+        b = i + 1 if i + 1 < len(legs) and legs[i + 1].get("mode") == "WALK" else i
+        start_pt, end_pt = _point(legs[a].get("from")), _point(legs[b].get("to"))
+        if not start_pt or not end_pt:
+            continue
+        walk_s = round(crow_m(start_pt, end_pt) * WALK_DETOUR / WALK_M_PER_S)
+        if walk_s > WALK_INSTEAD_S:
+            continue
+        if b == len(legs) - 1 and (end == "last" or a != 0):  # to the destination: set off when you would have
+            start = _when(legs[a]["startTime"])
+            finish = start + timedelta(seconds=walk_s)
+        elif a == 0:  # from the start: leave in time for the next ride
+            finish = _when(legs[b]["endTime"])
+            start = finish - timedelta(seconds=walk_s)
+        else:
+            continue
+        if (arrive_by and finish > arrive_by) or (depart_at and start < depart_at):
+            continue
+        walk = {"mode": "WALK", "from": legs[a].get("from"), "to": legs[b].get("to"),
+                "startTime": _iso(start), "endTime": _iso(finish), "duration": walk_s}
+        legs = legs[:a] + [walk] + legs[b + 1:]
+        changed = True
+    if not changed:
+        return it
+    rides = sum(1 for leg in legs if leg.get("mode") != "WALK")
+    begin, finish = _when(legs[0]["startTime"]), _when(legs[-1]["endTime"])
+    return {**it, "legs": legs, "startTime": legs[0]["startTime"], "endTime": legs[-1]["endTime"],
+            "duration": (finish - begin).total_seconds(), "transfers": max(0, rides - 1)}
+
+
+def pick_journey(itineraries: list[dict], arrive_by=None, depart_at=None) -> dict | None:
+    """The commute (see pick_itinerary and pick_departure). Short rides at either end are walked where that's
+    close enough, and journeys still with a ride under 10 minutes only count if nothing else will do: we'd rather
+    walk a few stops than wait for a tram to cover them."""
+    pick = (lambda its: pick_itinerary(its, arrive_by)) if arrive_by else (lambda its: pick_departure(its, depart_at))
+    itineraries = [walk_short_rides(i, arrive_by, depart_at) for i in itineraries]
+    return pick([i for i in itineraries if not has_short_ride(i)]) or pick(itineraries)
+
+
 def next_weekday_9am(now=None):
     """9am on the next weekday (never today, so there's a timetable to plan against), Melbourne time."""
     from datetime import datetime, timedelta
@@ -186,16 +313,22 @@ def next_weekday_9am(now=None):
 
 
 ARRIVAL_WINDOW_H = 3
+# Buses are the last resort: a station up to a 30 minute walk away is preferred over a bus to it. These are
+# Transitous's names for everything else that runs on a timetable (Melbourne's trains come back as SUBWAY).
+NO_BUS_MODES = "RAIL,SUBWAY,TRAM,SUBURBAN,REGIONAL_RAIL,METRO"
+WALK_INSTEAD_S = 30 * 60
+BUS_WORTH_S = 20 * 60  # how much quicker a bus trip must be to be chosen over one without buses
 
 
 def pick_itinerary(itineraries: list[dict], arrive_by) -> dict | None:
     """The journey arriving in the three hours before the time that leaves latest; else the first one arriving
-    up to 90 minutes late; else none (the planner also offers journeys that arrive the evening before, which
-    aren't a commute)."""
+    up to 90 minutes late; else none. Nothing leaving before 6am counts: that isn't a commute anyone would do (and
+    the planner also offers journeys that arrive the evening before)."""
     from datetime import datetime, timedelta
     def when(t: str):
         return datetime.fromisoformat(t.replace("Z", "+00:00"))
     earliest = arrive_by - timedelta(hours=ARRIVAL_WINDOW_H)
+    itineraries = [i for i in itineraries if when(i["startTime"]) >= earliest]
     on_time = [i for i in itineraries if earliest <= when(i["endTime"]) <= arrive_by]
     if on_time:
         return max(on_time, key=lambda i: (when(i["startTime"]), -i["duration"]))
@@ -209,10 +342,18 @@ def journey(it: dict) -> dict:
     for leg in it["legs"]:
         mode = TRANSIT_MODES.get(leg.get("mode", ""), leg.get("mode", "").lower().replace("_", " "))
         legs.append({"mode": mode, "name": leg.get("routeShortName") or leg.get("displayName") or None,
-                     "minutes": max(1, round(leg["duration"] / 60)),
+                     "minutes": max(1, round(leg["duration"] / 60)), "at": leg.get("startTime"),
                      "from": (leg.get("from") or {}).get("name"), "to": (leg.get("to") or {}).get("name")})
     return {"depart_at": it["startTime"], "arrive_at": it["endTime"], "duration_s": round(it["duration"]),
             "transfers": it.get("transfers"), "legs": legs}
+
+
+def bus_saving_s(trains: dict, any_way: dict, arriving: bool) -> float:
+    """What taking a bus gains: going in, how much later you can leave and still be there by 9; coming home, how
+    much sooner you're home. (Not the trip lengths: each trip is picked for when it leaves or arrives.)"""
+    if arriving:
+        return (_when(any_way["depart_at"]) - _when(trains["depart_at"])).total_seconds()
+    return (_when(trains["arrive_at"]) - _when(any_way["arrive_at"])).total_seconds()
 
 
 class Transitous:
@@ -223,13 +364,28 @@ class Transitous:
         self.base_url = base_url.rstrip("/")
         self._last = 0.0
 
-    def plan(self, origin: tuple[float, float], target: tuple[float, float], arrive_by) -> dict | None:
+    def plan(self, origin: tuple[float, float], target: tuple[float, float], arrive_by=None, depart_at=None) -> dict | None:
+        """A journey arriving by `arrive_by`, or (for the trip home) leaving from `depart_at`. Without buses (walking up
+        to 30 minutes at either end instead) unless a bus saves more than 20 minutes: a walk beats a bus to the
+        station, but where the bus is the main part of the trip, going round by train isn't worth it."""
+        trains = self._plan(origin, target, arrive_by, depart_at, no_bus=True)
+        any_way = self._plan(origin, target, arrive_by, depart_at, no_bus=False)
+        if trains and (any_way is None or bus_saving_s(trains, any_way, arrive_by is not None) <= BUS_WORTH_S):
+            return trains
+        return any_way
+
+    def _plan(self, origin, target, arrive_by, depart_at, no_bus: bool) -> dict | None:
         wait = 2.0 - (time.monotonic() - self._last)
         if wait > 0:
             time.sleep(wait)
         self._last = time.monotonic()
         query = urlencode({"fromPlace": f"{origin[1]},{origin[0]}", "toPlace": f"{target[1]},{target[0]}",
-                           "time": arrive_by.isoformat(), "arriveBy": "true"})
+                           "time": (arrive_by or depart_at).isoformat(), "arriveBy": "true" if arrive_by else "false",
+                           # Enough journeys across two hours to find the one that leaves latest and still makes 9am
+                           # (or gets home soonest after 5), not just the few the planner offers by default.
+                           "numItineraries": 12, "searchWindow": 7200,
+                           **({"transitModes": NO_BUS_MODES, "maxPreTransitTime": WALK_INSTEAD_S,
+                               "maxPostTransitTime": WALK_INSTEAD_S} if no_bus else {})})
         try:
             with urlopen(Request(f"{self.base_url}/api/v1/plan?{query}", headers={"User-Agent": USER_AGENT}), timeout=60) as r:
                 data = json.load(r)
@@ -237,5 +393,6 @@ class Transitous:
             if e.code in (400, 404, 422):
                 return None  # no journey between these points
             raise
-        it = pick_itinerary(data.get("itineraries") or [], arrive_by)
+        its = data.get("itineraries") or []
+        it = pick_journey(its, arrive_by=arrive_by, depart_at=depart_at)
         return journey(it) if it else None

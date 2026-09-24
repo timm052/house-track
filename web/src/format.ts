@@ -56,7 +56,7 @@ export const LABEL = {
     price_statement: "Statement of Information", advertised: "Advertised", agent_verbal: "Agent (verbal)", other: "Other",
   } satisfies Record<GuideSource, string>,
   judgement: {
-    estimated_reserve: "Our reserve estimate", expected_sale: "Expected sale", walk_away: "Walk-away limit",
+    estimated_reserve: "Our reserve estimate", expected_sale: "What we think it's worth", walk_away: "Our max",
   } satisfies Record<JudgementKind, string>,
 };
 

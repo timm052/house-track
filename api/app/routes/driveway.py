@@ -282,7 +282,7 @@ def download_file(url: str, types: tuple[str, ...] = DOCUMENT_TYPES, accept: str
     return data, mime
 
 
-def save_photo(property_id: UUID, person, url: str, caption: str | None) -> dict:
+def save_photo(property_id: UUID, person, url: str, caption: str | None, kind: str = "photo") -> dict:
     """Keep a copy (listings come down after the sale), once: the same photo twice is one attachment."""
     data, mime = download_image(url)
     sha = blobs.store(data)
@@ -297,21 +297,35 @@ def save_photo(property_id: UUID, person, url: str, caption: str | None) -> dict
         row = conn.execute(
             # A stored file, so no url: an attachment is a file or a link, never both.
             """INSERT INTO attachment (property_id, kind, sha256, mime_type, byte_size, original_name, caption)
-               VALUES (%s, 'photo', %s, %s, %s, %s, %s) RETURNING id""",
-            (property_id, sha, mime, len(data), name, caption)).fetchone()
+               VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+            (property_id, kind, sha, mime, len(data), name, caption)).fetchone()
     return {"id": row["id"], "existing": False}
 
 
-def save_photos_later(property_id: UUID, person, urls: list[str]) -> None:
-    """A listing's photos take a while to download, so the house is saved first and these follow."""
+def save_photos_later(property_id: UUID, person, urls: list[str], floorplans: list[str] = ()) -> None:
+    """A listing's photos (and floor plans) take a while to download, so the house is saved first and these follow,
+    in the listing's order (the first becomes the cover). Each gets a second try after a pause: image servers
+    sometimes refuse a burst of downloads."""
+    import logging
     import threading
+    import time
+    log = logging.getLogger("house_track.photos")
+    jobs = [(u, "From the listing", "photo") for u in urls[:30]] + [(u, "Floor plan (from the listing)", "floorplan") for u in floorplans[:5]]
 
     def run() -> None:
-        for url in urls[:30]:
+        failed = []
+        for url, caption, kind in jobs:
             try:
-                save_photo(property_id, person, url, "From the listing")
+                save_photo(property_id, person, url, caption, kind)
             except Exception:  # noqa: BLE001  one bad photo shouldn't stop the rest
-                pass
+                failed.append((url, caption, kind))
+        if failed:
+            time.sleep(5)
+        for url, caption, kind in failed:
+            try:
+                save_photo(property_id, person, url, caption, kind)
+            except Exception as e:  # noqa: BLE001
+                log.warning("Couldn't save %s %s for %s: %s", kind, url, property_id, getattr(e, "detail", e))
     threading.Thread(target=run, name="listing-photos", daemon=True).start()
 
 
@@ -327,11 +341,11 @@ def listing_update(property_id: UUID, body: ListingUpdateIn, person: Person, pre
         with conn.transaction(force_rollback=preview):
             added = listing_apply.refresh(conn, property_id, body)
     if preview:
-        added["photos"] = len(body.photos)
+        added["photos"], added["floorplans"] = len(body.photos), len(body.floorplans)
         return added
-    if body.photos:
-        save_photos_later(property_id, person, body.photos)
-    added["photos"] = len(body.photos)
+    if body.photos or body.floorplans:
+        save_photos_later(property_id, person, body.photos, body.floorplans)
+    added["photos"], added["floorplans"] = len(body.photos), len(body.floorplans)
     return added
 
 

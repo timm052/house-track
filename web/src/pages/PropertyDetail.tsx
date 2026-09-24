@@ -5,7 +5,7 @@ import {
   api, PROPERTY_TYPES, STATUSES,
   type Campaign, type GuideSource, type JudgementKind, type PropertyDetail as Detail,
   type PropertyType, type SaleMethod, type Stage, type Stance, type Status, ApiError } from "../api";
-import { parseMoney, day, fromLocalInput, km, LABEL, minutes, money, moneyRange, toLocalInput, saleWhen, streetLine, when } from "../format";
+import { parseMoney, day, fromLocalInput, LABEL, minutes, money, moneyRange, toLocalInput, saleWhen, streetLine, when } from "../format";
 import { newId, sendOrQueue } from "../outbox";
 import { usePeople } from "../people";
 import { STATUS_COLOUR, changeTone, minutesTone, soonTone, suburbClass, tagStyle, useSuburbSlots, useTagColours } from "../colour";
@@ -13,6 +13,7 @@ import { Checklist, Comparables, CostAt, PriceHistory } from "./MoneyExtras";
 import { Files, Inspections } from "./PropertyExtras";
 import { ScoresCard } from "./Decide";
 import { Bath, BedDouble, Building2, CalendarDays, CalendarPlus, Camera, Car, CircleDollarSign, CircleHelp, DollarSign, Gavel, House, ImagePlus, LandPlot, MapPin, Paperclip, PartyPopper, Scale, School, Tag, ThumbsDown, ThumbsUp, TrainFront, TramFront, Trash2, TriangleAlert } from "lucide-react";
+import Commute from "../Commute";
 import ConfirmButton from "../ConfirmButton";
 import { OutcomeForm, outcomeStatus, statusOutOfStep } from "../Outcome";
 
@@ -123,7 +124,7 @@ export default function PropertyDetail() {
 const oldestFirst = (c: Campaign | null) => [...(c?.price_guides ?? [])].sort((a, b) => a.observed_at.localeCompare(b.observed_at));
 
 // ─── listing head ─────────────────────────────────────────────────────
-const isPhoto = (a: Detail["attachments"][number]) => !!a.sha256 && !!a.mime_type?.startsWith("image/");
+const isPhoto = (a: Detail["attachments"][number]) => a.kind === "photo" && !!a.sha256 && !!a.mime_type?.startsWith("image/");
 
 /** The newest photo and a map of the spot side by side (phones show the photo), else whichever exists,
  *  else a prompt to set the pin or fetch the listing's photo. */
@@ -339,10 +340,16 @@ function AtAGlance({ p, c, setTab }: { p: Detail; c: Campaign | null; setTab: (t
     {station.drive_s != null && <><span className={`tone-${minutesTone(station.drive_s / 60, "drive")}`}>{minutes(station.drive_s)}</span> drive</>}
     {" "}to {station.name} station</> });
   for (const d of p.travel.destinations.slice(0, 3)) {
-    if (d.drive_s != null) items.push({ icon: <Car />, tab: "location", text: <><span className={`tone-${minutesTone(d.drive_s / 60, "drive")}`}>{minutes(d.drive_s)}</span> drive to {d.name}</> });
+    const drive = d.drive_peak_s ?? d.drive_s;
+    if (drive != null) items.push({ icon: <Car />, tab: "location", text: <><span className={`tone-${minutesTone(drive / 60, "drive")}`}>{minutes(drive)}</span> drive to {d.name}{d.drive_peak_s != null && <span className="muted"> in peak hour</span>}</> });
     if (d.transit?.duration_s != null) items.push({ icon: <TramFront />, tab: "location", text: <><span className={`tone-${minutesTone(d.transit.duration_s / 60, "transit")}`}>{minutes(d.transit.duration_s)}</span> public transport to {d.name}</> });
   }
-  for (const sch of schools) items.push({ icon: <School />, tab: "location", text: <>{sch.label} <span className="muted">zone</span></> });
+  for (const sch of schools) {
+    const way = p.travel.schools?.find((s) => s.name.toLowerCase() === String(sch.label).toLowerCase());
+    items.push({ icon: <School />, tab: "location", text: <>{sch.label} <span className="muted">zone</span>
+      {way?.walk_s != null && way.walk_s <= 45 * 60 && <> · <span className={`tone-${minutesTone(way.walk_s / 60)}`}>{minutes(way.walk_s)}</span> walk</>}
+      {way?.drive_s != null && (way.walk_s == null || way.walk_s > 35 * 60) && <> · {minutes(way.drive_s)} drive</>}</> });
+  }
   for (const f of flags) items.push({ icon: <TriangleAlert />, tab: "location", text: <span className={f.effect === "hard_exclude" ? "tone-bad" : "tone-warn"}>{f.label}</span> });
   if (guide && median) {
     const pct = ((guide.low_aud + guide.high_aud) / 2 / median - 1) * 100;
@@ -421,7 +428,7 @@ function PriceFacts({ p, c }: { p: Detail; c: Campaign }) {
   if (median) facts.push({ text: <>{Math.abs(Math.round((mid(now) / median - 1) * 100))}% {mid(now) >= median ? "above" : "below"} the suburb median ({money(median)})</> });
   if (p.land_m2) facts.push({ text: <>${Math.round(mid(now) / p.land_m2).toLocaleString()} per m² of land</> });
   if (walkAway) facts.push({ tone: walkAway.amount_aud >= now.high_aud ? "good" : "bad",
-    text: <>Our walk-away {money(walkAway.amount_aud)} is {money(Math.abs(walkAway.amount_aud - now.high_aud))} {walkAway.amount_aud >= now.high_aud ? "above" : "below"} the top of the guide</> });
+    text: <>Our max {money(walkAway.amount_aud)} is {money(Math.abs(walkAway.amount_aud - now.high_aud))} {walkAway.amount_aud >= now.high_aud ? "above" : "below"} the top of the guide</> });
   if (!facts.length) return null;
   return <ul className="price-facts">{facts.map((f, i) => <li key={i} className={f.tone ? `tone-${f.tone}` : ""}>{f.text}</li>)}</ul>;
 }
@@ -606,7 +613,6 @@ function StatusCard({ p, bare = false }: { p: Detail; bare?: boolean }) {
 // ─── location & travel (milestone 2) ──────────────────────────────────
 function WhereAndGettingAround({ p }: { p: Detail }) {
   const write = useWrite(p.id);
-  const { byId } = usePeople();
   const t = p.travel;
   let where: string;
   if (p.lat == null) where = p.geocode_status === "no_match" ? "Couldn't find this address automatically. Set the pin yourself." : "Finding it on the map…";
@@ -625,48 +631,7 @@ function WhereAndGettingAround({ p }: { p: Detail }) {
       </div>
       {p.lat != null && (
         <>
-          {(t.nearest || t.stations.length > 0 || t.destinations.length > 0) && (
-            <table className="travel">
-              <thead><tr><th>To</th><th>Walk</th><th>Drive</th><th>Transit</th><th>Distance</th></tr></thead>
-              <tbody>
-                {t.nearest && (
-                  <tr>
-                    <th><TrainFront /> <strong>{t.nearest.name}</strong><span className="muted small"> nearest station</span></th>
-                    <td className={`tone-${minutesTone(t.nearest.walk_s == null ? null : t.nearest.walk_s / 60)}`}>{t.nearest.walk_s == null ? "—" : minutes(t.nearest.walk_s)}</td>
-                    <td className={`tone-${minutesTone(t.nearest.drive_s == null ? null : t.nearest.drive_s / 60, "drive")}`}>{t.nearest.drive_s == null ? "—" : minutes(t.nearest.drive_s)}</td>
-                    <td className="muted">—</td>
-                    <td>{km(t.nearest.drive_m ?? t.nearest.walk_m)}</td>
-                  </tr>
-                )}
-                {t.stations.filter((s) => s.name !== t.nearest?.name).map((s) => (
-                  <tr key={s.place_id}>
-                    <th><TrainFront /> {s.name}<span className="muted small"> your station</span></th>
-                    <td className={`tone-${minutesTone(s.duration_s / 60)}`}>{minutes(s.duration_s)}</td><td className="muted">—</td><td className="muted">—</td><td>{km(s.distance_m)}</td>
-                  </tr>
-                ))}
-                {t.destinations.map((d) => (
-                  <tr key={d.place_id}>
-                    <th><MapPin /> {d.name}{d.person_id && <span className="muted small"> ({byId.get(d.person_id)?.display_name}'s)</span>}</th>
-                    <td className={`tone-${minutesTone(d.walk_s == null ? null : d.walk_s / 60)}`}
-                      title={d.walk_s == null && (d.drive_m ?? 0) > 25_000 ? "Too far to walk" : undefined}>{d.walk_s == null ? "—" : minutes(d.walk_s)}</td>
-                    <td className={`tone-${minutesTone(d.drive_s == null ? null : d.drive_s / 60, "drive")}`}>{d.drive_s == null ? "—" : minutes(d.drive_s)}</td>
-                    <td className={`tone-${minutesTone(d.transit?.duration_s == null ? null : d.transit.duration_s / 60, "transit")}`}>
-                      {d.transit?.duration_s == null ? "—" : minutes(d.transit.duration_s)}</td>
-                    <td>{d.drive_m == null ? "—" : km(d.drive_m)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          {t.destinations.filter((d) => d.transit?.duration_s != null).map((d) => <Journey key={d.place_id} to={d.name} j={d.transit!} />)}
-          {t.destinations.filter((d) => d.transit && d.transit.duration_s == null).map((d) => (
-            <div key={d.place_id} className="small muted">No public transport journey to {d.name} arriving between 6 and 9am on a weekday was found.</div>
-          ))}
-          {t.destinations.length > 0 && (
-            <div className="small muted">Drive times assume no traffic. Public transport: the journey arriving by 9am on a weekday,
-              from <a href="https://transitous.org" target="_blank" rel="noreferrer">Transitous</a> using PTV and V/Line timetables. Check it before relying on it.</div>
-          )}
-          {t.pending > 0 && <div className="small muted">Working out travel times…</div>}
+          {(t.nearest || t.stations.length > 0 || t.destinations.length > 0 || t.pending > 0) && <Commute travel={t} />}
           {!t.nearest && t.stations.length === 0 && t.destinations.length === 0 && t.pending === 0 && (
             <div className="small muted">No stations or places chosen yet. <Link to="/places">Choose some</Link></div>
           )}
@@ -866,12 +831,12 @@ function SaleTab({ p, c, showChart }: { p: Detail; c: Campaign; showChart: boole
             <h2>Our numbers</h2>
             <p className="small muted" style={{ marginTop: 0 }}>Shared between you both. Each change is kept.</p>
             <div className="numbers">
-              {(["estimated_reserve", "expected_sale", "walk_away"] as const).map((k) => {
+              {(["expected_sale", "walk_away"] as const).map((k) => {
                 const j = latest(k), all = c.judgements.filter((x) => x.kind === k);
                 return (
                   <div key={k} className="number-tile">
                     <div className="muted small">{LABEL.judgement[k]}</div>
-                    <div className="stat-value">{j ? money(j.amount_aud) : "—"}</div>
+                    <SetJudgement propertyId={p.id} campaignId={c.id} kind={k} current={j?.amount_aud ?? null} />
                     {j && <div className="muted tiny">{byId.get(j.created_by)?.display_name}, {day(j.created_at)}</div>}
                     {all.length > 1 && (
                       <details><summary className="tiny">{all.length - 1} earlier</summary>
@@ -882,7 +847,6 @@ function SaleTab({ p, c, showChart }: { p: Detail; c: Campaign; showChart: boole
                 );
               })}
             </div>
-            <AddJudgement propertyId={p.id} campaignId={c.id} />
             <CostAt campaign={c} />
           </div>
       <div className="tab-grid">
@@ -1053,21 +1017,24 @@ function AddGuide({ propertyId, campaignId }: { propertyId: string; campaignId: 
   );
 }
 
-function AddJudgement({ propertyId, campaignId }: { propertyId: string; campaignId: string }) {
+/** One of our figures, shown large and changed in place: click it, type ("1.15m"), Enter. */
+function SetJudgement({ propertyId, campaignId, kind, current }: { propertyId: string; campaignId: string; kind: JudgementKind; current: number | null }) {
   const write = useWrite(propertyId);
-  const [kind, setKind] = useState<JudgementKind>("estimated_reserve");
-  const [amount, setAmount] = useState("");
-  const aud = parseMoney(amount);
+  const [amount, setAmount] = useState<string | null>(null);
+  const aud = amount == null ? null : parseMoney(amount);
+  const save = () => {
+    if (aud == null || aud === current) { setAmount(null); return; }
+    write.mutate({ path: `/api/campaigns/${campaignId}/price-judgements`, body: { kind, amount_aud: aud } }, { onSuccess: () => setAmount(null) });
+  };
+  if (amount == null) return (
+    <button className="stat-value number-set" title="Change it" onClick={() => setAmount(current ? String(current) : "")}>
+      {current ? money(current) : <span className="muted small">Set it</span>}</button>
+  );
   return (
-    <div className="row" style={{ marginTop: 6 }}>
-      <select className="grow" value={kind} onChange={(e) => setKind(e.target.value as JudgementKind)}>
-        {(Object.keys(LABEL.judgement) as JudgementKind[]).map((k) => <option key={k} value={k}>{LABEL.judgement[k]}</option>)}
-      </select>
-      <input style={{ width: 120 }} placeholder="1.15m" value={amount} onChange={(e) => setAmount(e.target.value)} />
-      <button disabled={aud == null || write.isPending}
-        onClick={() => write.mutate({ path: `/api/campaigns/${campaignId}/price-judgements`, body: { kind, amount_aud: aud } }, { onSuccess: () => setAmount("") })}>
-        Set
-      </button>
+    <div className="row" style={{ gap: 4 }}>
+      <input autoFocus className="grow" style={{ minWidth: 0 }} placeholder="1.15m" value={amount} onChange={(e) => setAmount(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setAmount(null); }} />
+      <button className="primary" disabled={aud == null || write.isPending} onClick={save}>Save</button>
     </div>
   );
 }
@@ -1116,25 +1083,5 @@ function RecordOutcome({ propertyId, c }: { propertyId: string; c: Campaign }) {
   );
 }
 
-const clock = new Intl.DateTimeFormat("en-AU", { hour: "numeric", minute: "2-digit" });
-const weekday = new Intl.DateTimeFormat("en-AU", { weekday: "long" });
 
 /** A public transport journey, leg by leg: "Leave 8:26 am · walk 3 min → Lilydale train 20 min → … · arrive 8:51 am". */
-function Journey({ to, j }: { to: string; j: import("../api").Transit }) {
-  const late = j.arrive_at && new Date(j.arrive_at).getTime() > new Date(j.arrive_by).getTime();
-  return (
-    <div className="journey small">
-      <div><strong>By public transport to {to}</strong> <span className="muted">· {weekday.format(new Date(j.arrive_by))}, to be there by 9am</span></div>
-      <div className="journey-legs">
-        {j.depart_at && <span className="journey-time">Leave {clock.format(new Date(j.depart_at))}</span>}
-        {j.legs.map((l, i) => (
-          <span key={i} className={`journey-leg ${l.mode === "walk" ? "walk" : ""}`}>
-            {l.mode === "walk" ? `Walk ${l.minutes} min` : `${l.name ? `${l.name} ` : ""}${l.mode} ${l.minutes} min`}
-            {l.mode !== "walk" && l.to && <span className="muted"> to {l.to}</span>}
-          </span>
-        ))}
-        {j.arrive_at && <span className={`journey-time ${late ? "tone-bad" : ""}`}>Arrive {clock.format(new Date(j.arrive_at))}{late ? " (after 9)" : ""}</span>}
-      </div>
-    </div>
-  );
-}

@@ -169,6 +169,9 @@ class FakeValhalla:
             out.append(Route(round(metres), round(metres / speed)))
         return out
 
+    def drive_peak(self, origin, target):
+        return round(self.matrix(origin, [target], "drive")[0].duration_s * 1.5)
+
 
 def test_stations_places_and_travel(client, people, database_url):
     a = people["a"]
@@ -188,8 +191,12 @@ def test_stations_places_and_travel(client, people, database_url):
     client.put(f"/api/properties/{pid}/location", headers=as_(a), json={"lon": 145.1220, "lat": -37.8200})
     initially_pending = client.get(f"/api/properties/{pid}").json()["travel"]["pending"]
     assert initially_pending >= 5  # 3 stations walk, work walk + drive (plus places from other tests)
-    from app.worker import route_station_access
-    while route_stale(FakeValhalla()) + route_station_access(FakeValhalla()):
+    from app.worker import route_peak, route_station_access, route_transit
+
+    class NoJourney:  # public transport isn't under test here
+        def plan(self, *args, **kwargs):
+            return None
+    while route_stale(FakeValhalla()) + route_station_access(FakeValhalla()) + route_transit(NoJourney()) + route_peak(FakeValhalla()):
         pass
 
     travel = client.get(f"/api/properties/{pid}").json()["travel"]
@@ -344,8 +351,11 @@ def test_worker_plans_public_transport_to_destinations(client, people):
     class FakeTransitous:
         calls = 0
 
-        def plan(self, origin, target, arrive_by):
+        def plan(self, origin, target, arrive_by=None, depart_at=None):
             FakeTransitous.calls += 1
+            if depart_at:  # the trip home
+                return {"depart_at": "2026-09-29T07:05:00Z", "arrive_at": "2026-09-29T07:40:00Z", "duration_s": 2100, "transfers": 0,
+                        "legs": [{"mode": "train", "name": "Lilydale", "minutes": 30, "from": "Flinders Street", "to": "Box Hill"}]}
             return {"depart_at": "2026-09-28T22:26:00Z", "arrive_at": "2026-09-28T22:51:00Z", "duration_s": 1500, "transfers": 1,
                     "legs": [{"mode": "walk", "name": None, "minutes": 3, "from": None, "to": "Box Hill"},
                              {"mode": "train", "name": "Lilydale", "minutes": 20, "from": "Box Hill", "to": "Flinders Street"}]}
@@ -358,8 +368,9 @@ def test_worker_plans_public_transport_to_destinations(client, people):
         pass
     [dest] = [d for d in client.get(f"/api/properties/{pid}").json()["travel"]["destinations"] if d["place_id"] == office]
     assert dest["transit"]["duration_s"] == 1500 and dest["transit"]["legs"][1]["name"] == "Lilydale"
+    assert dest["transit"]["home"]["duration_s"] == 2100  # and home again, leaving at 5pm
     row = next(r for r in client.get("/api/overview").json()["rows"] if r["id"] == pid)
-    assert row[f"transit:{office}"] == 25
+    assert row[f"transit:{office}"] == 25 and row[f"transit_home:{office}"] == 35
     before = FakeTransitous.calls
     route_transit(fake)
     assert FakeTransitous.calls == before  # stored: not asked again until it's a fortnight old or a pin moves
@@ -395,3 +406,107 @@ def transit_queue_for(place_id):
     from app.db import tx
     with tx() as conn:
         return conn.execute("SELECT count(*) AS n FROM transit_estimate_stale WHERE place_id = %s", (place_id,)).fetchone()["n"]
+
+
+def test_moving_a_pin_recalculates_and_says_so(client, people, database_url):
+    """Travel times belong to the pin they were worked out from: moving it makes them pending (so screens keep
+    checking) until the worker has routed the new spot, then the new times show."""
+    from app.worker import route_station_access
+    a = people["a"]
+    load_stations([{"osm_id": 201, "name": "Here", "geometry": {"type": "Point", "coordinates": [145.00, -37.80]}},
+                   {"osm_id": 202, "name": "There", "geometry": {"type": "Point", "coordinates": [145.20, -37.80]}}], database_url)
+    pid = add(client, a, street_number="23", street="Moving St")
+    client.put(f"/api/properties/{pid}/location", headers=as_(a), json={"lon": 145.001, "lat": -37.80})
+    while route_stale(FakeValhalla()) + route_station_access(FakeValhalla()):
+        pass
+    assert client.get(f"/api/properties/{pid}").json()["travel"]["nearest"]["name"] == "Here"
+
+    client.put(f"/api/properties/{pid}/location", headers=as_(a), json={"lon": 145.199, "lat": -37.80})
+    assert client.get("/api/overview").json()["pending"] > 0 and client.get("/api/map", headers=as_(a)).json()["pending"] > 0
+    travel = client.get(f"/api/properties/{pid}").json()["travel"]
+    assert travel["pending"] > 0 and travel["nearest"] is None  # the old times aren't shown for the new spot
+    while route_stale(FakeValhalla()) + route_station_access(FakeValhalla()):
+        pass
+    travel = client.get(f"/api/properties/{pid}").json()["travel"]
+    assert travel["nearest"]["name"] == "There"
+
+
+def test_peak_hour_weights_big_roads_more():
+    from app.geo_services import peak_factor
+    freeway = [{"road_class": "motorway", "length": 10, "speed": 100}]
+    streets = [{"road_class": "residential", "length": 1, "speed": 40}]
+    assert peak_factor(freeway) == 1.8 and peak_factor(streets) == 1.05
+    mixed = peak_factor(freeway + streets)  # mostly freeway by time, so close to its factor
+    assert 1.05 < mixed < 1.8 and mixed > 1.6
+    assert peak_factor([]) == 1.0
+
+
+def test_trip_home_leaves_at_or_after_five():
+    from datetime import datetime, timezone
+    from app.geo_services import pick_departure
+    five = datetime(2026, 9, 29, 7, 0, tzinfo=timezone.utc)  # 5pm in Melbourne
+    its = [{"startTime": "2026-09-29T06:50:00Z", "endTime": "2026-09-29T07:30:00Z", "duration": 2400},  # before 5: no
+           {"startTime": "2026-09-29T07:05:00Z", "endTime": "2026-09-29T07:50:00Z", "duration": 2700},
+           {"startTime": "2026-09-29T07:10:00Z", "endTime": "2026-09-29T07:40:00Z", "duration": 1800}]
+    assert pick_departure(its, five) is its[2]  # home first
+    assert pick_departure(its[:1], five) is None
+
+
+def test_public_transport_prefers_no_bus():
+    """Without buses (walking up to 30 minutes at either end) unless a bus lets you leave more than 20 minutes later
+    and still be there by 9."""
+    from app.geo_services import Transitous
+
+    class Planner(Transitous):
+        def __init__(self, train_leaves, bus_leaves):
+            self.train_leaves, self.bus_leaves = train_leaves, bus_leaves
+
+        def _plan(self, origin, target, arrive_by, depart_at, no_bus):
+            leaves = self.train_leaves if no_bus else self.bus_leaves
+            return None if leaves is None else {"depart_at": f"2026-09-28T{leaves}:00Z", "arrive_at": "2026-09-28T22:55:00Z",
+                                                "legs": [{"mode": "train" if no_bus else "bus"}]}
+    pick = lambda train, bus: Planner(train, bus).plan((0, 0), (1, 1), arrive_by=object())["legs"][0]["mode"]
+    assert pick("21:50", "21:40") == "train"  # the train lets you leave later anyway
+    assert pick("21:40", "21:55") == "train"  # the bus only buys 15 minutes: walk to the station
+    assert pick("21:10", "21:50") == "bus"    # 40 minutes more in bed: take the bus
+    assert pick(None, "21:50") == "bus"       # no way without one
+
+def test_short_rides_are_walked_instead():
+    """A journey with a two-minute tram loses to one that walks that bit, if it still makes 9am."""
+    from datetime import datetime, timezone
+    from app.geo_services import pick_journey
+    nine = datetime(2026, 9, 28, 23, 0, tzinfo=timezone.utc)
+    tram = {"startTime": "2026-09-28T21:54:00Z", "endTime": "2026-09-28T22:56:00Z", "duration": 3720,
+            "legs": [{"mode": "WALK", "duration": 1260}, {"mode": "SUBWAY", "duration": 1680}, {"mode": "TRAM", "duration": 120},
+                     {"mode": "WALK", "duration": 540}]}
+    walk = {"startTime": "2026-09-28T21:54:00Z", "endTime": "2026-09-28T22:59:00Z", "duration": 3900,
+            "legs": [{"mode": "WALK", "duration": 1260}, {"mode": "SUBWAY", "duration": 1680}, {"mode": "WALK", "duration": 960}]}
+    assert pick_journey([tram, walk], arrive_by=nine) is walk
+    assert pick_journey([tram], arrive_by=nine) is tram  # nothing better: the short ride stands
+
+
+def test_a_short_walkable_ride_at_the_end_is_walked():
+    """Home from work: a two-minute bus for the last 600 m becomes a walk, starting when the train gets in."""
+    from datetime import datetime, timezone
+    from app.geo_services import pick_journey
+    five = datetime(2026, 9, 29, 7, 0, tzinfo=timezone.utc)
+    stop, near_home, home = {"lon": 145.0700, "lat": -37.7300}, {"lon": 145.0760, "lat": -37.7320}, {"lon": 145.0770, "lat": -37.7340}
+    it = {"startTime": "2026-09-29T07:05:00Z", "endTime": "2026-09-29T07:58:00Z", "duration": 3180, "transfers": 1, "legs": [
+        {"mode": "SUBWAY", "duration": 1800, "startTime": "2026-09-29T07:05:00Z", "endTime": "2026-09-29T07:35:00Z",
+         "from": {"lon": 144.97, "lat": -37.81}, "to": stop},
+        {"mode": "WALK", "duration": 120, "startTime": "2026-09-29T07:35:00Z", "endTime": "2026-09-29T07:37:00Z", "from": stop, "to": stop},
+        {"mode": "BUS", "duration": 120, "startTime": "2026-09-29T07:45:00Z", "endTime": "2026-09-29T07:47:00Z", "from": stop, "to": near_home},
+        {"mode": "WALK", "duration": 660, "startTime": "2026-09-29T07:47:00Z", "endTime": "2026-09-29T07:58:00Z", "from": near_home, "to": home}]}
+    got = pick_journey([it], depart_at=five)
+    assert [leg["mode"] for leg in got["legs"]] == ["SUBWAY", "WALK"]
+    assert got["legs"][1]["startTime"] == "2026-09-29T07:35:00Z" and got["transfers"] == 0
+    assert got["endTime"] < "2026-09-29T07:58:00Z"  # and home sooner than waiting for the bus
+
+
+def test_nothing_leaving_before_six_is_a_commute():
+    from datetime import datetime, timezone
+    from app.geo_services import pick_journey
+    nine = datetime(2026, 9, 28, 23, 0, tzinfo=timezone.utc)
+    dawn = {"startTime": "2026-09-28T16:00:00Z", "endTime": "2026-09-28T22:57:00Z", "duration": 25020,
+            "legs": [{"mode": "REGIONAL_RAIL", "duration": 3900}]}
+    assert pick_journey([dawn], arrive_by=nine) is None

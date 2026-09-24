@@ -70,7 +70,8 @@ def test_anything_else_is_refused():
         statement.read_text("Contract of Sale of Real Estate")
 
 
-def test_worker_reads_linked_statements_once(client, people, monkeypatch):
+def test_worker_reads_linked_statements_once(client, people, monkeypatch, tmp_path):
+    monkeypatch.setenv("BLOB_DIR", str(tmp_path))  # the kept copy is stored here
     from app import worker
     a = people["a"]
     pid = client.post("/api/properties", headers=as_(a), json={
@@ -111,7 +112,8 @@ def test_worker_reads_linked_statements_once(client, people, monkeypatch):
     assert len(client.get(f"/api/campaigns/{campaign['id']}/comparables").json()["entered"]) == 3
 
 
-def test_a_statement_that_cannot_be_read_is_recorded(client, people, monkeypatch):
+def test_a_statement_that_cannot_be_read_is_recorded(client, people, monkeypatch, tmp_path):
+    monkeypatch.setenv("BLOB_DIR", str(tmp_path))
     from fastapi import HTTPException
     from app import worker
     a = people["a"]

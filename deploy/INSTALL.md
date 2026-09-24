@@ -1,49 +1,43 @@
-# Installing House Track from a release bundle
+# Installing House Track on the server
 
-A release bundle is a folder with everything the server needs. Nothing is downloaded from a registry.
-
-```
-housetrack-<version>/
-  housetrack-<version>-images.tar.gz   the app images: api, web and setup
-  compose.yaml                         the stack
-  deploy/serve.json                    Tailscale's HTTPS settings
-  .env.example                         settings to copy to .env
-  INSTALL.md                           this file
-```
-
-The database, Tailscale, rclone and (optionally) Valhalla images are public. The server pulls them itself the first time.
+The code lives in a private GitHub repo, [timm052/house-track](https://github.com/timm052/house-track). Tagging a version there (`git tag v0.3.2 && git push --tags`) builds the app images and publishes them to GitHub's container registry, `ghcr.io/timm052/housetrack-{api,web,setup}`. The server pulls them from there. `deploy/update.sh` does the pulling, both for the first install and for every update after it.
 
 ## What you need
 
-- An x86-64 server with Docker and Docker Compose v2. On Unraid, install the **Docker Compose Manager** plugin from Community Applications, which provides `docker compose`.
+- An x86-64 server with Docker and Docker Compose v2. On Unraid, install the **Docker Compose Manager** plugin from Community Applications; it provides `docker compose`.
 - A Tailscale account (free). In the admin console:
   - turn on **MagicDNS** and **HTTPS certificates**;
   - create a **reusable auth key**.
+- A GitHub token so the server can read the private repo and its images. On GitHub:
+  1. Go to **Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token**.
+  2. Tick the scopes **`repo`** and **`read:packages`**.
+  3. Set an expiry, e.g. a year.
 - About 4 GB of disk for the data after setup, on a fast disk. On Unraid, use the cache pool.
 
 ## First install
 
-The commands below are for the Unraid terminal (or SSH). Adjust the paths for another server.
+The commands are for the Unraid terminal (or SSH).
 
-1. **Copy the bundle to the server**, for example to `/mnt/user/appdata/housetrack-stack/`. Using the SMB share `\\tower\appdata` from Windows is fine.
-
-2. **Load the images:**
+1. **Make the stack folder and save the token:**
 
    ```bash
-   cd /mnt/user/appdata/housetrack-stack
-   docker load -i housetrack-0.3.0-images.tar.gz
+   mkdir -p /mnt/user/appdata/housetrack-stack && cd /mnt/user/appdata/housetrack-stack
+   nano .github-token          # paste the token, save
+   chmod 600 .github-token
    ```
 
-   It prints three `Loaded image: ghcr.io/housetrack/housetrack-…:0.3.0` lines.
-
-3. **Create the settings file:**
+2. **Fetch the installer and run it:**
 
    ```bash
-   cp .env.example .env
-   nano .env
+   curl -fsSL -H "Authorization: token $(cat .github-token)" \
+     https://raw.githubusercontent.com/timm052/house-track/v0.3.1/deploy/update.sh -o update.sh
+   chmod +x update.sh
+   ./update.sh 0.3.1
    ```
 
-   Set these:
+   The first run fetches the stack files, creates `.env` and stops.
+
+3. **Fill in `.env`** with `nano .env`:
 
    | Setting | Value |
    |---|---|
@@ -52,17 +46,16 @@ The commands below are for the Unraid terminal (or SSH). Adjust the paths for an
    | `DB_PASSWORD` | a long random password (only used inside the stack) |
    | `TS_AUTHKEY` | the reusable key from Tailscale |
    | `TS_HOSTNAME` | the app's name on your tailnet, e.g. `house` |
-   | `VERSION` | `0.3.0` (remove the `#` in front of it) |
 
-   Leave `IMAGE_OWNER` commented out. The images are named `ghcr.io/housetrack/...`.
+   `update.sh` adds `VERSION` and `IMAGE_OWNER` itself.
 
-4. **Start it.** `--no-build` uses the loaded images:
+4. **Start it:**
 
    ```bash
-   docker compose up -d --no-build
+   ./update.sh 0.3.1
    ```
 
-   The API creates the database tables on first start. Check with `docker compose ps`: `db`, `api`, `web` and `tailscale` should all be running.
+   It signs in to GitHub's registry, pulls the images and starts the stack. The API creates the database tables on first start. Check with `docker compose ps`: `db`, `api`, `web` and `tailscale` should all be running.
 
 5. **Load the region data** once. This fetches Victoria's addresses (G-NAF, a 1.9 GB download, about 15 minutes), the train stations, and the school zones and locations:
 
@@ -80,36 +73,28 @@ The commands below are for the Unraid terminal (or SSH). Adjust the paths for an
 
    The backup writes a database dump (kept 60 days) and a copy of the photos to `BACKUP_DIR`. For an off-site copy as well, see "Backups" in the README.
 
-## Upgrading to a new bundle
+## Updating
 
-1. Take a backup first:
+When a new version is tagged on GitHub and its build has finished (green under the repo's **Actions** tab), run:
 
-   ```bash
-   docker compose --profile ops run --rm backup
-   ```
+```bash
+cd /mnt/user/appdata/housetrack-stack && ./update.sh 0.3.2
+```
 
-2. Copy the new bundle's files over the old ones. Keep your `.env`.
-3. Load the images and set the new version:
+The script does the whole update:
+1. takes a backup;
+2. fetches that version's stack files;
+3. pulls its images and restarts.
 
-   ```bash
-   docker load -i housetrack-<version>-images.tar.gz
-   ```
+Database changes apply automatically when the API starts. A `pre-migrate-*.dump` is written to `BACKUP_DIR/db` first. Then follow any extra step in the release notes below.
 
-   Then change `VERSION=` in `.env` to the new version.
-4. Restart:
-
-   ```bash
-   docker compose up -d --no-build
-   ```
-
-   Database changes apply automatically when the API starts. A `pre-migrate-*.dump` is written to `BACKUP_DIR/db` first.
-5. Follow any extra step in the release notes below.
+If the token expires, make a new one and replace `.github-token`.
 
 ## Release notes
 
-### 0.3.0
+### 0.3.1
 
-- **Extra step when upgrading:** load the school locations, which give travel times to the zoned schools:
+- **Extra step when upgrading an existing install:** load the school locations, which give travel times to the zoned schools:
 
   ```bash
   docker compose --profile setup run --rm setup schools
@@ -121,6 +106,24 @@ The commands below are for the Unraid terminal (or SSH). Adjust the paths for an
   - public transport arrives by 9 and leaves at 5, with a time on each leg;
   - times to the zoned schools are included.
 - The map has a house side panel. Capture keeps photos in listing order and floor plans separately. The weekly refresh can fill in missing details. There's a light/dark switch.
+
+## Without GitHub access
+
+A release bundle (`release/housetrack-<version>.tar.gz`, built on a dev machine with `docker save`) works too:
+
+1. Copy it to the server and unpack it.
+2. Load the images:
+
+   ```bash
+   docker load -i housetrack-<version>-images.tar.gz
+   ```
+
+3. Set `VERSION=<version>` in `.env` and leave `IMAGE_OWNER` unset.
+4. Start it:
+
+   ```bash
+   docker compose up -d --no-build
+   ```
 
 ## Useful commands
 

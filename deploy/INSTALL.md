@@ -97,6 +97,10 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.3.4
+
+- Fix: a database password with characters such as `#`, `%`, `@` or `/` stopped the API from starting. Any characters work now.
+
 ### 0.3.3
 
 - Set up with Unraid's Compose Manager: the stack's compose file is now `docker-compose.yml`, with no build sections. If you installed 0.3.2 from the command line, `update.sh` replaces `compose.yaml` with it.

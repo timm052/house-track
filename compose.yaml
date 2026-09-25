@@ -2,6 +2,7 @@
 # First run and quarterly refresh of region data: docker compose --profile setup run --rm setup
 name: housetrack
 
+# The password travels only as PGPASSWORD (read by libpq), never inside a URL, so any characters work in it.
 x-pg-env: &pg-env
   PGHOST: db
   PGUSER: house
@@ -34,8 +35,8 @@ services:
       db: { condition: service_healthy }
     environment:
       <<: *pg-env
-      DATABASE_URL: postgresql://house:${DB_PASSWORD}@db:5432/house
-      GNAF_DATABASE_URL: postgresql://house:${DB_PASSWORD}@db:5432/gnaf
+      DATABASE_URL: postgresql://house@db:5432/house
+      GNAF_DATABASE_URL: postgresql://house@db:5432/gnaf
       # Walking/driving times: the free public FOSSGIS server by default. For a local engine, run
       # `setup osm`, start the local-routing profile and set VALHALLA_URL=http://valhalla:8002.
       VALHALLA_URL: ${VALHALLA_URL:-https://valhalla1.openstreetmap.de}
@@ -96,7 +97,7 @@ services:
       db: { condition: service_healthy }
     environment:
       <<: *pg-env
-      DATABASE_URL: postgresql://house:${DB_PASSWORD}@db:5432/house
+      DATABASE_URL: postgresql://house@db:5432/house
       REGION: ${REGION:-vic}
       BBOX: ${BBOX:-}
       DOWNLOAD_DIR: /downloads

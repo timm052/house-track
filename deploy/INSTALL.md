@@ -97,6 +97,10 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.3.6
+
+- Fix: loading the region data with no steps named (`docker compose --profile setup run --rm setup`, as the region-data job does) stopped with "invalid choice: ['all']".
+
 ### 0.3.5
 
 - Add houses from a phone's Share menu: on Android once House Track is installed to the home screen, or on iPhone through a shortcut. Setup steps are in the app under **Settings → Adding houses from your phone**.

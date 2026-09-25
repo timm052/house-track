@@ -31,9 +31,10 @@ def ensure_database(database_url: str, name: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("steps", nargs="*", default=["all"], choices=("all", *STEPS))
+    # No default on the argument itself: newer Pythons check a list default against the choices as one value.
+    parser.add_argument("steps", nargs="*", choices=("all", *STEPS), help="default: all")
     args = parser.parse_args()
-    steps = DEFAULT_STEPS if "all" in args.steps else set(args.steps)
+    steps = DEFAULT_STEPS if not args.steps or "all" in args.steps else set(args.steps)
 
     region = regions.get(os.environ.get("REGION", "vic"))
     bbox = regions.parse_bbox(os.environ.get("BBOX"), region)

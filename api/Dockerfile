@@ -34,6 +34,9 @@ RUN apt-get update \
  && pmtiles version
 # The stack's own files (compose file, settings template, install and update scripts): the server's updater reads
 # them from this image, so the server needs no access to the code, only to the images.
+# The server's compose file is docker-compose.yml (Unraid's Compose Manager only looks for *compose*.yml) and has no
+# build sections: the server has no source to build from, and the plugin's Update button runs `up --build`.
 COPY --from=stack compose.yaml .env.example /stack/
 COPY --from=stack deploy/ /stack/deploy/
+RUN sed '/^    build:/d' /stack/compose.yaml > /stack/docker-compose.yml && rm /stack/compose.yaml  && ! grep -q '^    build:' /stack/docker-compose.yml
 CMD ["python", "-m", "app.setup"]

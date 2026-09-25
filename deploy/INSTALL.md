@@ -1,14 +1,14 @@
 # Installing House Track on the server
 
-The code lives in a private GitHub repo, [timm052/house-track](https://github.com/timm052/house-track). Tagging a version there (`git tag v0.3.3 && git push --tags`) builds the app images and publishes them to GitHub's container registry, `ghcr.io/timm052/housetrack-{api,web,setup}`. The server pulls them from there, using `update.sh`:
-- it installs the first time and updates after that;
-- it can run nightly to keep the app up to date on its own.
+The code lives in a private GitHub repo, [timm052/house-track](https://github.com/timm052/house-track). Tagging a version there (`git tag v0.3.4 && git push --tags`) builds the app images and publishes them to GitHub's container registry, `ghcr.io/timm052/housetrack-{api,web,setup}`. The server pulls them from there. The server never needs the code: the stack's files (`docker-compose.yml`, `.env.example` and the scripts in `deploy/`) travel inside the setup image.
 
-The server never needs the code. The stack's files (`compose.yaml`, `.env.example` and the scripts in `deploy/`) travel inside the setup image.
+On Unraid, most of the running is done from the GUI:
+- **Docker Compose Manager** runs the stack. It has start and stop, logs, settings (the `.env` file) and autostart, and the containers also show on the Docker tab.
+- **User Scripts** runs the jobs: the region data, the backup, and the updates to new versions.
 
 ## What you need
 
-- An x86-64 server with Docker and Docker Compose v2. On Unraid, install the **Docker Compose Manager** plugin (it provides `docker compose`) and the **User Scripts** plugin, both from Community Applications.
+- Unraid, with two plugins from **Apps**: **Docker Compose Manager** and **User Scripts**.
 - A Tailscale account (free). In the admin console:
   - turn on **MagicDNS** and **HTTPS certificates**;
   - create a **reusable auth key**.
@@ -16,32 +16,29 @@ The server never needs the code. The stack's files (`compose.yaml`, `.env.exampl
   1. Go to **Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token**.
   2. Tick **only `read:packages`**. That scope can pull your images and nothing else: no access to code, no writes.
   3. Set a long expiry, or none.
-- About 4 GB of disk for the data after setup, on a fast disk. On Unraid, use the cache pool.
+- About 4 GB of disk for the data after setup, on a fast disk: use the cache pool.
 
-## First install
+## 1. Fetch the stack (terminal, once)
 
-The commands are for the Unraid terminal (or SSH).
+This part is typed once in the Unraid terminal (the **>_** icon at the top right of the web UI). It saves the token and unpacks the stack's files into a folder.
 
-1. **Make the stack folder and save the token:**
+```bash
+mkdir -p /mnt/user/appdata/housetrack-stack && cd /mnt/user/appdata/housetrack-stack
+nano .github-token          # paste the token, then Ctrl+O, Enter, Ctrl+X
+chmod 600 .github-token
+docker login ghcr.io -u timm052 --password-stdin < .github-token
+docker run --rm --entrypoint cat ghcr.io/timm052/housetrack-setup:latest /stack/deploy/update.sh > update.sh
+chmod +x update.sh && ./update.sh latest
+```
 
-   ```bash
-   mkdir -p /mnt/user/appdata/housetrack-stack && cd /mnt/user/appdata/housetrack-stack
-   nano .github-token          # paste the token, save
-   chmod 600 .github-token
-   ```
+The last command fetches the newest version's files, creates `.env` (with the version already set), and stops there. The folder now holds `docker-compose.yml`, `.env`, `update.sh` and `deploy/`.
 
-2. **Get the updater out of the newest image and run it:**
+## 2. Add the stack in Compose Manager
 
-   ```bash
-   docker login ghcr.io -u timm052 --password-stdin < .github-token
-   docker run --rm --entrypoint cat ghcr.io/timm052/housetrack-setup:latest /stack/deploy/update.sh > update.sh
-   chmod +x update.sh
-   ./update.sh latest
-   ```
-
-   The first run unpacks the stack files, creates `.env` and stops.
-
-3. **Fill in `.env`** with `nano .env`:
+1. Go to **Docker** and scroll to **Compose**. Click **Add New Stack**.
+2. Enter **`housetrack`** as the name. It must be exactly this: it's the stack's name inside the compose file, so the GUI and the scripts manage the same stack.
+3. Open **Advanced** and set the path to `/mnt/user/appdata/housetrack-stack`. Click OK.
+4. Click the stack's **⚙ → Edit Stack → Env File** and fill in:
 
    | Setting | Value |
    |---|---|
@@ -51,60 +48,58 @@ The commands are for the Unraid terminal (or SSH).
    | `TS_AUTHKEY` | the reusable key from Tailscale |
    | `TS_HOSTNAME` | the app's name on your tailnet, e.g. `house` |
 
-   `update.sh` adds `VERSION` and `IMAGE_OWNER` itself.
+   `VERSION` and `IMAGE_OWNER` are already set at the bottom. Leave them. Save. Don't edit the compose file itself: updates replace it.
+5. Click **Compose Up**. The first time, it downloads the images (a few minutes). The API creates the database tables as it starts.
+6. Tick **Autostart**, so the stack starts with the array.
 
-4. **Start it:**
+The stack's containers (`housetrack-db-1`, `-api-1`, `-web-1`, `-tailscale-1`) now also show on the Docker tab. Their logs are under the stack's **⚙ → Logs**.
 
-   ```bash
-   ./update.sh latest
-   ```
+## 3. Add the jobs in User Scripts
 
-   It pulls the images and starts the stack. The API creates the database tables on first start. Check with `docker compose ps`: `db`, `api`, `web` and `tailscale` should all be running.
+Go to **Settings → User Scripts → Add New Script**. Give each a name, then use **⚙ → Edit Script** to paste the commands (keep the `#!/bin/bash` line at the top), and set the schedule in the dropdown. For a set time, choose *Custom* and enter the cron line. Any of them can be run from the GUI at any time with **Run Script**, or **Run in background** for the long one.
 
-5. **Load the region data** once. This fetches Victoria's addresses (G-NAF, a 1.9 GB download, about 15 minutes), the train stations, and the school zones and locations:
-
-   ```bash
-   docker compose --profile setup run --rm setup
-   ```
-
-6. **Open the app** on any device signed in to your tailnet: `https://house.<your-tailnet>.ts.net`, using your `TS_HOSTNAME`. The first visit may take a minute while Tailscale issues the certificate. Name the household's members, then go to **Settings → Choose stations and places**.
-
-7. **Schedule the nightly jobs** (below): the backup, and automatic updates if you want them.
-
-## Nightly jobs (User Scripts plugin)
-
-Go to **Settings → User Scripts → Add New Script**. For each script, paste the commands in with **Edit Script**, then choose a schedule. For a set time, pick *Custom* and enter the cron line.
-
-**Backup**, daily. It writes a database dump (kept 60 days) and a copy of the photos to `BACKUP_DIR`:
+**housetrack-region-data.** Schedule: *Schedule Disabled*. Run it once now with **Run in background**, then again about once a quarter for new addresses. It loads Victoria's addresses (G-NAF, a 1.9 GB download, about 15–20 minutes), the train stations, and the school zones and locations:
 
 ```bash
+#!/bin/bash
+cd /mnt/user/appdata/housetrack-stack && docker compose --profile setup run --rm setup
+```
+
+**housetrack-backup.** Schedule: *Custom* `30 3 * * *`. It writes a database dump (kept 60 days) and a copy of the photos to `BACKUP_DIR`:
+
+```bash
+#!/bin/bash
 cd /mnt/user/appdata/housetrack-stack && docker compose --profile ops run --rm backup
 ```
 
-**Automatic updates**, e.g. at 4am with the custom schedule `0 4 * * *`:
+**housetrack-update.** Schedule: *Custom* `0 4 * * *`, to update automatically each night. Choose *Schedule Disabled* instead to update only when you click **Run Script**:
 
 ```bash
-cd /mnt/user/appdata/housetrack-stack && ./update.sh latest >> update.log 2>&1
+#!/bin/bash
+cd /mnt/user/appdata/housetrack-stack && ./update.sh latest 2>&1 | tee -a update.log
 ```
 
-Each night this asks the registry for the newest version whose images are all published. If that's newer than what's running, it does the whole update:
+It asks the registry for the newest version whose images are all published. If that's newer than what's running, it:
 1. takes a backup;
-2. pulls the new images and restarts;
-3. runs any one-off steps the new version needs (`deploy/after-update.sh`).
+2. fetches the new version's files and sets `VERSION` in `.env`;
+3. pulls the images and restarts;
+4. runs any one-off steps the new version needs (`deploy/after-update.sh`).
 
-Database changes apply by themselves when the API starts, after a `pre-migrate-*.dump` is written to `BACKUP_DIR/db`. It never moves to an older version. Unraid shows a notification when it updates or when an update fails; `update.log` has the details.
+Database changes apply by themselves when the API starts, after a `pre-migrate-*.dump` is written to `BACKUP_DIR/db`. It never moves to an older version. Unraid shows a notification when it updates or when an update fails. The script's log, and `update.log`, have the details.
 
-To stay on a version instead, don't schedule it. Run `./update.sh <version>` by hand when you want to update.
+Compose Manager's own **Update Stack** button only pulls fresh copies of the version already in `.env`. Moving to a new version is this script's job.
 
-## Updating by hand
+## 4. Open the app
 
-```bash
-cd /mnt/user/appdata/housetrack-stack && ./update.sh latest      # or a specific version: ./update.sh 0.3.3
-```
+On any device signed in to your tailnet, open `https://house.<your-tailnet>.ts.net`, using your `TS_HOSTNAME`. The tailnet name is on the admin console's DNS page. The first visit may take a minute while Tailscale issues the certificate. Name the household's members, then go to **Settings → Choose stations and places**.
 
-If the token expires, make a new one (`read:packages`) and replace `.github-token`.
+If the token expires, make a new one (`read:packages`), put it in `/mnt/user/appdata/housetrack-stack/.github-token`, and run **housetrack-update**.
 
 ## Release notes
+
+### 0.3.3
+
+- Set up with Unraid's Compose Manager: the stack's compose file is now `docker-compose.yml`, with no build sections. If you installed 0.3.2 from the command line, `update.sh` replaces `compose.yaml` with it.
 
 ### 0.3.2
 
@@ -140,7 +135,7 @@ A release bundle (`release/housetrack-<version>.tar.gz`, built on a dev machine 
    docker compose up -d --no-build
    ```
 
-## Useful commands
+## Useful commands (terminal, from the stack folder)
 
 ```bash
 docker compose logs -f api          # what the server is doing (routing, statements, errors)

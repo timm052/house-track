@@ -1,8 +1,9 @@
 #!/bin/bash
 # Install or update House Track from GitHub's container registry: back up, pull the images for the version asked
 # for, restart, and run any steps the new version needs (deploy/after-update.sh). The stack's own files (this
-# script, compose.yaml, .env.example, deploy/) come out of the setup image, so the server needs no access to the
-# code. Run it from the stack folder:
+# script, docker-compose.yml, .env.example, deploy/) come out of the setup image, so the server needs no access to
+# the code. The stack is the compose project "housetrack" (the name in the compose file), the same one Unraid's
+# Compose Manager runs when its stack is called housetrack. Run it from the stack folder:
 #
 #   ./update.sh latest       # the newest published version; does nothing if already on it (the nightly job)
 #   ./update.sh 0.3.2        # that version
@@ -67,16 +68,19 @@ SETUP_IMAGE=$REGISTRY/housetrack-setup:$VERSION
 docker pull -q "$SETUP_IMAGE" > /dev/null
 rm -f deploy/after-update.sh   # only the new version's steps
 docker run --rm --entrypoint tar "$SETUP_IMAGE" -C /stack -cf - . | tar -xf -
+# From 0.3.3 the stack's compose file is docker-compose.yml (for Unraid's Compose Manager); drop the old name.
+[ -f docker-compose.yml ] && rm -f compose.yaml
 cp deploy/update.sh update.sh.new && chmod +x update.sh.new && mv update.sh.new update.sh
 
-if [ ! -f .env ]; then
-  cp .env.example .env
-  echo "Created .env from the example. Fill it in (see deploy/INSTALL.md), then run ./update.sh $VERSION again."
-  exit 0
-fi
+FIRST_RUN=false
+[ -f .env ] || { cp .env.example .env; FIRST_RUN=true; }
 # The version and image owner this stack runs.
 grep -q '^VERSION=' .env && sed -i "s/^VERSION=.*/VERSION=$VERSION/" .env || echo "VERSION=$VERSION" >> .env
 grep -q '^IMAGE_OWNER=' .env || echo "IMAGE_OWNER=$OWNER" >> .env
+if [ "$FIRST_RUN" = true ]; then
+  echo "Fetched House Track $VERSION and created .env. Fill in .env (in Compose Manager: Edit Stack > Env File), then Compose Up."
+  exit 0
+fi
 
 if docker compose ps --status running --services 2>/dev/null | grep -qx api; then
   echo "Backing up before the update…"

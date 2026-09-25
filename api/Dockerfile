@@ -32,4 +32,8 @@ RUN apt-get update \
           | grep -o "https://[^\"]*_Linux_${arch}\.tar\.gz" | head -1) \
  && curl -fsSL "$url" | tar -xz -C /usr/local/bin pmtiles \
  && pmtiles version
+# The stack's own files (compose file, settings template, install and update scripts): the server's updater reads
+# them from this image, so the server needs no access to the code, only to the images.
+COPY --from=stack compose.yaml .env.example /stack/
+COPY --from=stack deploy/ /stack/deploy/
 CMD ["python", "-m", "app.setup"]

@@ -1,0 +1,5 @@
+# Only the stack's files are used from the repo root (as the setup image's "stack" build context).
+*
+!compose.yaml
+!.env.example
+!deploy/

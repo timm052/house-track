@@ -1,3 +1,4 @@
 # Keep LF everywhere: the stack is built into Linux containers and deployed on Unraid.
 * text=auto eol=lf
 *.png binary
+*.sh text eol=lf

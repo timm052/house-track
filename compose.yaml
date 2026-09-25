@@ -90,7 +90,7 @@ services:
   # ─── setup: docker compose --profile setup run --rm setup [gnaf|osm|tiles] ─
   setup:
     image: ghcr.io/${IMAGE_OWNER:-housetrack}/housetrack-setup:${VERSION:-latest}
-    build: { context: ./api, target: setup }
+    build: { context: ./api, target: setup, additional_contexts: { stack: . } }   # see api/Dockerfile
     profiles: [setup]
     depends_on:
       db: { condition: service_healthy }

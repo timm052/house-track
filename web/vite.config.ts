@@ -18,6 +18,8 @@ export default defineConfig({
         short_name: "House Track",
         start_url: "/",
         display: "standalone",
+        // Android's Share menu, once the app is installed: sharing a listing opens Add with its link (pages/QuickAdd.tsx).
+        share_target: { action: "/add", method: "GET", params: { title: "title", text: "text", url: "url" } },
         background_color: "#f4f0e8",
         theme_color: "#f4f0e8",
         icons: [

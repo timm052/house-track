@@ -97,15 +97,41 @@ export default function QuickAdd() {
       return hits.find((h) => same(h.street_number, a.street_number) && same(h.street, a.street) && same(h.suburb, a.suburb) && same(h.unit, a.unit))?.pid ?? null;
     } catch { return null; }
   }
-  async function importLink() {
+  async function importLink(link = importUrl.trim()) {
     setImportMsg("Reading the listing…");
     try {
-      await applyPrefill(await api<Capture>("/api/listing/prefill", { method: "POST", body: { url: importUrl.trim() } }));
+      await applyPrefill(await api<Capture>("/api/listing/prefill", { method: "POST", body: { url: link } }));
     } catch (e) {
       setImportMsg((e as Error).message);
-      setUrl(importUrl.trim());
+      setUrl(link);
     }
   }
+  // Shared from a phone (Android's Share menu, or the Apple Shortcut on iPhone): /add?url=… or ?text=… with the link
+  // in it. Domain's links spell out the address; the rooms, price and photos come with the weekly refresh.
+  useEffect(() => {
+    if (params.get("capture")) return;
+    const shared = [params.get("url"), params.get("text"), params.get("title")].join(" ").match(/https?:\/\/[^\s"<>]+/)?.[0];
+    if (!shared) return;
+    (async () => {
+      if (!PORTAL_URL.test(shared)) { setImportUrl(shared); await importLink(shared); return; }
+      setImportMsg("Reading the link…");
+      try {
+        const p = await api<Capture>("/api/listing/from-link", { method: "POST", body: { url: shared } });
+        await applyPrefill(p);
+        setUrl(p.url ?? shared);
+        if (p.existing_property_id) return;
+        setCapture(null);  // nothing else to choose from a bare link (photos and agents come with the refresh)
+        setChoices(null);
+        setMethod((m) => m || "private_sale");
+        setImportMsg((p.address_parts ? "Filled in the address from the link. " : "Type the address below (this link doesn't include it). ")
+          + "Check the sale method. The rooms, price guide, photos and floor plan come in with the next weekly refresh, "
+          + "or open the listing on a computer and click + House Track.");
+      } catch (e) {
+        setImportMsg((e as Error).message);
+        setUrl(shared);
+      }
+    })();
+  }, [params]); // eslint-disable-line react-hooks/exhaustive-deps
   // Opened by the bookmarklet: wait for the listing page to hand over its HTML.
   useEffect(() => {
     if (!params.get("capture")) return;
@@ -219,7 +245,7 @@ export default function QuickAdd() {
           Another agent's website? Paste its link
           <div className="row" style={{ marginTop: 4 }}>
             <input className="grow" type="url" placeholder="https://www.agency.com.au/listing/…" value={importUrl} onChange={(e) => setImportUrl(e.target.value)} />
-            <button disabled={!/^https?:\/\//.test(importUrl)} onClick={importLink}>Import</button>
+            <button disabled={!/^https?:\/\//.test(importUrl)} onClick={() => importLink()}>Import</button>
           </div>
         </label>
         {PORTAL_URL.test(importUrl) && <p className="small tone-warn" style={{ margin: 0 }}>

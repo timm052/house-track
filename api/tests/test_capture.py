@@ -234,3 +234,39 @@ def test_sold_listing_asks_for_the_outcome(client, people):
     assert r.status_code == 200 and r.json()["guide"] is False
     got = row()
     assert got["needs_outcome"] is True and got["listing_status"] == "sold" and got["listing_price_text"] == "Sold for $1,250,000"
+
+
+def test_address_from_a_shared_domain_link(monkeypatch):
+    from app import gnaf
+    from app.listing import address_from_link
+    monkeypatch.setattr(gnaf, "search", lambda q, limit=8: [])  # no G-NAF: the street ends at its type word
+    got = lambda slug: address_from_link(f"https://www.domain.com.au/{slug}")
+    assert got("3-14-example-street-box-hill-north-vic-3129-2029990001") == {
+        "unit": "3", "street_number": "14", "street": "Example Street", "suburb": "Box Hill North", "postcode": "3129"}
+    assert got("12-glen-street-glen-waverley-vic-3150-2029990003")["suburb"] == "Glen Waverley"
+    assert got("15-hill-view-road-mount-evelyn-vic-3796-2029990004")["street"] == "Hill View Road"
+    # A near miss isn't taken: another street, or a unit when the link has none.
+    monkeypatch.setattr(gnaf, "search", lambda q, limit=8: [
+        {"unit": "1", "street_number": "12", "street": "BEACON STREET", "suburb": "GLEN WAVERLEY", "postcode": "3150"},
+        {"unit": "1", "street_number": "12", "street": "GLEN STREET", "suburb": "GLEN WAVERLEY", "postcode": "3150"}])
+    assert got("12-glen-street-glen-waverley-vic-3150-2029990003") == {
+        "unit": None, "street_number": "12", "street": "Glen Street", "suburb": "Glen Waverley", "postcode": "3150"}
+    assert got("lot-5-new-road-clyde-vic-3978-2029990006") is None
+    assert address_from_link("https://www.realestate.com.au/property-house-vic-mitcham-145678901") is None
+    # With G-NAF, its record wins (and says where the street ends).
+    monkeypatch.setattr(gnaf, "search", lambda q, limit=8: [
+        {"unit": None, "street_number": "15", "street": "HILL VIEW ROAD", "suburb": "MOUNT EVELYN", "postcode": "3796"}])
+    assert got("15-hill-view-road-mount-evelyn-vic-3796-2029990004")["street"] == "Hill View Road"
+
+
+def test_shared_link_finds_a_tracked_listing(client, people, monkeypatch):
+    from app import gnaf
+    monkeypatch.setattr(gnaf, "search", lambda q, limit=8: [])
+    a = as_(people["a"])
+    url = "https://www.domain.com.au/8-shared-street-mitcham-vic-3132-2029990088"
+    got = client.post("/api/listing/from-link", headers=a, json={"url": url + "?utm_source=app"}).json()
+    assert got["url"] == url and got["address_parts"]["street"] == "Shared Street" and got["existing_property_id"] is None
+    pid = client.post("/api/properties", headers=a, json={
+        "address": {"street_number": "8", "street": "Shared Street", "suburb": "Mitcham", "postcode": "3132"},
+        "campaign": {"sale_method": "private_sale", "url": url}}).json()["id"]
+    assert client.post("/api/listing/from-link", headers=a, json={"url": url}).json()["existing_property_id"] == pid

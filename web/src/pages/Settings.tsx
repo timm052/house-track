@@ -33,6 +33,7 @@ export default function Settings() {
     <div style={{ marginTop: 12 }}>
       <h1>Settings</h1>
       <p className="small muted">Shared by everyone in the household. <a href="#bookmarklets">Browser buttons</a> · Travel times and stations are under <Link to="/places">Places</Link>.</p>
+      <PhoneAdding />
       <Bookmarklets />
       <div className="card stack">
         <h2>People</h2>
@@ -200,6 +201,58 @@ export function refreshBookmarklet() {
   return <BookmarkletButton code={refreshCode(location.origin)} label="⟳ Refresh from Domain" />;
 }
 
+/** Adding a house from a phone: the Share menu (Android, once the app is installed) or an Apple Shortcut (iPhone),
+ *  both opening /add with the listing's link. Phone browsers make bookmarklets awkward, so this is the phone path. */
+function PhoneAdding() {
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const android = /Android/.test(navigator.userAgent);
+  const shortcutUrl = `${location.origin}/add?url=`;
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try { await navigator.clipboard.writeText(shortcutUrl); setCopied(true); setTimeout(() => setCopied(false), 2500); } catch { /* select it by hand */ }
+  }
+  return (
+    <div className="card stack" id="phone">
+      <h2>Adding houses from your phone</h2>
+      <p className="small" style={{ margin: 0 }}>
+        Share a listing to House Track from the Domain or realestate.com.au app, or from your phone's browser. A Domain listing's
+        address is filled in from its link. Its rooms, price guide, photos and floor plan come in with the next weekly refresh, as long
+        as <strong>Fill in what's missing</strong> is ticked. A realestate.com.au link doesn't include the address, so you type that.
+      </p>
+      {!ios && (
+        <details open={android}>
+          <summary><strong>Android</strong></summary>
+          <ol className="small steps">
+            <li>Install House Track: in Chrome, open this site, tap <strong>⋮ → Add to Home screen → Install</strong>.</li>
+            <li>On a listing, in the Domain app or in Chrome, tap <strong>Share</strong> and choose <strong>House Track</strong>.</li>
+          </ol>
+          <p className="small muted" style={{ margin: 0 }}>Not in the Share menu? Open House Track once from the home screen, then try again.</p>
+        </details>
+      )}
+      {!android && (
+        <details open={ios}>
+          <summary><strong>iPhone and iPad</strong></summary>
+          <p className="small" style={{ margin: "6px 0" }}>Apple doesn't let web apps into the Share menu, so a shortcut does it. Set it up once:</p>
+          <ol className="small steps">
+            <li>Open the <strong>Shortcuts</strong> app and tap <strong>+</strong>. Name the shortcut <strong>Add to House Track</strong>.</li>
+            <li>Tap <strong>ⓘ</strong> and turn on <strong>Show in Share Sheet</strong>. At the top of the shortcut, set what it receives to
+              <strong> URLs</strong>, <strong>Safari web pages</strong> and <strong>Text</strong>.</li>
+            <li>Add the action <strong>URL Encode</strong>. It encodes the <em>Shortcut Input</em>.</li>
+            <li>Add the action <strong>Open URLs</strong>. In its box, paste this address, then tap the variables bar and add
+              <strong> URL Encoded Text</strong> straight after it:
+              <div className="row" style={{ marginTop: 4 }}>
+                <code className="grow" style={{ wordBreak: "break-all" }}>{shortcutUrl}</code>
+                <button className="small-btn" onClick={copy}>{copied ? "Copied ✓" : "Copy"}</button>
+              </div>
+            </li>
+            <li>On a listing, tap <strong>Share → Add to House Track</strong>.</li>
+          </ol>
+        </details>
+      )}
+    </div>
+  );
+}
+
 function Bookmarklets() {
   const origin = location.origin;
   const mac = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -231,6 +284,18 @@ function Bookmarklets() {
         </p>
       </div>
 
+      <details>
+        <summary className="small">On a phone browser instead</summary>
+        <p className="small" style={{ margin: "6px 0" }}>
+          Sharing (above) is easier on a phone, but the buttons can be added too. They may not work in every phone browser.</p>
+        <ol className="small steps">
+          <li>Tap <strong>Copy code</strong> next to a button.</li>
+          <li><strong>Android Chrome:</strong> bookmark any page (☆), then edit that bookmark, name it (e.g. “House Track”) and paste the code
+            as its URL. To use it on a listing, type its name in the address bar and tap it in the suggestions.</li>
+          <li><strong>iPhone Safari:</strong> bookmark any page, then go to <strong>Bookmarks → Edit</strong>, open it, name it and paste the code
+            as its address. To use it on a listing, open Bookmarks and tap it.</li>
+        </ol>
+      </details>
       <details>
         <summary className="small">Can't drag them? Add them by hand</summary>
         <ol className="small steps">

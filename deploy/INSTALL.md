@@ -97,6 +97,12 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.3.5
+
+- Add houses from a phone's Share menu: on Android once House Track is installed to the home screen, or on iPhone through a shortcut. Setup steps are in the app under **Settings → Adding houses from your phone**.
+  - A shared Domain link fills in the address.
+  - The weekly refresh then brings in the rooms, price guide, photos and floor plan.
+
 ### 0.3.4
 
 - Fix: a database password with characters such as `#`, `%`, `@` or `/` stopped the API from starting. Any characters work now.

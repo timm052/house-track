@@ -118,6 +118,19 @@ def prefill(body: PrefillIn, _: Person) -> dict:
     return with_existing(listing_parse.parse(page, body.url))
 
 
+class LinkIn(BaseModel):
+    url: str = Field(pattern=r"^https?://", max_length=2000)
+
+
+@router.post("/listing/from-link")
+def from_link(body: LinkIn, _: Person) -> dict:
+    """A listing link shared from a phone: the address, where the link spells it out (Domain's do), and whether the
+    listing is already tracked. Nothing is fetched from the portal; the weekly refresh fills in the rest."""
+    from ..listing import address_from_link, clean_url
+    url = clean_url(body.url)
+    return with_existing({"url": url, "address_parts": address_from_link(url)})
+
+
 @router.post("/listing/parse")
 def parse_capture(body: CaptureIn, _: Person) -> dict:
     with tx() as conn:

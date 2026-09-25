@@ -3,6 +3,7 @@ station list the Places screen picks from (PLAN.md D10)."""
 
 import json
 import subprocess
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 import tempfile
@@ -12,7 +13,9 @@ import psycopg
 
 from .fetch import USER_AGENT, download
 
-OVERPASS = "https://overpass-api.de/api/interpreter"
+# Public Overpass servers, tried in turn: each is often busy or rate-limited (429, 504). OVERPASS_URL puts another first.
+OVERPASS_SERVERS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter",
+                    "https://overpass.private.coffee/api/interpreter"]
 
 Bbox = tuple[float, float, float, float]
 
@@ -86,15 +89,37 @@ def load_stations(stations: list[dict], database_url: str) -> int:
     return len(stations)
 
 
+def _overpass(query: str, rounds: int = 3, pause_s: float = 30) -> list[dict]:
+    """The query's elements, from whichever public server answers: each server in turn, a few rounds, pausing
+    between rounds (a busy server usually has room again within a minute)."""
+    import os
+    import time
+    servers = [u for u in [os.environ.get("OVERPASS_URL")] if u] + OVERPASS_SERVERS
+    body = urlencode({"data": query}).encode()
+    problems = []
+    for attempt in range(rounds):
+        for url in servers:
+            try:
+                req = Request(url, data=body, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+                with urlopen(req, timeout=240) as r:
+                    return json.load(r)["elements"]
+            except (HTTPError, URLError, TimeoutError, ValueError, KeyError) as e:
+                problem = f"{url.split('/')[2]}: {getattr(e, 'code', None) or e}"
+                problems.append(problem)
+                print(f"osm: {problem}", flush=True)
+        if attempt < rounds - 1:
+            print(f"osm: every Overpass server was busy; trying again in {pause_s:.0f}s", flush=True)
+            time.sleep(pause_s)
+    raise RuntimeError("no Overpass server answered (" + "; ".join(problems[-len(servers):]) + ")")
+
+
 def overpass_stations(bbox: Bbox) -> list[dict]:
     """Named railway stations in the search area from the public Overpass API: a few hundred records,
     instead of downloading and clipping the national OpenStreetMap extract."""
     south, west, north, east = bbox[1], bbox[0], bbox[3], bbox[2]
     query = (f"[out:json][timeout:180];(node[railway=station]({south},{west},{north},{east});"
              f"way[railway=station]({south},{west},{north},{east}););out center tags;")
-    req = Request(OVERPASS, data=urlencode({"data": query}).encode(), headers={"User-Agent": USER_AGENT})
-    with urlopen(req, timeout=240) as r:
-        elements = json.load(r)["elements"]
+    elements = _overpass(query)
     stations = []
     for e in elements:
         tags = e.get("tags", {})

@@ -22,3 +22,38 @@ def test_steps(monkeypatch, argv, expected):
     with pytest.raises(Stop):
         setup.main()
     assert seen["line"].endswith(f"steps {sorted(expected)}")
+
+
+def test_a_failed_step_does_not_stop_the_others(monkeypatch, capsys):
+    done = []
+    monkeypatch.setattr("sys.argv", ["setup", "stations", "schools"])
+    monkeypatch.setenv("DATABASE_URL", "postgresql://nowhere/none")
+    monkeypatch.setattr(setup, "migrate", lambda url: None)
+
+    def busy(bbox):
+        raise RuntimeError("no Overpass server answered")
+    monkeypatch.setattr(setup.osm, "overpass_stations", busy)
+    monkeypatch.setattr(setup.overlays, "load_schools", lambda *a, **k: done.append("schools"))
+    with pytest.raises(SystemExit) as stopped:
+        setup.main()
+    assert stopped.value.code == 1 and done == ["schools"]
+    assert "run --rm setup stations" in capsys.readouterr().out
+
+
+def test_overpass_falls_back_to_another_server(monkeypatch):
+    import io
+    import json
+    from urllib.error import HTTPError
+    from app.setup import osm
+    asked = []
+
+    def fake_urlopen(req, timeout):
+        asked.append(req.full_url)
+        if "overpass-api.de" in req.full_url:
+            raise HTTPError(req.full_url, 429, "Too Many Requests", {}, None)
+        return io.BytesIO(json.dumps({"elements": [{"type": "node", "id": 1, "lon": 145.0, "lat": -37.8,
+                                                     "tags": {"name": "Box Hill", "railway": "station"}}]}).encode())
+    monkeypatch.setattr(osm, "urlopen", fake_urlopen)
+    monkeypatch.delenv("OVERPASS_URL", raising=False)
+    got = osm.overpass_stations((144.0, -39.0, 146.0, -37.0))
+    assert [s["name"] for s in got] == ["Box Hill"] and len(asked) == 2

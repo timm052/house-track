@@ -97,6 +97,11 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.3.7
+
+- Region data setup copes with a busy OpenStreetMap server: the stations are asked for again after a pause, and from two other public servers.
+- A step that fails no longer stops the rest. Setup names the failed steps at the end, so you can run just those again.
+
 ### 0.3.6
 
 - Fix: loading the region data with no steps named (`docker compose --profile setup run --rm setup`, as the region-data job does) stopped with "invalid choice: ['all']".

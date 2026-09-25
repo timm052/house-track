@@ -8,6 +8,7 @@ self-hosted Valhalla; then `docker compose --profile local-routing up -d valhall
 
 import argparse
 import os
+import sys
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -46,27 +47,42 @@ def main() -> None:
 
     migrate(database_url)  # station table must exist even if the API hasn't started yet
 
-    if "gnaf" in steps:
+    def gnaf_step():
         gnaf_url = ensure_database(database_url, "gnaf")
         zip_path = gnaf_load.fetch(downloads, os.environ.get("GNAF_ZIP_URL"))
         gnaf_load.load(zip_path, region.gnaf_state, gnaf_url)
 
-    if "stations" in steps:
-        osm.load_stations(osm.overpass_stations(bbox), database_url)
-
-    if "osm" in steps:
+    def osm_step():
         region_pbf = osm.fetch_and_clip(os.environ.get("OSM_EXTRACT_URL") or region.osm_extract,
                                         downloads, bbox, valhalla_dir / "region.osm.pbf")
         osm.load_stations(osm.read_stations(region_pbf), database_url)
 
-    if "tiles" in steps:
+    def tiles_step():
         tiles.extract(bbox, tiles_dir, os.environ.get("PMTILES_SOURCE"))
         tiles.assets(tiles_dir, downloads)
 
-    if "schools" in steps:
+    def schools_step():
         school_zip = os.environ.get("SCHOOL_ZONES_ZIP")
         overlays.load_schools(database_url, bbox, downloads, Path(school_zip) if school_zip else None)
 
+    run = {"gnaf": gnaf_step, "stations": lambda: osm.load_stations(osm.overpass_stations(bbox), database_url),
+           "osm": osm_step, "tiles": tiles_step, "schools": schools_step}
+    # Each step on its own: one that fails (a download site down, a busy server) doesn't stop the others, and
+    # what's loaded stays loaded. The failed ones are named at the end, to run again on their own.
+    failed = []
+    for step in ("gnaf", "stations", "osm", "tiles", "schools"):
+        if step not in steps:
+            continue
+        try:
+            run[step]()
+        except Exception as e:  # noqa: BLE001
+            print(f"setup: {step} failed: {e}", flush=True)
+            failed.append(step)
+
+    if failed:
+        print(f"setup: finished, but {', '.join(failed)} failed. Run just those again later, e.g. "
+              f"docker compose --profile setup run --rm setup {' '.join(failed)}", flush=True)
+        sys.exit(1)
     print("setup: done." + (" Restart the local routing engine: docker compose restart valhalla" if "osm" in steps else ""),
           flush=True)
 

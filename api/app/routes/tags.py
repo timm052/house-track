@@ -26,7 +26,10 @@ class TagPatch(BaseModel):
 
 
 class PropertyTagsIn(BaseModel):
-    names: list[str]
+    names: list[str] | None = None  # the whole set, replacing what's there
+    # Or a change, which leaves the house's other tags alone: two people tagging it at once both keep theirs.
+    add: list[str] = []
+    remove: list[str] = []
 
 
 def clean(name: str) -> str:
@@ -104,7 +107,13 @@ def put_property_tags(property_id: UUID, body: PropertyTagsIn, person: Person) -
     with tx(person) as conn:
         if conn.execute("SELECT 1 FROM property WHERE id = %s", (property_id,)).fetchone() is None:
             raise not_found("Property")
-        set_property_tags(conn, property_id, body.names)
+        if body.names is not None:
+            set_property_tags(conn, property_id, body.names)
+        for tag_id in ensure_tags(conn, body.add):
+            conn.execute("INSERT INTO property_tag (property_id, tag_id) VALUES (%s, %s) ON CONFLICT DO NOTHING", (property_id, tag_id))
+        if gone := [clean(n).lower() for n in body.remove if clean(n)]:
+            conn.execute("""DELETE FROM property_tag pt USING tag t
+                            WHERE pt.tag_id = t.id AND pt.property_id = %s AND lower(t.name) = ANY(%s)""", (property_id, gone))
         names = [r["name"] for r in conn.execute(
             "SELECT t.name FROM property_tag pt JOIN tag t ON t.id = pt.tag_id WHERE pt.property_id = %s ORDER BY lower(t.name)",
             (property_id,))]

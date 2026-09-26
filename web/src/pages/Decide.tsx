@@ -2,6 +2,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { LIVE, Live } from "../live";
 import { api, type Stance } from "../api";
 import { catalogue, display, type OverviewPlace, type OverviewRow } from "../overview/columns";
 import { usePeople } from "../people";
@@ -11,8 +12,8 @@ export type Criterion = { id: string; name: string; weight: number; sort: number
 type Scores = { scores: { criterion_id: string; person_id: string; score: number }[];
                 totals: { person_id: string; score: number | null; scored: number; criteria: number }[] };
 
-export function useCriteria() {
-  return useQuery({ queryKey: ["criteria"], queryFn: () => api<Criterion[]>("/api/criteria") });
+export function useCriteria(live = false) {
+  return useQuery({ queryKey: ["criteria"], queryFn: () => api<Criterion[]>("/api/criteria"), ...(live ? LIVE : {}) });
 }
 
 /** Property page section: each person scores each criterion 1-5; weighted totals out of 100. */
@@ -64,13 +65,14 @@ export function ScoresCard({ propertyId }: { propertyId: string }) {
 /** Settings section: the household's criteria and weights. */
 export function CriteriaSettings() {
   const queryClient = useQueryClient();
-  const criteria = useCriteria();
+  const criteria = useCriteria(true);
   const [name, setName] = useState("");
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["criteria"] });
   return (
     <div className="card stack">
       <h2>What matters to us</h2>
       <p className="small muted">You each score houses on these from 1 to 5. A weight of 5 counts five times as much as 1.</p>
+      <Live queries={[criteria]}>
       {criteria.data?.map((c) => (
         <div key={c.id} className="row">
           <span className="grow">{c.name}</span>
@@ -85,6 +87,7 @@ export function CriteriaSettings() {
         <input className="grow" placeholder="e.g. North-facing garden" value={name} onChange={(e) => setName(e.target.value)} />
         <button disabled={!name.trim()} onClick={() => api("/api/criteria", { method: "POST", body: { name } }).then(() => { setName(""); refresh(); })}>Add</button>
       </div>
+      </Live>
     </div>
   );
 }

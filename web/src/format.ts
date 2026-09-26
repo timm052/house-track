@@ -23,6 +23,27 @@ export function moneyRange(low: number | null, high: number | null): string {
   return high == null || high === low ? money(low) : `${money(low)}–${money(high)}`;
 }
 
+/** How a sale went against the first price guide (over its top, within it, or under its bottom) and against what
+ *  we thought the house was worth: `amount` is the difference ("$195k over"), `rest` what it's against. */
+export function soldAgainst(sold: number, firstLow: number | null, firstHigh: number | null, ours: number | null) {
+  const out: { amount: string | null; rest: string; tone: "" | "bad" | "good" }[] = [];
+  if (firstLow != null) {
+    const high = firstHigh ?? firstLow, guide = `the first guide of ${moneyRange(firstLow, high)}`;
+    if (sold > high) out.push({ amount: `${money(sold - high)} over`, rest: guide, tone: "bad" });
+    else if (sold < firstLow) out.push({ amount: `${money(firstLow - sold)} under`, rest: guide, tone: "good" });
+    else out.push({ amount: null, rest: `${high === firstLow ? "at" : "within"} ${guide}`, tone: "" });
+  }
+  if (ours != null) {
+    const d = sold - ours, est = `our ${money(ours)} estimate`;
+    out.push(d === 0 ? { amount: null, rest: `at ${est}`, tone: "" }
+      : { amount: `${money(Math.abs(d))} ${d > 0 ? "over" : "under"}`, rest: est, tone: d > 0 ? "bad" : "good" });
+  }
+  return out;
+}
+
+/** An outcome that means the house sold. */
+export const isSold = (outcome: unknown) => typeof outcome === "string" && outcome.startsWith("sold");
+
 const dateTime = new Intl.DateTimeFormat("en-AU", { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
 const dateOnly = new Intl.DateTimeFormat("en-AU", { day: "numeric", month: "short", year: "numeric" });
 

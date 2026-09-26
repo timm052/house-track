@@ -129,6 +129,10 @@ def test_tags_on_houses_and_in_the_grid(client, people):
     client.delete(f"/api/tags/{tags['North garden']['id']}", headers=as_(a))
     assert row_for(client, a, pid)["tags"] == ["Corner block"]
     assert client.patch(f"/api/tags/{tags['needs reno']['id']}", headers=as_(a), json={"name": "Corner Block"}).status_code == 409
+    # The house page sends a change, not the set: b's page still only knew "Corner block", and a's new tag survives it.
+    client.put(f"/api/properties/{pid}/tags", headers=as_(a), json={"add": ["Solar"]})
+    r = client.put(f"/api/properties/{pid}/tags", headers=as_(b), json={"remove": ["corner block"], "add": ["Carport"]})
+    assert r.json()["tags"] == ["Carport", "Solar"]
 
 
 def test_price_history_columns(client, people):

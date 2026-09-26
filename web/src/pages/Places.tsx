@@ -8,6 +8,7 @@ import { useNavigate } from "react-router-dom";
 import AddressSearch from "../AddressSearch";
 import { api, type Place, type Settings as SettingsT, type StationHit, type TravelMode } from "../api";
 import ConfirmButton from "../ConfirmButton";
+import { LIVE, Live, OfflineNote } from "../live";
 import { usePeople } from "../people";
 
 const MODES: { mode: TravelMode; label: string; icon: React.ReactNode }[] = [
@@ -20,8 +21,9 @@ export default function Places() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { active, me } = usePeople();
-  const places = useQuery({ queryKey: ["places"], queryFn: () => api<Place[]>("/api/places") });
-  const settings = useQuery({ queryKey: ["settings"], queryFn: () => api<SettingsT>("/api/settings") });
+  const places = useQuery({ queryKey: ["places"], queryFn: () => api<Place[]>("/api/places"), ...LIVE });
+  const settings = useQuery({ queryKey: ["settings"], queryFn: () => api<SettingsT>("/api/settings"), ...LIVE });
+  const [walkText, setWalkText] = useState<string | null>(null);   // the walking limit as typed, until it's saved
   const stationCount = useQuery({ queryKey: ["station-count"], queryFn: () => api<{ n: number }>("/api/stations/count") });
   const [q, setQ] = useState("");
   const hits = useQuery({
@@ -42,7 +44,7 @@ export default function Places() {
   });
   const walk = useMutation({
     mutationFn: (v: number) => api("/api/settings/walk_limit_min", { method: "PUT", body: { value: v } }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["settings"] }); done(); },
+    onSuccess: () => { setWalkText(null); queryClient.invalidateQueries({ queryKey: ["settings"] }); done(); },
   });
   const error = add.error || patch.error || remove.error || favourite.error || walk.error;
 
@@ -55,9 +57,11 @@ export default function Places() {
       <h1>Places</h1>
       <p className="small muted">Where travel times are worked out to, from every house. They show on the house cards, each house's
         Location tab and as columns in the grid.</p>
+      <OfflineNote queries={[places, settings]} />
 
       <div className="card stack">
         <h2>Your places</h2>
+        <Live queries={[places]}>
         {destinations.length === 0 && <p className="small muted" style={{ margin: 0 }}>None yet. Add work, family or school below.</p>}
         {destinations.map((d) => (
           <div key={d.id} className="place-row">
@@ -113,6 +117,7 @@ export default function Places() {
             </>
           ) : <p className="small muted" style={{ margin: 0 }}>Name it first, then find its address or pick it on the map.</p>}
         </div>
+        </Live>
       </div>
 
       <div className="card stack">
@@ -121,10 +126,18 @@ export default function Places() {
           {stationCount.data ? ` ${stationCount.data.n}` : ""} stations, with the walk and the drive to it.</p>
         <p className="small muted" style={{ margin: 0 }}>Add stations you'd use anyway (on your line, say) to see the walk to them from every house too.
           They show on a house when they're within the walking limit.</p>
+        <Live queries={[places, settings]}>
         {settings.data && (
           <label className="row small" style={{ gap: 8 }}>Walking limit
-            <input inputMode="numeric" defaultValue={settings.data.walk_limit_min} style={{ width: 70 }}
-              onBlur={(e) => { const v = Number(e.target.value); if (v >= 1 && v <= 120 && v !== settings.data!.walk_limit_min) walk.mutate(v); }} /> minutes
+            {/* Saved only when someone changes it, never from what the page first showed. */}
+            <input inputMode="numeric" value={walkText ?? String(settings.data.walk_limit_min)} style={{ width: 70 }}
+              onChange={(e) => setWalkText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+              onBlur={() => {
+                if (walkText == null) return;
+                const v = Number(walkText);
+                if (Number.isInteger(v) && v >= 1 && v <= 120 && v !== settings.data!.walk_limit_min) walk.mutate(v); else setWalkText(null);
+              }} /> minutes
           </label>
         )}
         {stations.map((s) => (
@@ -150,6 +163,7 @@ export default function Places() {
             )}
           </div>
         )}
+        </Live>
       </div>
       {error && <p className="error">{(error as Error).message}</p>}
     </div>

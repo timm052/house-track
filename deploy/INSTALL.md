@@ -97,6 +97,14 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.1
+
+- Fix: Settings and Places could show one person's old copy of the household settings, and save it over someone else's change. The walking limit did this just by clicking in and out of it. These pages now get the latest values each time they open, and changes wait until those arrive.
+- Fix: on a house page, tags and **Method and dates** could put back an older copy. They now send only what you changed.
+- Sold houses show the sale price on their card, house page and map panel. Beside it: how far over or under the first guide it went, and how it compared with your estimate.
+- **Open the full map** on a house page opens the map on that house, with its walking route to the station. **Move pin** opens zoomed in on the house.
+- The map colours houses by price, light to dark, with the ranges in the key. The key can switch back to colouring by status.
+
 ### 0.4.0
 
 - Floor plans: open a house's floor plan with the **Floor plan** button on its About tab. Look through the saved versions and measure rooms. Press **Edit** to set the scale, draw walls and areas, and try furniture at real size. Everyone in the household sees every version.

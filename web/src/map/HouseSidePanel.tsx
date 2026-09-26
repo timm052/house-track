@@ -7,7 +7,8 @@ import { Link } from "react-router-dom";
 import Commute from "../Commute";
 import { api, type MapProperty, type PropertyDetail } from "../api";
 import { budgetTone, changeTone, soonTone, STATUS_COLOUR, tagStyle, useTagColours } from "../colour";
-import { km, LABEL, landArea, money, moneyRange, saleWhen, when } from "../format";
+import { isSold, km, LABEL, landArea, money, moneyRange, saleWhen, when } from "../format";
+import SoldAgainst from "../SoldAgainst";
 import type { OverviewRow } from "../overview/columns";
 import { usePeople } from "../people";
 
@@ -89,13 +90,17 @@ export default function HouseSidePanel({ p, route, routeError, onClose }: {
 
         {c && (
           <section className="map-side-price">
-            {guide ? <div className="price">{moneyRange(guide.low_aud, guide.high_aud)}</div> : <div className="muted small">No guide yet</div>}
-            <div className="row small" style={{ gap: 6 }}>
+            {isSold(c.outcome) && c.sold_price_aud != null ? <>
+              <div className="price">{money(c.sold_price_aud)}</div>
+              <SoldAgainst sold={c.sold_price_aud} firstLow={num("first_guide_low")} firstHigh={num("first_guide_high")}
+                ours={c.judgements.find((j) => j.kind === "expected_sale")?.amount_aud ?? null} />
+            </> : guide ? <div className="price">{moneyRange(guide.low_aud, guide.high_aud)}</div> : <div className="muted small">No guide yet</div>}
+            {!isSold(c.outcome) && <div className="row small" style={{ gap: 6 }}>
               {change != null && change !== 0 && <span className={`pill tone-${changeTone(change)}`}>guide {change > 0 ? "↑" : "↓"} {money(Math.abs(change))}</span>}
               {(row?.budget === "over" || row?.budget === "stretch") && (
                 <span className={`pill tone-${budgetTone(row.budget)}`}>{row.budget === "over" ? "Over budget" : "Stretch"}</span>)}
               {walkAway && <span className="pill">our max {money(walkAway.amount_aud)}</span>}
-            </div>
+            </div>}
             <div className="small">
               {c.outcome ? <>{LABEL.outcome[c.outcome]}{c.sold_price_aud != null && ` · ${money(c.sold_price_aud)}`}</> : <>
                 {saleWhen(c)}{soon && <span className={`pill tone-${soonTone(c.sale_method === "auction" ? c.auction_at : c.eoi_closes_at)}`} style={{ marginLeft: 6 }}>{soon}</span>}</>}

@@ -7,7 +7,8 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { TerraDraw, TerraDrawPolygonMode, TerraDrawSelectMode } from "terra-draw";
 import { TerraDrawMapLibreGLAdapter } from "terra-draw-maplibre-gl-adapter";
 import { STATUSES, api, whilePending, type AreaKind, type MapArea, type MapData, type MapProperty } from "../api";
-import { LABEL, streetLine } from "../format";
+import { isSold, LABEL, money, streetLine } from "../format";
+import type { OverviewRow } from "../overview/columns";
 import { basemapStyle } from "../map/basemap";
 import { colourFor, syncOverlays, type OverlayLayer } from "../map/overlays";
 import { usePeople } from "../people";
@@ -22,6 +23,29 @@ type Selected = { kind: "property"; p: MapProperty } | { kind: "area"; a: MapAre
 
 
 const addressOf = (p: Pick<MapProperty, "unit" | "street_number" | "street" | "suburb" | "lot_number">) => `${streetLine(p)}, ${p.suburb}`;
+
+// ─── colouring houses by price ─────────────────────────────────────────
+// One hue, light (cheaper) to dark (dearer), in even OKLCH lightness steps (0.84 to 0.39, hue 340): nothing like the
+// stations' white and teal. Houses with no price yet are grey.
+const PRICE_RAMP = ["#efb7db", "#da83be", "#c253a3", "#9e3081", "#721b5c"];
+const NO_PRICE = "#a8a29e";
+/** What a house is going for: its sale price once sold, else the middle of its latest guide. */
+function priceOf(r: OverviewRow): number | null {
+  if (isSold(r.outcome) && r.sold_price_aud != null) return Number(r.sold_price_aud);
+  return r.guide_low != null ? (Number(r.guide_low) + Number(r.guide_high ?? r.guide_low)) / 2 : null;
+}
+/** Up to five bands holding about as many houses each, split at round $50k figures. Returns where each band starts
+ *  (after the first). */
+function priceBreaks(prices: number[]): number[] {
+  const sorted = [...prices].sort((a, b) => a - b), n = Math.min(5, new Set(sorted).size), breaks: number[] = [];
+  for (let i = 1; i < n; i++) {
+    const at = Math.round(sorted[Math.floor((i * sorted.length) / n)] / 50_000) * 50_000;
+    if (at > sorted[0] && (!breaks.length || at > breaks[breaks.length - 1])) breaks.push(at);
+  }
+  return breaks;
+}
+/** The ramp colour for band `i` of `bands`, spread across the ramp so a few bands still differ clearly. */
+const bandColour = (i: number, bands: number) => PRICE_RAMP[bands === 1 ? 2 : Math.round((i * (PRICE_RAMP.length - 1)) / (bands - 1))];
 
 export default function MapPage() {
   const queryClient = useQueryClient();
@@ -61,6 +85,14 @@ export default function MapPage() {
   }, [ready, enabled, overlayList.data]);
 
   const pinFor = params.get("pin");
+  // Opened from a house's page: start zoomed in on it, selected, with its route to the station.
+  const houseFor = params.get("house");
+  const [colourBy, setColourBy] = useState<"price" | "status">(() => {
+    try { return localStorage.getItem("housetrack.map.colour") === "status" ? "status" : "price"; } catch { return "price"; }
+  });
+  useEffect(() => { try { localStorage.setItem("housetrack.map.colour", colourBy); } catch { /* per-device nicety */ } }, [colourBy]);
+  const overview = useQuery({ queryKey: ["overview"], queryFn: () => api<{ rows: OverviewRow[] }>("/api/overview") });
+  const priceById = useMemo(() => new Map((overview.data?.rows ?? []).map((r) => [r.id, priceOf(r)])), [overview.data]);
   // From the Places tab: tap to add a place (with the ways to get there chosen there), or to move one.
   const pick = params.get("pick");
   const pickPlace = pick === "place" || pick === "move"
@@ -127,6 +159,13 @@ export default function MapPage() {
     });
   }, [data, filter]);
 
+  const breaks = useMemo(() => priceBreaks(visibleProperties.map((f) => priceById.get(f.properties.id)).filter((x): x is number => x != null)),
+    [visibleProperties, priceById]);
+  const priceColour = (id: string) => {
+    const price = priceById.get(id);
+    return price == null ? NO_PRICE : bandColour(breaks.filter((b) => price >= b).length, breaks.length + 1);
+  };
+
   useEffect(() => {
     const map = mapRef.current;
     if (!ready || !map || !data) return;
@@ -137,7 +176,9 @@ export default function MapPage() {
         properties: {
           id: f.properties.id,
           label: addressOf(f.properties),
-          colour: STATUS_COLOUR[f.properties.status],
+          colour: colourBy === "price" ? priceColour(f.properties.id) : STATUS_COLOUR[f.properties.status],
+          // On the light map the palest price shades need an outline to stand out; white is enough on the dark one.
+          stroke: colourBy === "price" && !isDark ? "#4a1140" : "#ffffff",
           dim: f.properties.excluded || ["rejected", "lost", "withdrawn"].includes(f.properties.status),
           ring: f.properties.others_flags.length ? byId.get(f.properties.others_flags[0].owner_id)?.colour ?? "#888" : "",
           warned: f.properties.warned,
@@ -154,12 +195,21 @@ export default function MapPage() {
     (map.getSource("places") as GeoJSONSource).setData(data.places as GeoJSON.FeatureCollection);
 
     if (!fitted.current && data.properties.features.length) {
-      const bounds = new maplibregl.LngLatBounds();
-      data.properties.features.forEach((f) => bounds.extend(f.geometry.coordinates as [number, number]));
-      map.fitBounds(bounds, { padding: 60, maxZoom: 15, duration: 0 });
+      // A house to show (opened from its page, or to move its pin): start on it, street level. Otherwise all of them.
+      const focus = data.properties.features.find((f) => f.properties.id === (houseFor ?? pinFor));
+      if (focus) {
+        const at = focus.geometry.coordinates as [number, number], wide = window.innerWidth >= 800;
+        map.fitBounds(new maplibregl.LngLatBounds(at, at), { maxZoom: 16, duration: 0,
+          padding: houseFor ? (wide ? { top: 60, left: 60, right: 440, bottom: 90 } : { top: 60, left: 40, right: 40, bottom: window.innerHeight * 0.55 }) : 60 });
+        if (houseFor) setSelected({ kind: "property", p: focus.properties });
+      } else {
+        const bounds = new maplibregl.LngLatBounds();
+        data.properties.features.forEach((f) => bounds.extend(f.geometry.coordinates as [number, number]));
+        map.fitBounds(bounds, { padding: 60, maxZoom: 15, duration: 0 });
+      }
       fitted.current = true;
     }
-  }, [ready, data, visibleProperties, editing, byId, me]);
+  }, [ready, data, visibleProperties, editing, byId, me, colourBy, breaks, priceById, isDark]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── all train stations ──────────────────────────────────────────────
   const stations = useQuery({ queryKey: ["stations"], queryFn: () => api<GeoJSON.FeatureCollection>("/api/stations"), staleTime: 3600_000 });
@@ -414,7 +464,18 @@ export default function MapPage() {
         {statusesShown.length > 0 && (
           <details className="banner map-legend">
             <summary>Key</summary>
-            {statusesShown.map((st) => (
+            <div className="map-colour-by small" role="group" aria-label="Colour houses by">
+              <button className={colourBy === "price" ? "on" : ""} aria-pressed={colourBy === "price"} onClick={() => setColourBy("price")}>Price</button>
+              <button className={colourBy === "status" ? "on" : ""} aria-pressed={colourBy === "status"} onClick={() => setColourBy("status")}>Status</button>
+            </div>
+            {colourBy === "price" ? <>
+              {priceKey(breaks, visibleProperties.map((f) => priceById.get(f.properties.id)).filter((x): x is number => x != null)).map(([colour, text]) => (
+                <div key={colour} className="small"><span className="status-dot price-dot" style={{ background: colour, marginRight: 6 }} />{text}</div>
+              ))}
+              {visibleProperties.some((f) => priceById.get(f.properties.id) == null) &&
+                <div className="small"><span className="status-dot price-dot" style={{ background: NO_PRICE, marginRight: 6 }} />No price yet</div>}
+              <div className="small muted">Sale price once sold, otherwise the middle of the latest guide</div>
+            </> : statusesShown.map((st) => (
               <div key={st} className="small"><span className="status-dot" style={{ background: STATUS_COLOUR[st], marginRight: 6 }} />{LABEL.status[st]}</div>
             ))}
             <div className="small muted">Faded: rejected, lost, withdrawn or excluded</div>
@@ -506,6 +567,18 @@ export default function MapPage() {
   );
 }
 
+/** The key's rows for price: each band's colour and range. */
+function priceKey(breaks: number[], prices: number[]): [string, string][] {
+  if (!prices.length) return [];
+  const bands = breaks.length + 1;
+  if (bands === 1) {
+    const lo = Math.min(...prices), hi = Math.max(...prices);
+    return [[bandColour(0, 1), lo === hi ? money(lo) : `${money(lo)}–${money(hi)}`]];
+  }
+  return Array.from({ length: bands }, (_, i) => [bandColour(i, bands),
+    i === 0 ? `Under ${money(breaks[0])}` : i === bands - 1 ? `${money(breaks[i - 1])} and over` : `${money(breaks[i - 1])}–${money(breaks[i])}`]);
+}
+
 function addLayers(map: maplibregl.Map) {
   const empty: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
   // Commute area: everywhere within so many minutes of a chosen place (from the routing engine).
@@ -562,7 +635,7 @@ function addLayers(map: maplibregl.Map) {
     paint: { "circle-radius": 12, "circle-color": "transparent", "circle-stroke-color": ["get", "ring"], "circle-stroke-width": 2.5 } });
   map.addLayer({ id: "props-circle", type: "circle", source: "properties",
     paint: { "circle-radius": 8, "circle-color": ["get", "colour"], "circle-opacity": ["case", ["get", "dim"], 0.35, 1],
-             "circle-stroke-color": ["case", ["get", "warned"], "#f59e0b", "#ffffff"], "circle-stroke-width": ["case", ["get", "warned"], 3, 1.5] } });
+             "circle-stroke-color": ["case", ["get", "warned"], "#f59e0b", ["get", "stroke"]], "circle-stroke-width": ["case", ["get", "warned"], 3, 1.5] } });
 }
 
 // ─── bottom sheets ────────────────────────────────────────────────────

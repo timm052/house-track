@@ -6,10 +6,11 @@ import { usePeople, usePersons } from "../people";
 import { money, parseMoney } from "../format";
 import { CriteriaSettings } from "./Decide";
 import ConfirmButton from "../ConfirmButton";
+import { LIVE, Live, OfflineNote } from "../live";
 
 export default function Settings() {
   const queryClient = useQueryClient();
-  const persons = usePersons();
+  const persons = usePersons(true);
   const [name, setName] = useState("");
   const [colour, setColour] = useState("#2ca02c");
 
@@ -33,10 +34,12 @@ export default function Settings() {
     <div style={{ marginTop: 12 }}>
       <h1>Settings</h1>
       <p className="small muted">These settings are shared by the household. Stations and places are in <Link to="/places">Places</Link>.</p>
+      <OfflineNote queries={[persons]} />
       <PhoneAdding />
       <Bookmarklets />
       <div className="card stack">
         <h2>People</h2>
+        <Live queries={[persons]}>
         {persons.data?.map((p) => (
           <div key={p.id} className="row">
             <input type="color" aria-label="Colour" value={p.colour} style={{ width: 56, padding: 4 }}
@@ -57,6 +60,7 @@ export default function Settings() {
           <input className="grow" placeholder="Add a person" value={name} onChange={(e) => setName(e.target.value)} />
           <button disabled={!name.trim() || add.isPending} onClick={() => add.mutate()}>Add</button>
         </div>
+        </Live>
         <p className="small muted" style={{ margin: 0 }}>Deactivate hides someone but keeps their verdicts. Delete removes them for good.</p>
         {(add.error || patch.error || remove.error) && <p className="error">{((add.error || patch.error || remove.error) as Error).message}</p>}
       </div>
@@ -75,7 +79,8 @@ type CostSettings = { cash_aud: number; loan_preapproval_aud: number; loan_expir
 /** Budget and fixed costs for the cost calculator and the highest affordable bid (milestone 4). */
 function MoneySettings() {
   const queryClient = useQueryClient();
-  const { data } = useQuery({ queryKey: ["costs"], queryFn: () => api<{ settings: CostSettings; max_bid: number | null }>("/api/costs") });
+  const costs = useQuery({ queryKey: ["costs"], queryFn: () => api<{ settings: CostSettings; max_bid: number | null }>("/api/costs"), ...LIVE });
+  const data = costs.data;
   const [f, setF] = useState<Record<string, string | boolean> | null>(null);
   const s = data?.settings;
   const form = f ?? (s ? {
@@ -99,6 +104,7 @@ function MoneySettings() {
     <div className="card stack">
       <h2>Budget</h2>
       <p className="small muted">Used to work out total costs and the most you can bid. Stamp duty uses Victorian rates. Check with the State Revenue Office before relying on it.</p>
+      <Live queries={[costs]}>
       <div className="grid2">{text("cash", "Cash for the purchase")}{text("loan", "Loan pre-approval")}</div>
       <label>Pre-approval expires<input type="date" value={String(form.expiry)} onChange={(e) => setF({ ...form, expiry: e.target.value })} /></label>
       {expiring && <p className="small error">Your pre-approval expires within 30 days.</p>}
@@ -106,6 +112,7 @@ function MoneySettings() {
       <label className="check"><input type="checkbox" checked={!!form.ppr} onChange={(e) => setF({ ...form, ppr: e.target.checked })} /> We'll live in it (principal place of residence)</label>
       <div className="grid3">{text("conv", "Conveyancing")}{text("insp", "Inspections")}{text("other", "Other fees")}</div>
       <button className="primary" onClick={() => save.mutate()} disabled={save.isPending}>Save budget</button>
+      </Live>
       {data?.max_bid != null && <p>Most you can bid, including costs: <strong>{money(data.max_bid)}</strong></p>}
     </div>
   );
@@ -116,7 +123,8 @@ type Layer = { code: string; title: string; effect: "info" | "soft_warn" | "hard
 /** Per-layer effect for the whole household (milestone 5): e.g. make floodways exclude houses outright. */
 function LayerSettings() {
   const queryClient = useQueryClient();
-  const { data = [] } = useQuery({ queryKey: ["overlays"], queryFn: () => api<Layer[]>("/api/overlays") });
+  const overlays = useQuery({ queryKey: ["overlays"], queryFn: () => api<Layer[]>("/api/overlays"), ...LIVE });
+  const data = overlays.data ?? [];
   if (!data.length) return null;
   const set = (code: string, effect: string) =>
     api(`/api/overlays/${code}`, { method: "PATCH", body: { effect } }).then(() => {
@@ -128,6 +136,7 @@ function LayerSettings() {
     <div className="card stack">
       <h2>Schools and planning layers</h2>
       <p className="small muted">Choose what happens to houses inside each layer. Run setup again to update the data.</p>
+      <Live queries={[overlays]}>
       {data.map((l) => (
         <div key={l.code} className="row">
           <span className="grow small">{l.title}{l.data_as_of && <span className="muted"> · {l.data_as_of}</span>}</span>
@@ -138,6 +147,7 @@ function LayerSettings() {
           </select>
         </div>
       ))}
+      </Live>
     </div>
   );
 }
@@ -355,7 +365,8 @@ type TagRow = { id: string; name: string; colour: string; houses: number };
  *  or from a listing's suggestions). */
 function TagSettings() {
   const queryClient = useQueryClient();
-  const { data = [] } = useQuery({ queryKey: ["tags"], queryFn: () => api<TagRow[]>("/api/tags") });
+  const tags = useQuery({ queryKey: ["tags"], queryFn: () => api<TagRow[]>("/api/tags"), ...LIVE });
+  const data = tags.data ?? [];
   const [msg, setMsg] = useState<{ id: string; text: string; mergeInto?: string; name?: string } | null>(null);
   const refresh = () => ["tags", "overview", "property"].forEach((k) => queryClient.invalidateQueries({ queryKey: [k] }));
   async function patch(t: TagRow, body: Record<string, unknown>) {
@@ -372,6 +383,7 @@ function TagSettings() {
     <div className="card stack">
       <h2>Tags</h2>
       {data.length === 0 && <p className="small muted" style={{ margin: 0 }}>No tags yet. Add them on a house's page or in the Grid.</p>}
+      <Live queries={[tags]}>
       {data.map((t) => (
         <div key={t.id}>
           <div className="row">
@@ -392,6 +404,7 @@ function TagSettings() {
           )}
         </div>
       ))}
+      </Live>
     </div>
   );
 }

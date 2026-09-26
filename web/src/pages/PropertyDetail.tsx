@@ -5,7 +5,8 @@ import {
   api, PROPERTY_TYPES, STATUSES,
   type Campaign, type GuideSource, type JudgementKind, type PropertyDetail as Detail,
   type PropertyType, type SaleMethod, type Stage, type Stance, type Status, ApiError } from "../api";
-import { parseMoney, day, daysSince, fromLocalInput, LABEL, minutes, money, moneyRange, toLocalInput, saleWhen, streetLine, when } from "../format";
+import SoldAgainst from "../SoldAgainst";
+import { parseMoney, day, daysSince, isSold, fromLocalInput, LABEL, minutes, money, moneyRange, toLocalInput, saleWhen, streetLine, when } from "../format";
 import { newId, sendOrQueue } from "../outbox";
 import { usePeople } from "../people";
 import { STATUS_COLOUR, changeTone, minutesTone, soonTone, suburbClass, tagStyle, useSuburbSlots, useTagColours } from "../colour";
@@ -142,8 +143,8 @@ function Banner({ p }: { p: Detail }) {
           <span className="banner-badge"><Camera /> {photos.length} {photos.length === 1 ? "photo" : "photos"}</span>
         </a>
       )}
-      {cover && hasPin && <div className="banner-map">{map}<Link className="banner-badge top" to="/map">Open the full map</Link></div>}
-      {!cover && hasPin && <>{map}<Link className="banner-badge top" to="/map">Open the full map</Link><ListingPhoto p={p} compact /></>}
+      {cover && hasPin && <div className="banner-map">{map}<Link className="banner-badge top" to={`/map?house=${p.id}`}>Open the full map</Link></div>}
+      {!cover && hasPin && <>{map}<Link className="banner-badge top" to={`/map?house=${p.id}`}>Open the full map</Link><ListingPhoto p={p} compact /></>}
       {!cover && !hasPin && (
         <div className="banner-empty">
           <MapPin aria-hidden className="big-icon" />
@@ -242,13 +243,18 @@ function PriceBox({ p, c }: { p: Detail; c: Campaign | null }) {
   const soon = c && !c.outcome ? soonTone(saleAt) : "";
   const listedDays = c?.listed_on ? daysSince(c.listed_on, c.outcome_on) : null;  // on the market until the outcome
   const link = c?.links[0];
+  // Sold: against the house's very first guide (across relistings, as on its card) and our own estimate.
+  const firstEver = p.campaigns.flatMap((x) => x.price_guides).sort((a, b) => a.observed_at.localeCompare(b.observed_at))[0];
+  const ours = c?.judgements.find((j) => j.kind === "expected_sale")?.amount_aud ?? null;
+  const sold = c && isSold(c.outcome) ? c.sold_price_aud : null;
   return (
     <div className="card price-box">
       <div className="muted small">{c?.outcome ? LABEL.outcome[c.outcome] : guide ? `Price guide · ${LABEL.guideSource[guide.source]}` : "Price"}</div>
       <div className="price-big">
         {c?.outcome && c.sold_price_aud ? money(c.sold_price_aud) : guide ? moneyRange(guide.low_aud, guide.high_aud) : <span className="muted">No guide yet</span>}
       </div>
-      {guide && first && guides.length > 1 && (
+      {sold != null && <SoldAgainst sold={sold} firstLow={firstEver?.low_aud ?? null} firstHigh={firstEver?.high_aud ?? null} ours={ours} />}
+      {sold == null && guide && first && guides.length > 1 && (
         <div className={`small tone-${changeTone((guide.low_aud + guide.high_aud) / 2 - (first.low_aud + first.high_aud) / 2)}`}>
           {(guide.low_aud + guide.high_aud) > (first.low_aud + first.high_aud) ? "↑" : "↓"} from {moneyRange(first.low_aud, first.high_aud)} · changed {guides.length - 1}×
         </div>
@@ -502,8 +508,9 @@ function TagEditor({ p: detail }: { p: Detail }) {
   const all = useQuery({ queryKey: ["tags"], queryFn: () => api<{ name: string }[]>("/api/tags") });
   const [text, setText] = useState("");
   const colours = useTagColours();
-  const save = async (names: string[]) => {
-    await api(`/api/properties/${p.id}/tags`, { method: "PUT", body: { names } });
+  // Sends the change rather than the whole set, so a tag someone else added since this page loaded stays.
+  const save = async (change: { add?: string[]; remove?: string[] }) => {
+    await api(`/api/properties/${p.id}/tags`, { method: "PUT", body: change });
     setText("");
     for (const key of [["property", p.id], ["overview"], ["tags"]]) queryClient.invalidateQueries({ queryKey: key });
   };
@@ -511,11 +518,11 @@ function TagEditor({ p: detail }: { p: Detail }) {
   return (
     <div className="row" style={{ marginTop: 6 }}>
       {p.tags.map((t) => (
-        <span key={t} className="tag" style={tagStyle(colours, t)}>#{t} <button className="link" aria-label={`Remove ${t}`} onClick={() => save(p.tags.filter((x) => x !== t))}>✕</button></span>
+        <span key={t} className="tag" style={tagStyle(colours, t)}>#{t} <button className="link" aria-label={`Remove ${t}`} onClick={() => save({ remove: [t] })}>✕</button></span>
       ))}
       <input className="grow" list={`tags-${p.id}`} placeholder="Add a tag" value={text} style={{ maxWidth: 200, padding: "4px 8px" }}
         onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => { if (e.key === "Enter" && text.trim()) save([...p.tags, text.trim()]); }} />
+        onKeyDown={(e) => { if (e.key === "Enter" && text.trim()) save({ add: [text.trim()] }); }} />
       <datalist id={`tags-${p.id}`}>{suggestions.map((n) => <option key={n} value={n} />)}</datalist>
     </div>
   );
@@ -947,9 +954,24 @@ function PastCampaign({ c }: { c: Campaign }) {
 
 function CampaignDates({ propertyId, c }: { propertyId: string; c: Campaign }) {
   const write = useWrite(propertyId);
-  const [method, setMethod] = useState(c.sale_method);
-  const [at, setAt] = useState(toLocalInput(c.sale_method === "eoi" ? c.eoi_closes_at : c.auction_at));
-  const [listed, setListed] = useState(c.listed_on ?? "");
+  // The saved values, until the person changes one: someone else or the weekly refresh may update them meanwhile,
+  // and only what was changed here is sent, so their changes aren't put back.
+  const saved = { method: c.sale_method, at: toLocalInput(c.sale_method === "eoi" ? c.eoi_closes_at : c.auction_at), listed: c.listed_on ?? "" };
+  const [edits, setEdits] = useState<Partial<typeof saved>>({});
+  const { method, at, listed } = { ...saved, ...edits };
+  const setMethod = (v: SaleMethod) => setEdits((e) => ({ ...e, method: v }));
+  const setAt = (v: string) => setEdits((e) => ({ ...e, at: v }));
+  const setListed = (v: string) => setEdits((e) => ({ ...e, listed: v }));
+  function save() {
+    const body: Record<string, unknown> = {};
+    if ("method" in edits || "at" in edits) {   // the date belongs to the method, so they go together
+      body.sale_method = method;
+      body.auction_at = method === "auction" ? fromLocalInput(at) : null;
+      body.eoi_closes_at = method === "eoi" ? fromLocalInput(at) : null;
+    }
+    if ("listed" in edits) body.listed_on = listed || null;
+    if (Object.keys(body).length) write.mutate({ path: `/api/campaigns/${c.id}`, method: "PATCH", body }, { onSuccess: () => setEdits({}) });
+  }
   return (
     <details>
       <summary>Method and dates</summary>
@@ -961,21 +983,7 @@ function CampaignDates({ propertyId, c }: { propertyId: string; c: Campaign }) {
           <label>{method === "auction" ? "Auction" : "EOI closes"}<input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} /></label>
         )}
         <label>Listed on<input type="date" value={listed} onChange={(e) => setListed(e.target.value)} /></label>
-        <button
-          disabled={write.isPending}
-          onClick={() =>
-            write.mutate({
-              path: `/api/campaigns/${c.id}`, method: "PATCH",
-              body: {
-                sale_method: method, listed_on: listed || null,
-                auction_at: method === "auction" ? fromLocalInput(at) : null,
-                eoi_closes_at: method === "eoi" ? fromLocalInput(at) : null,
-              },
-            })
-          }
-        >
-          Save dates
-        </button>
+        <button disabled={write.isPending || !Object.keys(edits).length} onClick={save}>Save dates</button>
       </div>
     </details>
   );

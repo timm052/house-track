@@ -937,3 +937,16 @@ a.plan-open:active { transform: scale(0.98); transition-duration: 0ms; }
 @media (prefers-reduced-motion: reduce) {
   a.plan-open:active, .fp-page button.fp-edit:active, .fp-page .fp-chip:active { transform: none; }
 }
+
+/* Household settings wait for the server's current values before they can be changed (live.tsx). The wrapper takes
+   no space; on a slow connection its contents dim after a moment, so a quick check doesn't flicker. */
+.live { display: contents; }
+.live.waiting > * { animation: live-wait 0s 400ms forwards; }
+@keyframes live-wait { to { opacity: 0.55; } }
+
+/* The map key's switch between colouring houses by price and by status. */
+.map-colour-by { display: inline-flex; gap: 2px; margin: 4px 0 6px; padding: 2px; border-radius: 999px; background: var(--surface-2); }
+.map-colour-by button { min-height: 28px; padding: 2px 12px; border: 0; border-radius: 999px; background: none; color: var(--text); font-size: 0.8rem; }
+.map-colour-by button.on { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+.price-dot { box-shadow: inset 0 0 0 1.5px #4a1140; }
+[data-theme="dark"] .price-dot { box-shadow: none; }

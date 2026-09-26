@@ -4,7 +4,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, whilePending } from "../api";
-import { LABEL, landArea, money, moneyRange } from "../format";
+import { isSold, LABEL, landArea, money, moneyRange } from "../format";
+import SoldAgainst from "../SoldAgainst";
 import { STATUSES } from "../api";
 import { catalogue, display, type Column, type OverviewPlace, type OverviewRow } from "../overview/columns";
 import { applyView, builtInDefault, describe, useViews, type Filter, type Sort } from "../overview/views";
@@ -250,6 +251,8 @@ function Card({ r, people, favourites, cols, slots, tagColours, picked, onPick }
   const change = n("guide_change");
   // The campaign has an outcome but the house still looks active: nudge whoever looks next.
   const staleStatus = statusOutOfStep(r.outcome as Outcome, Boolean(r.bought_by_us), r.status as Status);
+  // Sold with a price: the price, and how it went against the first guide and our estimate, in place of the guide.
+  const sold = isSold(r.outcome) ? n("sold_price_aud") : null;
   const sale = r.outcome
     ? `${display(col("outcome"), r.outcome)}${r.sold_price_aud ? ` ${money(n("sold_price_aud"))}` : ""}`
     : r.sale_at ? `${display(col("sale_method"), r.sale_method)} ${display(col("sale_at"), r.sale_at)}`
@@ -273,15 +276,18 @@ function Card({ r, people, favourites, cols, slots, tagColours, picked, onPick }
       </div>
       <div className="muted small">{line2.map((part, i) => <Fragment key={i}>{i > 0 && " · "}{part}</Fragment>)}</div>
       <div className="row small" style={{ marginTop: 4 }}>
-        <span className={`grow ${!r.outcome ? `tone-${soonTone(r.sale_at)}` : ""}`}>{sale}</span>
-        <span className={n("guide_low") == null ? "muted" : "price"}>{moneyRange(n("guide_low"), n("guide_high"))}</span>
-        {change != null && change !== 0 && <span className={`pill tone-${changeTone(change)}`}>guide {change > 0 ? "↑" : "↓"} {money(Math.abs(change))}</span>}
-        {r.walk_away != null && <span className="pill">our max {money(n("walk_away"))}</span>}
-        {(r.budget === "over" || r.budget === "stretch") && (
-          <span className={`pill tone-${budgetTone(r.budget)}`} title="Guide against the most you can bid. Set it in Settings.">
-            {r.budget === "over" ? "Over budget" : "Stretch"}</span>
-        )}
+        <span className={`grow ${!r.outcome ? `tone-${soonTone(r.sale_at)}` : ""}`}>{sold != null ? <strong className="price">{sale}</strong> : sale}</span>
+        {sold == null && <>
+          <span className={n("guide_low") == null ? "muted" : "price"}>{moneyRange(n("guide_low"), n("guide_high"))}</span>
+          {change != null && change !== 0 && <span className={`pill tone-${changeTone(change)}`}>guide {change > 0 ? "↑" : "↓"} {money(Math.abs(change))}</span>}
+          {r.walk_away != null && <span className="pill">our max {money(n("walk_away"))}</span>}
+          {(r.budget === "over" || r.budget === "stretch") && (
+            <span className={`pill tone-${budgetTone(r.budget)}`} title="Guide against the most you can bid. Set it in Settings.">
+              {r.budget === "over" ? "Over budget" : "Stretch"}</span>
+          )}
+        </>}
       </div>
+      {sold != null && <SoldAgainst sold={sold} firstLow={n("first_guide_low")} firstHigh={n("first_guide_high")} ours={n("expected_sale")} />}
       {staleStatus && <div className="small tone-warn" style={{ marginTop: 4 }}>Sale's over. Update the status.</div>}
       {Boolean(r.needs_outcome) && <div className="small tone-warn" style={{ marginTop: 4 }}>
         {r.listing_status ? `The listing says ${String(r.listing_status).replace(/_/g, " ")}` : "The sale date has passed"}. Record the outcome.</div>}

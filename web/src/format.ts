@@ -29,6 +29,14 @@ const dateOnly = new Intl.DateTimeFormat("en-AU", { day: "numeric", month: "shor
 export const when = (iso: string | null) => (iso ? dateTime.format(new Date(iso)) : "");
 export const day = (iso: string | null) => (iso ? dateOnly.format(new Date(iso)) : "");
 
+/** Whole calendar days from a date (YYYY-MM-DD) to another, or to today. */
+export function daysSince(from: string, to?: string | null): number {
+  const utc = (d: Date) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  const [y, m, d] = from.slice(0, 10).split("-").map(Number);
+  const end = to ? (() => { const [ty, tm, td] = to.slice(0, 10).split("-").map(Number); return Date.UTC(ty, tm - 1, td); })() : utc(new Date());
+  return Math.max(0, Math.round((end - Date.UTC(y, m - 1, d)) / 86_400_000));
+}
+
 /** <input type="datetime-local"> value ⇄ ISO with offset. */
 export function toLocalInput(iso: string | null): string {
   if (!iso) return "";

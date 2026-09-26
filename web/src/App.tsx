@@ -136,7 +136,7 @@ function BrandMark() {
 }
 
 const NEXT_THEME: Record<ThemeChoice, ThemeChoice> = { auto: "light", light: "dark", dark: "auto" };
-const THEME_LABEL: Record<ThemeChoice, string> = { auto: "Light or dark: following this device", light: "Light", dark: "Dark" };
+const THEME_LABEL: Record<ThemeChoice, string> = { auto: "Matches this device", light: "Light", dark: "Dark" };
 
 /** Auto (follow the device), light, dark: one button that steps through them, remembered on this device. */
 function ThemeSwitch() {

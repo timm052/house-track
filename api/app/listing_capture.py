@@ -114,6 +114,14 @@ def _local(iso: Any) -> str | None:
     return (dt if dt.tzinfo else dt.replace(tzinfo=MELBOURNE)).isoformat()
 
 
+def _date(v: Any) -> str | None:
+    """The Melbourne calendar date of a portal time (a UTC one can be the day before), or a plain date as given."""
+    iso = _local(v)
+    if iso:
+        return datetime.fromisoformat(iso).astimezone(MELBOURNE).date().isoformat()
+    return v if isinstance(v, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", v) else None
+
+
 def _method(v: Any) -> str | None:
     if not isinstance(v, str):
         return None
@@ -293,7 +301,7 @@ def extract(url: str, html: str = "", next_data: str | None = None, argonaut: st
     words = " ".join(x for x in (headline, description, text or "") if x)
     out["auction_at"] = auction if out.get("sale_method") == "auction" else None
     out["eoi_closes_at"] = _eoi_from_text(words) if out.get("sale_method") == "eoi" else None
-    out["listed_on"] = (_local(_first(tree, "dateCreated", "firstListedDate", "createdOn", kind=(str, dict))) or "")[:10] or None
+    out["listed_on"] = _date(_first(tree, "dateCreated", "firstListedDate", "createdOn", kind=(str, dict)))
     out["headline"] = headline
     out["description"] = description.strip()[:4000] if isinstance(description, str) else None
 

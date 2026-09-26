@@ -107,9 +107,9 @@ export default function Refresh() {
         <div className="card stack" style={{ borderColor: "var(--maybe)" }}>
           <h2>The Domain tab hasn't answered</h2>
           <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>
-            <li>Keep the Domain tab open: it does the loading.</li>
-            <li>Drag the button from Settings again. Older copies of the button don't talk to this page.</li>
-            <li>Click it from the bookmarks bar while you're on domain.com.au, not from inside House Track.</li>
+            <li>Keep the Domain tab open. It does the loading.</li>
+            <li>Drag the button from Settings again. Older copies don't work with this page.</li>
+            <li>Click it in the bookmarks bar while you're on domain.com.au, not in House Track.</li>
           </ul>
           <div>{refreshBookmarklet()}</div>
         </div>

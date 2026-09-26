@@ -352,7 +352,7 @@ def station_route(property_id: UUID) -> dict:
                               FROM property p JOIN property_nearest_station n ON n.property_id = p.id
                               WHERE p.id = %s""", (property_id,)).fetchone()
     if row is None:
-        raise HTTPException(404, "No nearest station for this house yet (it needs a pin, and a moment to work out).")
+        raise HTTPException(404, "No nearest station yet. The house needs a pin first.")
     origin, target = (row["lon"], row["lat"]), (row["s_lon"], row["s_lat"])
     out = {"station": {"name": row["name"], "lon": row["s_lon"], "lat": row["s_lat"]}}
     with _routing_lock:

@@ -166,7 +166,7 @@ export default function Trends() {
             </tbody>
           </table>
         </div>
-        <p className="small muted">Add sold prices from each campaign's outcome and comparable sales from Statements of Information to fill this in. <Link to="/overview">Grid</Link></p>
+        <p className="small muted">Record sale outcomes and add comparables from Statements of Information to fill this in. <Link to="/overview">Grid</Link></p>
       </div>
     </div>
   );

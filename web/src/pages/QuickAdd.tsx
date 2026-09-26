@@ -123,9 +123,9 @@ export default function QuickAdd() {
         setCapture(null);  // nothing else to choose from a bare link (photos and agents come with the refresh)
         setChoices(null);
         setMethod((m) => m || "private_sale");
-        setImportMsg((p.address_parts ? "Filled in the address from the link. " : "Type the address below (this link doesn't include it). ")
-          + "Check the sale method. The rooms, price guide, photos and floor plan come in with the next weekly refresh, "
-          + "or open the listing on a computer and click + House Track.");
+        setImportMsg((p.address_parts ? "Address filled in from the link. " : "This link has no address, so type it below. ")
+          + "Check the sale method. The rooms, price, photos and floor plan are added at the next weekly refresh, "
+          + "or click + House Track on the listing from a computer.");
       } catch (e) {
         setImportMsg((e as Error).message);
         setUrl(shared);
@@ -224,7 +224,7 @@ export default function QuickAdd() {
   return (
     <div className="stack" style={{ marginTop: 12 }}>
       <h1>Add a house</h1>
-      <p className="muted small">Use the + House Track button on a listing to fill most of this in, or type the address. Only the address is needed; the rest can wait.</p>
+      <p className="muted small">Only the address is needed. The + House Track button on a listing fills in most of the rest.</p>
 
       {capture?.existing_property_id && (
         <>
@@ -238,7 +238,7 @@ export default function QuickAdd() {
         <h2>From a listing</h2>
         <p className="small" style={{ margin: 0 }}>
           On <strong>Domain</strong> or <strong>realestate.com.au</strong>, open the listing and click <strong>+ House Track</strong> in
-          your bookmarks bar: it fills all of this in, with photos, agents and inspection times.{" "}
+          your bookmarks bar. It fills in everything, including photos, agents and inspections.{" "}
           <Link to="/settings#bookmarklets">Set up the button</Link>
         </p>
         <label>
@@ -266,7 +266,7 @@ export default function QuickAdd() {
             setByLot(false);
           }} />
         </label>
-        {gnafPid && <p className="small muted">Matched to the national address file, so it gets pinned on the map straight away.</p>}
+        {gnafPid && <p className="small muted">Address found. It goes straight on the map.</p>}
         <label>
           Or paste one from a listing
           <div className="row" style={{ marginTop: 4 }}>
@@ -278,7 +278,7 @@ export default function QuickAdd() {
 
         <label className="check">
           <input type="checkbox" checked={byLot} onChange={(e) => setByLot(e.target.checked)} />
-          No street number yet (off the plan): use plan and lot
+          Off the plan? Use the plan and lot number
         </label>
         {byLot && (
           <div className="grid2">

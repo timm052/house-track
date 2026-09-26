@@ -5,7 +5,7 @@ import {
   api, PROPERTY_TYPES, STATUSES,
   type Campaign, type GuideSource, type JudgementKind, type PropertyDetail as Detail,
   type PropertyType, type SaleMethod, type Stage, type Stance, type Status, ApiError } from "../api";
-import { parseMoney, day, fromLocalInput, LABEL, minutes, money, moneyRange, toLocalInput, saleWhen, streetLine, when } from "../format";
+import { parseMoney, day, daysSince, fromLocalInput, LABEL, minutes, money, moneyRange, toLocalInput, saleWhen, streetLine, when } from "../format";
 import { newId, sendOrQueue } from "../outbox";
 import { usePeople } from "../people";
 import { STATUS_COLOUR, changeTone, minutesTone, soonTone, suburbClass, tagStyle, useSuburbSlots, useTagColours } from "../colour";
@@ -240,7 +240,7 @@ function PriceBox({ p, c }: { p: Detail; c: Campaign | null }) {
   const first = guides[0];
   const saleAt = c && (c.sale_method === "auction" ? c.auction_at : c.eoi_closes_at);
   const soon = c && !c.outcome ? soonTone(saleAt) : "";
-  const listedDays = c?.listed_on ? Math.max(0, Math.round((Date.now() - new Date(c.listed_on).getTime()) / 86_400_000)) : null;
+  const listedDays = c?.listed_on ? daysSince(c.listed_on, c.outcome_on) : null;  // on the market until the outcome
   const link = c?.links[0];
   return (
     <div className="card price-box">
@@ -286,7 +286,7 @@ function Actions({ p, setTab }: { p: Detail; setTab: (t: Tab) => void }) {
       <Link to={`/map?pin=${p.id}`}><button><MapPin /> {p.lat == null ? "Set pin" : "Move pin"}</button></Link>
       <div className="actions-foot">
         <ConfirmButton label={<><Trash2 /> Delete house</>} yes="Delete it"
-          question="For mistakes and duplicates: everything recorded about it goes. Ruled it out? Set its status instead." onConfirm={remove} />
+          question="This deletes everything recorded about it. If you've ruled it out, change its status instead." onConfirm={remove} />
         {error && <p className="error small">{error}</p>}
       </div>
     </div>
@@ -615,7 +615,7 @@ function WhereAndGettingAround({ p }: { p: Detail }) {
   const write = useWrite(p.id);
   const t = p.travel;
   let where: string;
-  if (p.lat == null) where = p.geocode_status === "no_match" ? "Couldn't find this address automatically. Set the pin yourself." : "Finding it on the map…";
+  if (p.lat == null) where = p.geocode_status === "no_match" ? "Couldn't find this address. Set the pin yourself." : "Finding it on the map…";
   else if (p.manual_pin) where = "Pinned by hand.";
   else if (p.geocode_source === "gnaf") where = (p.geocode_confidence ?? 1) < 0.7 ? "Pinned to the street, not the house. Check it." : "Pinned from the national address file.";
   else where = "Pinned from an OpenStreetMap search. Check it's right.";
@@ -655,7 +655,7 @@ function SchoolsAndPlanning({ p }: { p: Detail }) {
           {o.label}
         </div>
       ))}
-      <div className="small muted">From the region's planning and school zone data, as of the last setup run. Confirm with a planning certificate.</div>
+      <div className="small muted">From planning and school zone data as at the last setup. Confirm with a planning certificate.</div>
     </div>
   );
 }
@@ -684,7 +684,7 @@ function Opinions({ p }: { p: Detail }) {
                 check_latest: true, expected_latest_id: seen },
       });
       setNote("");
-      setQueuedMsg(result === "queued" ? "No signal: saved on this phone, sends when you're back online." : null);
+      setQueuedMsg(result === "queued" ? "Saved on this phone. It sends when you're back online." : null);
       queryClient.invalidateQueries({ queryKey: ["property", p.id] });
       queryClient.invalidateQueries({ queryKey: ["overview"] });
     } catch (e) {
@@ -722,7 +722,7 @@ function Opinions({ p }: { p: Detail }) {
               {s === "pre_inspection" ? "Before inspecting" : "After: pursue to buy?"}</button>
           ))}
         </div>
-        <textarea placeholder="Note (optional). Dictate it." value={note} onChange={(e) => setNote(e.target.value)} />
+        <textarea placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
         <div className="stance">
           {(["yes", "maybe", "no"] as const).map((s) => (
             <button key={s} className={`on ${s}`} disabled={!whose} onClick={() => record(s)}>
@@ -784,7 +784,7 @@ function SaleTab({ p, c, showChart }: { p: Detail; c: Campaign; showChart: boole
   const { byId } = usePeople();
   const at = c.sale_method === "auction" ? c.auction_at : c.sale_method === "eoi" ? c.eoi_closes_at : null;
   const soon = countdown(at);
-  const listedDays = c.listed_on ? Math.max(0, Math.round((Date.now() - new Date(c.listed_on).getTime()) / 86400_000)) : null;
+  const listedDays = c.listed_on ? daysSince(c.listed_on) : null;
   const latest = (k: JudgementKind) => c.judgements.find((j) => j.kind === k);
   return (
     <>
@@ -829,7 +829,7 @@ function SaleTab({ p, c, showChart }: { p: Detail; c: Campaign; showChart: boole
       </div>
           <div className="card">
             <h2>Our numbers</h2>
-            <p className="small muted" style={{ marginTop: 0 }}>Shared between you both. Each change is kept.</p>
+            <p className="small muted" style={{ marginTop: 0 }}>Shared between you. Every change is kept.</p>
             <div className="numbers">
               {(["expected_sale", "walk_away"] as const).map((k) => {
                 const j = latest(k), all = c.judgements.filter((x) => x.kind === k);
@@ -1027,7 +1027,7 @@ function SetJudgement({ propertyId, campaignId, kind, current }: { propertyId: s
     write.mutate({ path: `/api/campaigns/${campaignId}/price-judgements`, body: { kind, amount_aud: aud } }, { onSuccess: () => setAmount(null) });
   };
   if (amount == null) return (
-    <button className="stat-value number-set" title="Change it" onClick={() => setAmount(current ? String(current) : "")}>
+    <button className="stat-value number-set" title="Change" onClick={() => setAmount(current ? String(current) : "")}>
       {current ? money(current) : <span className="muted small">Set it</span>}</button>
   );
   return (

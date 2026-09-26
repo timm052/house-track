@@ -32,7 +32,7 @@ export default function Settings() {
   return (
     <div style={{ marginTop: 12 }}>
       <h1>Settings</h1>
-      <p className="small muted">Shared by everyone in the household. <a href="#bookmarklets">Browser buttons</a> · Travel times and stations are under <Link to="/places">Places</Link>.</p>
+      <p className="small muted">These settings are shared by the household. Stations and places are in <Link to="/places">Places</Link>.</p>
       <PhoneAdding />
       <Bookmarklets />
       <div className="card stack">
@@ -98,15 +98,15 @@ function MoneySettings() {
   return (
     <div className="card stack">
       <h2>Budget</h2>
-      <p className="small muted">Used to show all-in costs and the most you can bid. Stamp duty uses Victoria's rates (check them with the State Revenue Office before relying on a figure).</p>
+      <p className="small muted">Used to work out total costs and the most you can bid. Stamp duty uses Victorian rates. Check with the State Revenue Office before relying on it.</p>
       <div className="grid2">{text("cash", "Cash for the purchase")}{text("loan", "Loan pre-approval")}</div>
       <label>Pre-approval expires<input type="date" value={String(form.expiry)} onChange={(e) => setF({ ...form, expiry: e.target.value })} /></label>
-      {expiring && <p className="small error">The pre-approval expires within 30 days.</p>}
+      {expiring && <p className="small error">Your pre-approval expires within 30 days.</p>}
       <label className="check"><input type="checkbox" checked={!!form.fhb} onChange={(e) => setF({ ...form, fhb: e.target.checked })} /> First home buyers</label>
-      <label className="check"><input type="checkbox" checked={!!form.ppr} onChange={(e) => setF({ ...form, ppr: e.target.checked })} /> We'll live in it (principal residence)</label>
+      <label className="check"><input type="checkbox" checked={!!form.ppr} onChange={(e) => setF({ ...form, ppr: e.target.checked })} /> We'll live in it (principal place of residence)</label>
       <div className="grid3">{text("conv", "Conveyancing")}{text("insp", "Inspections")}{text("other", "Other fees")}</div>
       <button className="primary" onClick={() => save.mutate()} disabled={save.isPending}>Save budget</button>
-      {data?.max_bid != null && <p>Most you can bid, all costs included: <strong>{money(data.max_bid)}</strong></p>}
+      {data?.max_bid != null && <p>Most you can bid, including costs: <strong>{money(data.max_bid)}</strong></p>}
     </div>
   );
 }
@@ -127,7 +127,7 @@ function LayerSettings() {
   return (
     <div className="card stack">
       <h2>Schools and planning layers</h2>
-      <p className="small muted">What a house inside each layer means for both of you. Refresh the data with the setup job.</p>
+      <p className="small muted">Choose what happens to houses inside each layer. Run setup again to update the data.</p>
       {data.map((l) => (
         <div key={l.code} className="row">
           <span className="grow small">{l.title}{l.data_as_of && <span className="muted"> · {l.data_as_of}</span>}</span>
@@ -186,11 +186,11 @@ function BookmarkletButton({ code, label }: { code: string; label: string }) {
   return (
     <div className="row">
       {/* React blocks javascript: links in JSX, so the href is set directly. Clicking it here does nothing. */}
-      <a className="bookmarklet" title="Drag me to your bookmarks bar" draggable
+      <a className="bookmarklet" title="Drag to your bookmarks bar" draggable
         ref={(el) => { el?.setAttribute("href", code); }} onClick={(e) => { e.preventDefault(); setHint(true); }}>{label}</a>
       <button className="small-btn" onClick={copy}>{copied === "yes" ? "Copied ✓" : copied === "no" ? "Couldn't copy" : "Copy code"}</button>
       {hint && <p className="small tone-warn" style={{ flexBasis: "100%", margin: 0 }}>
-        This button does nothing here. Drag it to your bookmarks bar, then click it there while you're on a
+        Drag this to your bookmarks bar, then click it there on a
         {label.includes("Refresh") ? " Domain page" : " Domain or realestate.com.au listing"}.</p>}
     </div>
   );
@@ -225,16 +225,16 @@ function PhoneAdding() {
     <div className="card stack" id="phone">
       <h2>Adding houses from your phone</h2>
       <p className="small" style={{ margin: 0 }}>
-        Share a listing to House Track from the Domain or realestate.com.au app, or from your phone's browser. A Domain listing's
-        address is read from its link. Its rooms, price guide, photos and floor plan come in with the next weekly refresh, as long
-        as <strong>Fill in what's missing</strong> is ticked. A realestate.com.au link doesn't include the address, so you type that.
+        Share a listing to House Track from the Domain or realestate.com.au app, or from your browser. Domain links include the
+        address. The rooms, price, photos and floor plan are added at the next weekly refresh, if <strong>Fill in what's
+        missing</strong> is ticked. For realestate.com.au links, you type the address.
       </p>
       {!ios && (
         <details open={android}>
           <summary><strong>Android</strong></summary>
           <ol className="small steps">
-            <li>Install House Track: in Chrome, open this site, tap <strong>⋮ → Add to Home screen → Install</strong>.</li>
-            <li>On a listing, in the Domain app or in Chrome, tap <strong>Share</strong> and choose <strong>House Track</strong>.</li>
+            <li>In Chrome, open House Track and tap <strong>⋮ → Add to Home screen → Install</strong>.</li>
+            <li>On a listing, tap <strong>Share</strong> and choose <strong>House Track</strong>.</li>
           </ol>
           <p className="small muted" style={{ margin: 0 }}>Not in the Share menu? Open House Track once from the home screen, then try again.</p>
         </details>
@@ -243,53 +243,47 @@ function PhoneAdding() {
         <details open={ios}>
           <summary><strong>iPhone and iPad</strong></summary>
           <p className="small" style={{ margin: "6px 0" }}>
-            Apple doesn't let web apps into the Share menu, so a shortcut from the Shortcuts app does it. There are two kinds; set up
-            either or both, once on each person's phone, and give them different names.</p>
+            iPhones don't let web apps into the Share menu, so you use a shortcut instead. There are two. Set up either or both on
+            each phone, with different names.</p>
           <h3 className="small" style={{ margin: "8px 0 2px" }}>Add in the background</h3>
           <p className="small" style={{ margin: 0 }}>
-            No browser opens: a notification says what happened. A Domain listing becomes a house straight away. A link without an address
-            (realestate.com.au) waits at the top of the Houses page for you to finish.</p>
+            Adds the house without opening a browser, then shows a notification. Domain listings are added right away. realestate.com.au
+            links wait at the top of the Houses page for you to finish.</p>
           <ol className="small steps">
-            <li>Open <strong>Shortcuts</strong> and tap <strong>+</strong>. Tap the name at the top, <strong>Rename</strong> it
-              to <strong>Add to House Track</strong>.</li>
-            <li>Tap the name again → <strong>Details</strong> (or <strong>ⓘ</strong> at the bottom) and turn on <strong>Show in Share
-              Sheet</strong>. In the <em>Receive</em> block that appears, choose <strong>URLs</strong>, <strong>Safari web pages</strong>
-              and <strong>Text</strong>.</li>
-            <li>Add <strong>Get URLs from Input</strong> (from <em>Shortcut Input</em>).</li>
-            <li>Add <strong>URL</strong>, and type this address into it:
+            <li>Open <strong>Shortcuts</strong>, tap <strong>+</strong>, and rename the shortcut <strong>Add to House Track</strong>.</li>
+            <li>Tap the name, then <strong>Details</strong> (or <strong>ⓘ</strong>), and turn on <strong>Show in Share Sheet</strong>. In
+              the <em>Receive</em> block, choose <strong>URLs</strong>, <strong>Safari web pages</strong> and <strong>Text</strong>.</li>
+            <li>Add <strong>Get URLs from Input</strong>.</li>
+            <li>Add <strong>URL</strong> and enter this address:
               <CopyLine text={`${location.origin}/api/share`} /></li>
-            <li>Add <strong>Get Contents of URL</strong>. Tap <strong>Show More</strong> (the ⌄) and set:
+            <li>Add <strong>Get Contents of URL</strong>, tap <strong>Show More</strong>, and set:
               <ul>
                 <li><strong>Method</strong>: POST</li>
-                <li><strong>Headers</strong> → Add new header: key <code>X-Person-Id</code>, value your ID:
-                  {me ? <CopyLine text={me.id} /> : <span className="muted"> (pick who you are first)</span>}</li>
-                <li><strong>Request Body</strong>: JSON → Add new field → <strong>Text</strong>: key <code>url</code>, and for the value
-                  tap the variable bar and choose <strong>URLs</strong> (from Get URLs from Input).</li>
+                <li><strong>Headers</strong>: a header with key <code>X-Person-Id</code> and your ID as the value.
+                  {me ? <CopyLine text={me.id} /> : <span className="muted"> Choose who you are first.</span>}</li>
+                <li><strong>Request Body</strong>: JSON, with a <strong>Text</strong> field. Its key is <code>url</code> and its value is
+                  the variable <strong>URLs</strong>.</li>
               </ul></li>
-            <li>Add <strong>Get Dictionary Value</strong>: <em>Get <strong>Value</strong> for</em> <code>message</code> <em>in
-              <strong> Contents of URL</strong></em>.</li>
-            <li>Add <strong>Show Notification</strong> with <strong>Dictionary Value</strong>. Tap <strong>Done</strong>.</li>
-            <li>On a listing in the Domain app or your browser: <strong>Share → Add to House Track</strong>. The first time, allow it
-              to connect to House Track.</li>
+            <li>Add <strong>Get Dictionary Value</strong> and set it to get <code>message</code> from <strong>Contents of URL</strong>.</li>
+            <li>Add <strong>Show Notification</strong> showing <strong>Dictionary Value</strong>, then tap <strong>Done</strong>.</li>
+            <li>To use it, tap <strong>Share → Add to House Track</strong> on a listing. Allow it to connect the first time.</li>
           </ol>
           <h3 className="small" style={{ margin: "12px 0 2px" }}>Check it first</h3>
           <p className="small" style={{ margin: 0 }}>
-            Opens the <strong>Add a house</strong> form in your browser, filled in from the link, to check and save.</p>
+            Opens the filled-in <strong>Add a house</strong> form in your browser, so you can check it before saving.</p>
           <ol className="small steps">
-            <li>In <strong>Shortcuts</strong>, tap <strong>+</strong> and rename it, e.g. <strong>Check in House Track</strong>.</li>
-            <li>Tap the name → <strong>Details</strong> (or <strong>ⓘ</strong>) → turn on <strong>Show in Share Sheet</strong>, and in
-              the <em>Receive</em> block choose <strong>URLs</strong>, <strong>Safari web pages</strong> and <strong>Text</strong>.</li>
-            <li>Add <strong>Get URLs from Input</strong>, then <strong>URL Encode</strong> (it should say <em>URL Encode
-              <strong> URLs</strong></em>).</li>
-            <li>Add <strong>Text</strong>. Type this into it, then with the cursor at the end tap <strong>URL Encoded Text</strong> in the
-              variable bar above the keyboard, so it follows straight after <code>url=</code>:
+            <li>In <strong>Shortcuts</strong>, tap <strong>+</strong> and name it <strong>Check in House Track</strong>.</li>
+            <li>Turn on <strong>Show in Share Sheet</strong> as above, with the same three input types.</li>
+            <li>Add <strong>Get URLs from Input</strong>, then <strong>URL Encode</strong>.</li>
+            <li>Add <strong>Text</strong> and enter this address. With the cursor at the end, tap <strong>URL Encoded Text</strong> above
+              the keyboard so it follows <code>url=</code>:
               <CopyLine text={`${location.origin}/add?url=`} /></li>
-            <li>Add <strong>Open URLs</strong>. It should say <em>Open <strong>Text</strong></em>. Tap <strong>Done</strong>.</li>
-            <li>On a listing: <strong>Share → Check in House Track</strong>. It opens in your default browser (iOS can't open links in a
-              home-screen app).</li>
+            <li>Add <strong>Open URLs</strong>. It should read <em>Open Text</em>. Tap <strong>Done</strong>.</li>
+            <li>To use it, tap <strong>Share → Check in House Track</strong> on a listing. It opens in your default browser, since iOS
+              can't open links in home-screen apps.</li>
           </ol>
-          <p className="small muted" style={{ margin: 0 }}>Either way the phone must be on Tailscale. For the background shortcut, each
-            person uses their own ID, so the house is added in their name.</p>
+          <p className="small muted" style={{ margin: 0 }}>Both need Tailscale on. Each person uses their own ID, so houses are added in
+            their name.</p>
         </details>
       )}
     </div>
@@ -303,40 +297,40 @@ function Bookmarklets() {
     <div className="card stack" id="bookmarklets">
       <h2>Browser buttons</h2>
       <p className="small" style={{ margin: 0 }}>
-        Two buttons for your browser's bookmarks bar, for adding and updating houses straight from Domain and realestate.com.au.
-        They work in Chrome, Edge, Firefox and Safari on a computer.
+        Two bookmarks-bar buttons for adding and updating houses from Domain and realestate.com.au. They work in Chrome, Edge,
+        Firefox and Safari on a computer.
       </p>
       <ol className="small steps">
-        <li>Show the bookmarks bar: press <kbd>{mac ? "⌘" : "Ctrl"}</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd>.</li>
-        <li>Drag each button below onto the bookmarks bar.</li>
+        <li>Show the bookmarks bar with <kbd>{mac ? "⌘" : "Ctrl"}</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd>.</li>
+        <li>Drag each button below onto it.</li>
       </ol>
 
       <div className="bm-item">
         <BookmarkletButton code={captureCode(origin)} label="+ House Track" />
         <p className="small muted">
-          On a listing, click it to add the house: the address, rooms, land, sale method and date, and price guide are filled in, with
-          the photos, agents, inspection times, Statement of Information and suggested tags to tick. On a listing you already track, it
-          shows what's changed and updates the house.
+          Click it on a listing to add the house. It fills in the address, rooms, land, sale details and price guide, and lets you
+          choose photos, agents, inspections, the Statement of Information and tags. On a house you already track, it shows what's
+          changed.
         </p>
       </div>
       <div className="bm-item">
         <BookmarkletButton code={refreshCode(origin)} label="⟳ Refresh from Domain" />
         <p className="small muted">
-          Once a week, open any Domain page and click it. It checks every active house's listing a few seconds apart and records new price
-          guides, dates, inspection times and agents. <Link to="/refresh">See what it will check</Link>
+          Once a week, click it on any Domain page. It checks each active house's listing and records new price guides, dates,
+          inspections and agents. <Link to="/refresh">See what it checks</Link>
         </p>
       </div>
 
       <details>
         <summary className="small">On a phone browser instead</summary>
         <p className="small" style={{ margin: "6px 0" }}>
-          Sharing (above) is easier on a phone, but the buttons can be added too. They may not work in every phone browser.</p>
+          Sharing is easier on a phone, but the buttons can work too. Not every phone browser supports them.</p>
         <ol className="small steps">
           <li>Tap <strong>Copy code</strong> next to a button.</li>
-          <li><strong>Android Chrome:</strong> bookmark any page (☆), then edit that bookmark, name it (e.g. “House Track”) and paste the code
-            as its URL. To use it on a listing, type its name in the address bar and tap it in the suggestions.</li>
-          <li><strong>iPhone Safari:</strong> bookmark any page, then go to <strong>Bookmarks → Edit</strong>, open it, name it and paste the code
-            as its address. To use it on a listing, open Bookmarks and tap it.</li>
+          <li><strong>Android Chrome:</strong> bookmark any page, edit the bookmark and paste the code as its URL. To use it, type its
+            name in the address bar on a listing and tap it.</li>
+          <li><strong>iPhone Safari:</strong> bookmark any page, edit it in <strong>Bookmarks</strong> and paste the code as its address.
+            To use it, open Bookmarks on a listing and tap it.</li>
         </ol>
       </details>
       <details>
@@ -344,12 +338,12 @@ function Bookmarklets() {
         <ol className="small steps">
           <li>Click <strong>Copy code</strong> next to a button.</li>
           <li>Right-click the bookmarks bar and choose <strong>Add page…</strong> (Chrome, Edge) or <strong>Add Bookmark…</strong> (Firefox).</li>
-          <li>Name it (for example “+ House Track”), paste the code into the <strong>URL</strong> box, and save.</li>
+          <li>Name it, paste the code into the <strong>URL</strong> box and save.</li>
         </ol>
       </details>
       <p className="small muted" style={{ margin: 0 }}>
-        Buttons last updated {BOOKMARKLETS_UPDATED}. If you added them before then, delete the old ones and drag these again.
-        They read the listing as your browser shows it, so they can break when the sites change.
+        Buttons last updated {BOOKMARKLETS_UPDATED}. If yours are older, replace them. They can stop working if Domain or
+        realestate.com.au change their sites.
       </p>
     </div>
   );

@@ -35,7 +35,7 @@ export default function Driveway() {
     if (!navigator.geolocation) { setGpsError("This browser can't share your location."); return; }
     const watch = navigator.geolocation.watchPosition(
       (p) => setPos({ lat: p.coords.latitude, lon: p.coords.longitude, accuracy: p.coords.accuracy }),
-      (e) => setGpsError(e.code === e.PERMISSION_DENIED ? "Location permission is off; pick the house below." : "No GPS fix yet."),
+      (e) => setGpsError(e.code === e.PERMISSION_DENIED ? "Location is off. Pick the house below." : "No GPS fix yet."),
       { enableHighAccuracy: true, maximumAge: 15_000, timeout: 20_000 },
     );
     return () => navigator.geolocation.clearWatch(watch);
@@ -143,7 +143,7 @@ export default function Driveway() {
                 {s === "pre_inspection" ? "Before inspecting" : "After: pursue to buy?"}</button>
             ))}
           </div>
-          <textarea placeholder="Note: tap the microphone on your keyboard to dictate" value={note} onChange={(e) => setNote(e.target.value)} />
+          <textarea placeholder="Add a note, or tap the mic to dictate" value={note} onChange={(e) => setNote(e.target.value)} />
           <div className="stance big">
             {(["yes", "maybe", "no"] as const).map((s) => (
               <button key={s} className={`on ${s}`} onClick={() => record(s)}>{LABEL.stance[s]}</button>

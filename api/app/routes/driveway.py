@@ -198,7 +198,7 @@ def one_event(event_type: str, event_id: UUID, request: Request) -> Response:
 
 # ─── photos & documents ───────────────────────────────────────────────
 ATTACHMENT_SELECT = """SELECT id, property_id, campaign_id, inspection_id, kind, sha256, mime_type, byte_size,
-                              original_name, url, caption, taken_at, created_at, created_by FROM attachment"""
+                              original_name, url, source_url, caption, taken_at, created_at, created_by FROM attachment"""
 
 
 def attachments_for(conn, property_id: UUID) -> list[dict]:
@@ -283,7 +283,12 @@ def download_file(url: str, types: tuple[str, ...] = DOCUMENT_TYPES, accept: str
 
 
 def save_photo(property_id: UUID, person, url: str, caption: str | None, kind: str = "photo") -> dict:
-    """Keep a copy (listings come down after the sale), once: the same photo twice is one attachment."""
+    """Keep a copy (listings come down after the sale), once: the same photo twice is one attachment, and a
+    link already kept isn't downloaded again."""
+    with tx() as conn:
+        kept = conn.execute("SELECT id FROM attachment WHERE property_id = %s AND source_url = %s", (property_id, url)).fetchone()
+    if kept:
+        return {"id": kept["id"], "existing": True}
     data, mime = download_image(url)
     sha = blobs.store(data)
     blobs.image_facts(data, sha)  # also writes the thumbnail
@@ -293,12 +298,13 @@ def save_photo(property_id: UUID, person, url: str, caption: str | None, kind: s
             raise not_found("Property")
         same = conn.execute("SELECT id FROM attachment WHERE property_id = %s AND sha256 = %s", (property_id, sha)).fetchone()
         if same:
+            conn.execute("UPDATE attachment SET source_url = %s WHERE id = %s AND source_url IS NULL", (url, same["id"]))
             return {"id": same["id"], "existing": True}
         row = conn.execute(
-            # A stored file, so no url: an attachment is a file or a link, never both.
-            """INSERT INTO attachment (property_id, kind, sha256, mime_type, byte_size, original_name, caption)
-               VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
-            (property_id, kind, sha, mime, len(data), name, caption)).fetchone()
+            # A stored file, so no url: an attachment is a file or a link, never both. source_url is where it came from.
+            """INSERT INTO attachment (property_id, kind, sha256, mime_type, byte_size, original_name, caption, source_url)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+            (property_id, kind, sha, mime, len(data), name, caption, url)).fetchone()
     return {"id": row["id"], "existing": False}
 
 
@@ -388,8 +394,9 @@ def keep_copy(attachment_id: UUID, person: Person) -> dict:
         blobs.image_facts(data, sha)
     name = row["url"].split("?")[0].rstrip("/").rsplit("/", 1)[-1][:200] or "document"
     with tx(person) as conn:
-        conn.execute("""UPDATE attachment SET sha256 = %s, mime_type = %s, byte_size = %s, original_name = %s, url = NULL
-                        WHERE id = %s""", (sha, mime, len(data), name, attachment_id))
+        conn.execute("""UPDATE attachment SET sha256 = %s, mime_type = %s, byte_size = %s, original_name = %s,
+                               url = NULL, source_url = %s
+                        WHERE id = %s""", (sha, mime, len(data), name, row["url"], attachment_id))
     return {"id": attachment_id, "mime_type": mime, "byte_size": len(data)}
 
 

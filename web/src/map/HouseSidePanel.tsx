@@ -153,7 +153,7 @@ export default function HouseSidePanel({ p, route, routeError, onClose }: {
               ))}
             </div>
             <div className="tiny muted">{comparables.some((x) => x.source === "price_statement") ? "From the Statement of Information. " : ""}
-              Drawn on the map as hollow markers while this house is selected.</div>
+              Shown as hollow markers while this house is selected.</div>
           </section>
         )}
 

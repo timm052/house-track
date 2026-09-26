@@ -80,7 +80,7 @@ export default function Plan() {
   return (
     <div style={{ marginTop: 12 }}>
       <h1>Plan the inspections</h1>
-      <p className="small muted">The day's inspections in time order, with the drive between each (no traffic) and when you'd get there.</p>
+      <p className="small muted">Each day's inspections in order, with the drive between them and when you'd arrive. Drives assume no traffic.</p>
       {events.isPending ? <p className="muted">Loading…</p> : days.length === 0 ? (
         <div className="card empty">No inspections in the next two weeks. Add them from a house's page, or with the + House Track button.</div>
       ) : (

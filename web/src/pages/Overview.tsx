@@ -247,7 +247,7 @@ export default function Overview() {
           h("span", { class: "col-name", title: col.label }, col.label),
           sortIdx >= 0 ? h("span", { class: "col-sort" }, `${current.sort[sortIdx].dir === "asc" ? "▲" : "▼"}${current.sort.length > 1 ? sortIdx + 1 : ""}`) : null,
           h("button", {
-            class: `col-filter ${filtered ? "on" : ""}`, title: "Filter, hide or move (or right-click the header)",
+            class: `col-filter ${filtered ? "on" : ""}`, title: "Column options. Or right-click the header.",
             onClick: (e: MouseEvent) => { e.stopPropagation(); const r = (e.target as HTMLElement).getBoundingClientRect(); setFilterFor({ key: col.key, x: r.left, y: r.bottom }); },
           }, "⏷"),
         ]),
@@ -428,7 +428,7 @@ export default function Overview() {
         <input type="search" placeholder="Search address, agent, notes" value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 240 }} />
         <button onClick={() => setPicker(!picker)}>Columns</button>
         <button onClick={exportCsv}>Export CSV</button>
-        <button disabled={!lastAction} onClick={undo} title="Ctrl+Z">Undo</button>
+        <button disabled={!lastAction} onClick={undo} title="Undo (Ctrl+Z)">Undo</button>
       </div>
 
       <div className="overview-filters">
@@ -468,7 +468,7 @@ export default function Overview() {
         {conflicts.length > 0 && (
           <aside className="conflicts">
             <strong>Changed by someone else</strong>
-            <p className="small muted">These saves were stopped because the value changed after you loaded it. History fields keep both entries whichever you choose.</p>
+            <p className="small muted">Someone changed these after you loaded them. Choose which value to keep. History fields keep both either way.</p>
             {conflicts.map(([key, s]) => {
               const [rowId, column] = key.split("|");
               const col = byKey.get(column)!;
@@ -510,7 +510,7 @@ export default function Overview() {
           onApply={(fs) => { change({ filters: [...current.filters.filter((x) => x.column !== filterFor.key), ...fs] }); setFilterFor(null); }}
           onClose={() => setFilterFor(null)} />
       )}
-      <p className="narrow-note small muted">Overview is designed for a desktop screen. On a phone, use <Link to="/">Houses</Link>.</p>
+      <p className="narrow-note small muted">Overview needs a bigger screen. On a phone, use <Link to="/">Houses</Link>.</p>
     </div>
   );
 }

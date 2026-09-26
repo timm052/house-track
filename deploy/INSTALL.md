@@ -97,6 +97,13 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.3.10
+
+- Fix: updating a house from its listing added another copy of the Statement of Information each time. The update merges the copies already added into one. The app backs up the database before it does.
+- The Statement of Information is always kept, since agents take it down after the sale.
+- Days listed comes from the listing. The weekly refresh fills in the date for houses added from a shared link. Until then it's blank, rather than counted from the day you added the house.
+- Shorter, plainer help text and tooltips throughout.
+
 ### 0.3.9
 
 - Settings has iPhone steps for both shortcuts:

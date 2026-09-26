@@ -403,7 +403,7 @@ export default function MapPage() {
       <div className="map-top">
         {pinFor && <div className="banner">Tap the map where {pinTarget ?? "the house"} is. <Link to={`/p/${pinFor}`}>Cancel</Link></div>}
         {pickPlace && <div className="banner">Tap the map {pickPlace.move ? "where" : "to place"} “{pickPlace.name}”{pickPlace.move ? " really is" : ""}. <Link to="/places">Cancel</Link></div>}
-        {drawKind && <div className="banner">Tap to add corners, and tap the first corner to finish. <button className="link" onClick={cancelDrawing}>Cancel</button></div>}
+        {drawKind && <div className="banner">Tap each corner. Tap the first one to finish. <button className="link" onClick={cancelDrawing}>Cancel</button></div>}
         {editing && (
           <div className="banner">
             Drag corners to reshape “{editing.name}”. <button className="link" onClick={saveEdit}>Save</button>{" "}
@@ -428,7 +428,7 @@ export default function MapPage() {
       {showCommute && (
         <div className="sheet stack">
           <div className="row"><strong className="grow">Commute area</strong><button className="link" onClick={() => setShowCommute(false)}>Done</button></div>
-          <p className="small muted" style={{ margin: 0 }}>Shades everywhere you can get to within the time, from a house or a place (driving assumes no traffic).</p>
+          <p className="small muted" style={{ margin: 0 }}>Shades everywhere you can reach in that time from a house or place. Drives assume no traffic.</p>
           {commuteFrom.length === 0 ? <p className="small" style={{ margin: 0 }}>Select a house on the map, or add places on the <Link to="/places">Places</Link> tab.</p> : (
             <>
               <select value={commute?.from ?? ""} aria-label="From"
@@ -617,7 +617,7 @@ function AreaSheet({ a, mine, owner, onEdit, onChanged, onClose }: {
         <span className="pill">{a.kind === "hard_exclude" ? "Exclude" : "Warn"}</span>
         <button className="link" onClick={onClose} aria-label="Close">✕</button>
       </div>
-      <div className="small muted">{mine ? "Your area. It only affects your map." : `${owner}'s area. It doesn't hide anything for you.`}</div>
+      <div className="small muted">{mine ? "Your area. Only your map is affected." : `${owner}'s area. It doesn't hide anything for you.`}</div>
       {a.reason && <div className="small">{a.reason}</div>}
       {mine && (
         <>

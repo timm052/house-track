@@ -74,7 +74,7 @@ function PdfPages({ src, zoom }: { src: string; zoom: number }) {
     fetch(src).then((r) => { if (!r.ok) throw new Error(`Couldn't load the document (${r.status}).`); return r.arrayBuffer(); })
       .then((data) => { task = pdfjs.getDocument({ data }); return task.promise; })
       .then((d) => { if (!cancelled) setDoc(d); })
-      .catch((e) => { if (!cancelled) setError(e instanceof TypeError ? "No connection, and this document isn't saved on this device yet." : (e as Error).message); });
+      .catch((e) => { if (!cancelled) setError(e instanceof TypeError ? "You're offline and this document isn't saved on this device." : (e as Error).message); });
     return () => { cancelled = true; void (task as ReturnType<typeof pdfjs.getDocument> | null)?.destroy(); };
   }, [src]);
 

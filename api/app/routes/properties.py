@@ -57,7 +57,7 @@ def find_duplicate(conn: psycopg.Connection, a: Address, exclude: UUID | None = 
 def duplicate_error(existing: UUID) -> HTTPException:
     # Relist recognition: the UI offers to open the existing property and add a new campaign there.
     return HTTPException(
-        409, {"message": "This property is already tracked.", "existing_property_id": str(existing)}
+        409, {"message": "This house is already in House Track.", "existing_property_id": str(existing)}
     )
 
 

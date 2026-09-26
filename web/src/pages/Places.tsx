@@ -62,7 +62,7 @@ export default function Places() {
         {destinations.map((d) => (
           <div key={d.id} className="place-row">
             <button className={`link place-star ${d.is_favourite ? "on" : ""}`} aria-pressed={d.is_favourite}
-              title={d.is_favourite ? "Shown on the house cards (click to stop)" : "Show on the house cards"}
+              title={d.is_favourite ? "Shown on house cards. Click to hide." : "Show on the house cards"}
               onClick={() => favourite.mutate({ id: d.id, on: !d.is_favourite })}><Star /></button>
             <div className="grow">
               <input className="place-name" defaultValue={d.name} key={d.name} aria-label="Name"
@@ -84,7 +84,7 @@ export default function Places() {
             </div>
             <div className="place-actions small">
               <button className="link" onClick={() => navigate(`/map?pick=move&place=${d.id}&name=${encodeURIComponent(d.name)}`)}>Move</button>
-              <ConfirmButton label="Remove" question={`Stop working out times to ${d.name}?`} yes="Remove" onConfirm={() => remove.mutate(d.id)} />
+              <ConfirmButton label="Remove" question={`Stop showing times to ${d.name}?`} yes="Remove" onConfirm={() => remove.mutate(d.id)} />
             </div>
           </div>
         ))}
@@ -134,7 +134,7 @@ export default function Places() {
           </div>
         ))}
         {stationCount.data?.n === 0 ? (
-          <p className="small muted">The station list is empty. Run the setup job to load it.</p>
+          <p className="small muted">No stations loaded yet. Run setup to load them.</p>
         ) : (
           <div className="address-search">
             <input type="search" placeholder="Add a station" value={q} onChange={(e) => setQ(e.target.value)} />

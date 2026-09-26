@@ -114,7 +114,7 @@ def prefill(body: PrefillIn, _: Person) -> dict:
     try:
         page = fetch_page(body.url)
     except HTTPException:
-        raise HTTPException(502, "Couldn't read that page. Try the bookmarklet from Settings, or fill the form in.") from None
+        raise HTTPException(502, "Couldn't read that page. Use the + House Track button, or fill in the form.") from None
     return with_existing(listing_parse.parse(page, body.url))
 
 
@@ -149,7 +149,7 @@ def share(body: ShareIn, person: Person) -> dict:
     shared = ([body.url] if isinstance(body.url, str) else list(body.url or [])) + [body.text or ""]
     link = next((m[0] for s in shared if (m := re.search(r"https?://[^\s\"<>]+", s or ""))), None)
     if not link:
-        return {"status": "no_link", "message": "Nothing to add: what was shared had no link in it."}
+        return {"status": "no_link", "message": "Nothing to add. The share had no link in it."}
     url = clean_url(link)
     known = with_existing({"url": url})
     if known["existing_property_id"]:
@@ -169,12 +169,12 @@ def share(body: ShareIn, person: Person) -> dict:
                     "message": f"Already in House Track: {display(Address(**{k: parts.get(k) for k in ('unit', 'street_number', 'street', 'suburb', 'postcode')}))}"}
         address = display(Address(**{k: parts.get(k) for k in ("unit", "street_number", "street", "suburb", "postcode")}))
         return {"status": "added", "property_id": str(created["id"]),
-                "message": f"Added {address}. The rooms, price and photos come in with the weekly refresh."}
+                "message": f"Added {address}. Rooms, price and photos arrive with the weekly refresh."}
     with tx(person) as conn:
         conn.execute("""INSERT INTO shared_link (url, shared_by) VALUES (%s, %s)
                         ON CONFLICT (url) DO UPDATE SET shared_at = now(), shared_by = EXCLUDED.shared_by, dismissed_at = NULL""",
                      (url, person))
-    return {"status": "saved", "message": "Saved the link. Open House Track to finish adding it: this link doesn't include the address."}
+    return {"status": "saved", "message": "Link saved. It has no address, so open House Track to finish adding it."}
 
 
 @router.get("/shared-links")
@@ -219,7 +219,7 @@ def fetch_page(url: str) -> str:
             return r.read(3_000_000).decode("utf-8", errors="replace")
     except (HTTPError, URLError, TimeoutError) as e:
         raise HTTPException(502, f"The listing site wouldn't let House Track read the page ({getattr(e, 'code', None) or 'no response'}). "
-                                 "Open the listing and click the House Track bookmarklet (see Settings) to add its photo.") from None
+                                 "Click + House Track on the listing to add its photo.") from None
 
 
 # ─── weekly refresh: the "Refresh from Domain" bookmarklet ───────────────
@@ -278,6 +278,7 @@ def refresh_one(body: RefreshIn, person: Person) -> dict:
         auction_at=got.get("auction_at") if method == "auction" else None,
         eoi_closes_at=got.get("eoi_closes_at") if method == "eoi" else None,
         inspections=got.get("inspections") or [], agents=got.get("agents") or [], soi_url=got.get("soi_url"),
+        listed_on=got.get("listed_on"),
         **{f: got.get(f) for f, _ in listing_apply.DETAILS}, apply_details=False,  # unattended: report, don't overwrite
         fill_missing=body.fill_missing,
         listing_status=got.get("listing_status"), listing_price_text=got.get("price_text"),

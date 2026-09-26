@@ -25,7 +25,7 @@ export function ScoresCard({ propertyId }: { propertyId: string }) {
   const [whose, setWhose] = useState(me?.id ?? "");
   if (!criteria.data?.length) {
     return (
-      <div className="card small muted">Score houses against your own criteria (garden, light, street…): set them up in <Link to="/settings">Settings</Link>.</div>
+      <div className="card small muted">Score houses on what matters to you, like garden, light or street. Set up criteria in <Link to="/settings">Settings</Link>.</div>
     );
   }
   const current = (c: string, p: string) => data?.scores.find((s) => s.criterion_id === c && s.person_id === p)?.score;
@@ -56,7 +56,7 @@ export function ScoresCard({ propertyId }: { propertyId: string }) {
           </div>
         </div>
       ))}
-      <div className="small muted">Out of 100, weighted. * = not every criterion scored yet.</div>
+      <div className="small muted">Weighted score out of 100. * means some criteria aren't scored yet.</div>
     </div>
   );
 }
@@ -70,7 +70,7 @@ export function CriteriaSettings() {
   return (
     <div className="card stack">
       <h2>What matters to us</h2>
-      <p className="small muted">Criteria you each score houses against, 1 to 5. Weight 5 counts five times as much as weight 1.</p>
+      <p className="small muted">You each score houses on these from 1 to 5. A weight of 5 counts five times as much as 1.</p>
       {criteria.data?.map((c) => (
         <div key={c.id} className="row">
           <span className="grow">{c.name}</span>
@@ -114,7 +114,7 @@ export function Compare() {
   return (
     <div style={{ marginTop: 12 }}>
       <h1>Compare</h1>
-      <p className="small muted">Pick up to four houses. Rows where they differ are highlighted; open a house from its name.</p>
+      <p className="small muted">Pick up to four houses. Differences are highlighted. Click a name to open the house.</p>
       <div className="row">
         {[0, 1, 2, 3].map((i) => (
           <select key={i} className="grow" value={ids[i] ?? ""} aria-label={`House ${i + 1}`}
@@ -124,7 +124,7 @@ export function Compare() {
           </select>
         ))}
       </div>
-      {rows.length === 0 && <div className="card empty">Choose a house above to start. You can also press Compare on any house page.</div>}
+      {rows.length === 0 && <div className="card empty">Choose a house above, or press Compare on any house page.</div>}
       {rows.length > 0 && (
         <div className="compare-wrap card" style={{ padding: 8 }}>
           <table className="compare">

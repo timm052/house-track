@@ -111,6 +111,16 @@ def test_worker_reads_linked_statements_once(client, people, monkeypatch, tmp_pa
         worker.save_statement(conn, campaign["id"], att, statement.read_text(FORM))
     assert len(client.get(f"/api/campaigns/{campaign['id']}/comparables").json()["entered"]) == 3
 
+    # Updating from the listing again, which still links it, doesn't add it again now that it's kept.
+    again = client.post(f"/api/properties/{pid}/listing-update", headers=as_(a), json={"soi_url": url}).json()
+    assert again["soi"] == 0 and "Statement of Information" not in again["changes"]
+    # The same file under another link is added, then dropped once it's downloaded and found to be the same.
+    client.post(f"/api/properties/{pid}/attachments", headers=as_(a), data={"kind": "price_statement", "url": url + "?v=2"})
+    while worker.read_statements():
+        pass
+    docs = [x for x in client.get(f"/api/properties/{pid}").json()["attachments"] if x["kind"] == "price_statement"]
+    assert [x["id"] for x in docs] == [att] and docs[0]["source_url"] == url
+
 
 def test_a_statement_that_cannot_be_read_is_recorded(client, people, monkeypatch, tmp_path):
     monkeypatch.setenv("BLOB_DIR", str(tmp_path))

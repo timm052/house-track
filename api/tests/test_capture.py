@@ -141,6 +141,8 @@ def test_weekly_refresh_targets_and_updates(client, people, monkeypatch):
     assert fetched == [mine_img.format(n=2), mine_img.format(n=1)]  # in the listing's order
     assert any(ch.startswith("1 new inspection time: ") for ch in r["changes"])
     assert "Agents: Pat Agent, Sam Seller" in r["changes"] and r["flag"].startswith("Under offer")
+    assert "Listed 10 Sep 2026" in r["changes"]  # added from a link with no date: now days listed can be counted
+    assert client.get(f"/api/properties/{pid}").json()["campaigns"][0]["listed_on"] == "2026-09-10"
     again = client.post("/api/listing/refresh", headers=a, json={"property_id": pid, "url": url, "status_code": 200,
                                                                   "next_data": json.dumps(data)}).json()
     assert again["changes"] == ["2 photos from the listing"]  # nothing else new (the stub above never saves the photos)

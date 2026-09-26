@@ -110,7 +110,7 @@ function AttendeeNote({ inspectionId, initial, attended, onDone }: { inspectionI
       id: newId(), method: "PUT", path: `/api/inspections/${inspectionId}/attendees/${me.id}`,
       body: { note: note.trim() || null }, label: `Inspection note by ${me.display_name}`,
     });
-    setMsg(result === "sent" ? null : "Saved on this phone; it sends when you're back online.");
+    setMsg(result === "sent" ? null : "Saved on this phone. It sends when you're back online.");
     onDone();
   }
   return (
@@ -204,7 +204,7 @@ export function Files({ propertyId, attachments, coverId, address }: { propertyI
             <>
               <a className="grow" href={d.url} target="_blank" rel="noreferrer">{d.caption ?? d.url} ↗</a>
               <button className="link" disabled={keeping === d.id} onClick={() => keepCopy(d.id)}
-                title="Download it into House Track so it opens here and works offline">{keeping === d.id ? "Saving…" : "Keep a copy"}</button>
+                title="Save a copy in House Track so it works offline">{keeping === d.id ? "Saving…" : "Keep a copy"}</button>
             </>
           ) : (
             <button className="link grow doc-open" onClick={() => setViewing({ items: docItems, start: fileDocs.indexOf(d) })}>

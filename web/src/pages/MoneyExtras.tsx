@@ -45,7 +45,7 @@ export function PriceHistory({ campaigns }: { campaigns: Campaign[] }) {
         {passed.map((p, i) => <circle key={`p${i}`} cx={x(p.t)} cy={y(p.v)} r={4} className="passed"><title>Passed in {money(p.v)}</title></circle>)}
         {sold.map((s, i) => <circle key={`s${i}`} cx={x(s.t)} cy={y(s.v)} r={5} className="sold"><title>Sold {money(s.v)}</title></circle>)}
       </svg>
-      <div className="small muted">Bars: price guides over time · dot: sold (filled) or passed in (hollow) · lines: our figures</div>
+      <div className="small muted">Bars: price guides · Filled dot: sold · Hollow dot: passed in · Lines: our numbers</div>
     </div>
   );
 }

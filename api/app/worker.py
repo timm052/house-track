@@ -286,7 +286,7 @@ def read_statements(limit: int = 1) -> int:
     from .routes.driveway import download_file
     with tx() as conn:
         rows = conn.execute(
-            f"""SELECT a.id, a.campaign_id, a.url, a.sha256, a.mime_type, a.created_by FROM attachment a
+            f"""SELECT a.id, a.property_id, a.campaign_id, a.url, a.sha256, a.mime_type, a.created_by FROM attachment a
                 LEFT JOIN statement_read r ON r.attachment_id = a.id
                 WHERE a.kind = 'price_statement' AND a.campaign_id IS NOT NULL
                   AND (a.url IS NOT NULL OR a.mime_type = 'application/pdf')
@@ -300,9 +300,18 @@ def read_statements(limit: int = 1) -> int:
                 data, mime = download_file(a["url"], ("application/pdf",), "application/pdf", "Statement of Information")
                 sha = blobs.store(data)
                 name = a["url"].split("?")[0].rstrip("/").rsplit("/", 1)[-1][:200] or "statement.pdf"
-                with tx(a["created_by"]) as conn:  # kept, so it opens in the app and outlives the listing
-                    conn.execute("""UPDATE attachment SET sha256 = %s, mime_type = %s, byte_size = %s, original_name = %s, url = NULL
-                                    WHERE id = %s""", (sha, mime, len(data), name, a["id"]))
+                with tx(a["created_by"]) as conn:
+                    same = conn.execute("""SELECT id FROM attachment WHERE property_id = %s AND campaign_id = %s
+                                           AND kind = 'price_statement' AND sha256 = %s AND id <> %s""",
+                                        (a["property_id"], a["campaign_id"], sha, a["id"])).fetchone()
+                    if same:  # the same Statement under another link: the copy already here is enough
+                        conn.execute("DELETE FROM attachment WHERE id = %s", (a["id"],))
+                        continue
+                    # Kept, so it opens in the app and outlives the listing; the link it came from is remembered
+                    # so the next capture of the listing knows it's here.
+                    conn.execute("""UPDATE attachment SET sha256 = %s, mime_type = %s, byte_size = %s, original_name = %s,
+                                           url = NULL, source_url = %s
+                                    WHERE id = %s""", (sha, mime, len(data), name, a["url"], a["id"]))
             else:
                 data = blobs.path_for(a["sha256"]).read_bytes()
             found = statement.read(data)

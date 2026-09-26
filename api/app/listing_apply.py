@@ -4,7 +4,7 @@ Idempotent, so the same listing can be captured again to pick up what changed: a
 photos already there are skipped, and a price guide is only added when it differs from the latest one.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -38,7 +38,8 @@ def apply(conn: psycopg.Connection, property_id: UUID, campaign_id: UUID | None,
                 attach_agent(conn, campaign_id, AgentIn(**{**agent.model_dump(), "is_lead": i == 0 and not added["agents"]}))
                 added["agents"] += 1
                 added["agent_names"].append(agent.name.strip())
-        if x.soi_url and not conn.execute("SELECT 1 FROM attachment WHERE property_id = %s AND url = %s",
+        # Already here if it's still a link, or a copy kept from that link (see migration 0016).
+        if x.soi_url and not conn.execute("SELECT 1 FROM attachment WHERE property_id = %s AND %s IN (url, source_url)",
                                           (property_id, x.soi_url)).fetchone():
             conn.execute("""INSERT INTO attachment (property_id, campaign_id, kind, url, caption)
                             VALUES (%s, %s, 'price_statement', %s, 'Statement of Information (from the listing)')""",
@@ -70,6 +71,10 @@ def when(t: datetime) -> str:
     return f"{t:%a} {t.day} {t:%b}, {t.hour % 12 or 12}:{t.minute:02d} {'am' if t.hour < 12 else 'pm'}"
 
 
+def on(d: date) -> str:
+    return f"{d.day} {d:%b %Y}"
+
+
 def detail(field: str, v: int) -> str:
     if field == "land_m2":
         return f"{v / 10_000:.2f}".rstrip("0").rstrip(".") + " ha" if v >= 10_000 else f"{v:,} m²"
@@ -80,10 +85,10 @@ def refresh(conn: psycopg.Connection, property_id: UUID, body: ListingUpdateIn) 
     """A tracked house, captured again: apply the extras, record a new guide, sale method or date if it changed,
     and correct rooms and areas (see apply_details). Returns what it did, including `changes`, sentences for
     people, which the + House Track panel (as a preview) and the weekly refresh both show."""
-    live = conn.execute("SELECT id, sale_method, auction_at, eoi_closes_at FROM campaign WHERE property_id = %s AND outcome IS NULL",
-                        (property_id,)).fetchone()
+    live = conn.execute("""SELECT id, sale_method, listed_on, auction_at, eoi_closes_at FROM campaign
+                           WHERE property_id = %s AND outcome IS NULL""", (property_id,)).fetchone()
     added = apply(conn, property_id, live and live["id"], body)
-    added.update(guide=False, date=False, method=None, details=[], differs=[])
+    added.update(guide=False, date=False, method=None, listed=False, details=[], differs=[])
     changes: list[str] = []
 
     prop = conn.execute("SELECT " + ", ".join(f for f, _ in DETAILS) + " FROM property WHERE id = %s", (property_id,)).fetchone()
@@ -110,9 +115,15 @@ def refresh(conn: psycopg.Connection, property_id: UUID, body: ListingUpdateIn) 
             # The listing changed how it's selling: switch, dropping the date that belonged to the old method.
             method = body.sale_method
             set_sale_method(conn, live["id"], method)
-            live = conn.execute("SELECT id, sale_method, auction_at, eoi_closes_at FROM campaign WHERE id = %s", (live["id"],)).fetchone()
+            live = conn.execute("SELECT id, sale_method, listed_on, auction_at, eoi_closes_at FROM campaign WHERE id = %s",
+                                (live["id"],)).fetchone()
             added["method"] = method
             changes.append(f"Now selling by {METHODS.get(method, method)}")
+        # When it went on the market, for days listed: filled in if missing, corrected when a person updates.
+        if body.listed_on and body.listed_on != live["listed_on"] and (live["listed_on"] is None or body.apply_details):
+            conn.execute("UPDATE campaign SET listed_on = %s WHERE id = %s", (body.listed_on, live["id"]))
+            added["listed"] = True
+            changes.append(f"Listed {on(body.listed_on)}" + (f" (was {on(live['listed_on'])})" if live["listed_on"] else ""))
         if body.guide_low_aud:
             latest = conn.execute("SELECT low_aud, high_aud FROM price_guide WHERE campaign_id = %s ORDER BY observed_at DESC, id DESC LIMIT 1",
                                   (live["id"],)).fetchone()

@@ -147,7 +147,7 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
         cj = {j["kind"]: j for j in judgements.get(pid, []) if c and j["campaign_id"] == c["id"]}
         lead = next((a for a in agents.get(pid, []) if c and a["campaign_id"] == c["id"]), None)
         link = next((l["url"] for l in links.get(pid, []) if c and l["campaign_id"] == c["id"]), None)
-        started = (c and (c["listed_on"] or _day(c["created_at"]))) or None
+        started = c and c["listed_on"]  # unknown until the listing says (the weekly refresh fills it in), not the day we added it
         ended = c and c["outcome_on"]
         sale_at = c and (c["auction_at"] if c["sale_method"] == "auction" else c["eoi_closes_at"] if c["sale_method"] == "eoi" else None)
         guide_high = latest_guide and latest_guide["high_aud"]

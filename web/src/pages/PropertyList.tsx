@@ -278,16 +278,16 @@ function Card({ r, people, favourites, cols, slots, tagColours, picked, onPick }
         {change != null && change !== 0 && <span className={`pill tone-${changeTone(change)}`}>guide {change > 0 ? "↑" : "↓"} {money(Math.abs(change))}</span>}
         {r.walk_away != null && <span className="pill">our max {money(n("walk_away"))}</span>}
         {(r.budget === "over" || r.budget === "stretch") && (
-          <span className={`pill tone-${budgetTone(r.budget)}`} title="The guide against the most you can bid (Settings → Budget)">
+          <span className={`pill tone-${budgetTone(r.budget)}`} title="Guide against the most you can bid. Set it in Settings.">
             {r.budget === "over" ? "Over budget" : "Stretch"}</span>
         )}
       </div>
-      {staleStatus && <div className="small tone-warn" style={{ marginTop: 4 }}>The sale's over: update the status</div>}
+      {staleStatus && <div className="small tone-warn" style={{ marginTop: 4 }}>Sale's over. Update the status.</div>}
       {Boolean(r.needs_outcome) && <div className="small tone-warn" style={{ marginTop: 4 }}>
-        {r.listing_status ? `The listing says ${String(r.listing_status).replace(/_/g, " ")}` : "The sale date has passed"}: record the outcome</div>}
+        {r.listing_status ? `The listing says ${String(r.listing_status).replace(/_/g, " ")}` : "The sale date has passed"}. Record the outcome.</div>}
       {(r.score_avg != null || people.some((p) => r[`v:${p.id}:post`] ?? r[`v:${p.id}:pre`])) && (
       <div className="row small" style={{ marginTop: 6 }}>
-        {r.score_avg != null && <span className="pill score-pill" title="Average of everyone's weighted scores, out of 100">Score {String(r.score_avg)}</span>}
+        {r.score_avg != null && <span className="pill score-pill" title="Average score out of 100">Score {String(r.score_avg)}</span>}
         {people.map((p) => {
           const post = r[`v:${p.id}:post`] as string | undefined, pre = r[`v:${p.id}:pre`] as string | undefined;
           const v = post ?? pre;

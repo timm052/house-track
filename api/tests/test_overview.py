@@ -1,4 +1,5 @@
 import uuid
+from datetime import date, timedelta
 
 from .conftest import as_
 
@@ -25,7 +26,10 @@ def test_overview_row_has_flat_fields_and_versions(client, people):
     r = row_for(client, people["a"], pid)
     assert (r["address"], r["suburb"], r["beds"], r["sale_method"]) == ("101 Grid Lane", "Ringwood", 3, "auction")
     assert (r["guide_low"], r["guide_high"], r["guide_source"]) == (900_000, 990_000, "advertised")
-    assert r["_v"]["guide"] and r["_v"]["status"] and r["days_on_market"] == 0
+    assert r["_v"]["guide"] and r["_v"]["status"] and r["days_on_market"] is None  # not listed on a known date
+    listed = (date.today() - timedelta(days=12)).isoformat()
+    assert cell(client, people["a"], pid, "listed_on", listed).status_code == 200
+    assert row_for(client, people["a"], pid)["days_on_market"] in (11, 12, 13)  # (the server's day is Melbourne's)
 
 
 def test_plain_cell_save_and_field_level_conflict(client, people):

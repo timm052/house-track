@@ -21,12 +21,12 @@ export type Capture = {
   existing_property_id?: string | null; existing_address?: string | null;
 };
 
-export type Choices = { photos: "main" | "all" | "none"; floorplans: boolean; agents: boolean; inspections: boolean; soi: boolean; pin: boolean; tags: string[]; notes: boolean };
+export type Choices = { photos: "main" | "all" | "none"; floorplans: boolean; agents: boolean; inspections: boolean; pin: boolean; tags: string[]; notes: boolean };
 
 export const photosOf = (c: Capture) => (c.photos?.length ? c.photos : c.image_url ? [c.image_url] : []);
 
 export function defaultChoices(c: Capture): Choices {
-  return { photos: photosOf(c).length ? "all" : "none", floorplans: true, agents: true, inspections: true, soi: true, pin: true,
+  return { photos: photosOf(c).length ? "all" : "none", floorplans: true, agents: true, inspections: true, pin: true,
            tags: c.suggested_tags ?? [], notes: false };
 }
 
@@ -37,7 +37,7 @@ export function extrasFor(c: Capture, ch: Choices) {
     lat: ch.pin ? c.lat ?? null : null, lon: ch.pin ? c.lon ?? null : null,
     agents: ch.agents ? (c.agents ?? []).map((a) => ({ name: a.name, mobile: a.mobile, email: a.email, agency_name: a.agency_name })) : [],
     inspections: ch.inspections ? c.inspections ?? [] : [],
-    soi_url: ch.soi ? c.soi_url ?? null : null,
+    soi_url: c.soi_url ?? null,  // always: agents take it down once the house sells
     tags: ch.tags,
     photos: ch.photos === "all" ? photos : ch.photos === "main" ? photos.slice(0, 1) : [],
     floorplans: ch.floorplans ? c.floorplans ?? [] : [],
@@ -51,14 +51,14 @@ export const listingNotes = (c: Capture) =>
 // ─── new house: pick what to keep ─────────────────────────────────────
 export function CaptureReview({ c, ch, set }: { c: Capture; ch: Choices; set: (ch: Choices) => void }) {
   const photos = photosOf(c);
-  const tick = (k: "agents" | "inspections" | "soi" | "pin" | "notes") => (
+  const tick = (k: "agents" | "inspections" | "pin" | "notes") => (
     <input type="checkbox" checked={ch[k]} onChange={(e) => set({ ...ch, [k]: e.target.checked })} />
   );
   const tags = [...new Set([...(c.suggested_tags ?? []), ...ch.tags])];
   return (
     <div className="card stack capture">
       <h2>Also from the listing</h2>
-      <p className="small muted" style={{ margin: 0 }}>The form below is filled in. Choose what else to save with the house.</p>
+      <p className="small muted" style={{ margin: 0 }}>The form below is filled in. Choose what else to keep.</p>
       {c.price_text && <div className="small"><span className="muted">Listing says:</span> <strong>{c.price_text}</strong></div>}
 
       {photos.length > 0 && (
@@ -91,8 +91,9 @@ export function CaptureReview({ c, ch, set }: { c: Capture; ch: Choices; set: (c
           <span>Open for inspection: {c.inspections!.map((i) => when(i.starts_at)).join(" · ")}</span>
         </label>
       )}
-      {c.soi_url && <label className="check">{tick("soi")}<span>Statement of Information <a href={c.soi_url} target="_blank" rel="noreferrer">(open)</a></span></label>}
-      {c.lat != null && <label className="check">{tick("pin")}<span>Map position from the listing <span className="muted">(used only if the address isn't found)</span></span></label>}
+      {c.soi_url && <div className="small">Statement of Information <span className="muted">· always kept ·</span>{" "}
+        <a href={c.soi_url} target="_blank" rel="noreferrer">Open</a></div>}
+      {c.lat != null && <label className="check">{tick("pin")}<span>Listing's map pin <span className="muted">· only if the address isn't found</span></span></label>}
       {(c.headline || c.description) && (
         <label className="check">{tick("notes")}<span>Copy the listing description into notes{c.headline && <span className="muted"> · “{c.headline}”</span>}</span></label>
       )}
@@ -117,10 +118,10 @@ export function CaptureReview({ c, ch, set }: { c: Capture; ch: Choices; set: (c
  *  works out what's new (see listing_apply.refresh), for the preview and the update alike. */
 function updateBody(c: Capture, ch: Choices) {
   return {
-    ...extrasFor(c, { ...ch, inspections: true, agents: true, soi: true }),
+    ...extrasFor(c, { ...ch, inspections: true, agents: true }),
     guide_low_aud: c.guide_low_aud, guide_high_aud: c.guide_high_aud, sale_method: c.sale_method,
     auction_at: c.sale_method === "auction" ? c.auction_at ?? null : null,
-    eoi_closes_at: c.sale_method === "eoi" ? c.eoi_closes_at ?? null : null,
+    eoi_closes_at: c.sale_method === "eoi" ? c.eoi_closes_at ?? null : null, listed_on: c.listed_on ?? null,
     beds: c.beds, baths: c.baths, car_spaces: c.car_spaces, land_m2: c.land_m2, building_m2: c.building_m2 ?? null,
   };
 }
@@ -170,7 +171,7 @@ export function ExistingUpdate({ c }: { c: Capture }) {
                   <label key={v} className="check"><input type="radio" name="uphotos" checked={ch.photos === v} onChange={() => setCh({ ...ch, photos: v })} />
                     {v === "main" ? "Main photo" : v === "all" ? `All ${photos.length}` : "None"}</label>
                 ))}
-                <span className="muted">(ones you already have are skipped)</span>
+                <span className="muted">Skips ones you have</span>
               </div>
             )}
             {(c.floorplans?.length ?? 0) > 0 && (

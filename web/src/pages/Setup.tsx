@@ -38,7 +38,7 @@ export default function Setup({ onDone }: { onDone: (personId: string) => void }
       <div className="card stack" style={{ marginTop: 32 }}>
         <h1>Set up House Track</h1>
         <p className="muted">
-          Who's in this household? Each person's opinions, notes and drawn areas are kept under their name. There are no passwords.
+          Who's in this household? Everyone's verdicts, notes and map areas are kept under their name. There are no passwords.
         </p>
         {rows.map((r, i) => (
           <div className="row" key={i}>

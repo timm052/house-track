@@ -95,6 +95,7 @@ class ListingUpdateIn(ListingExtras):
     sale_method: SaleMethod | None = None  # listings do switch, e.g. auction to private sale
     auction_at: datetime | None = None
     eoi_closes_at: datetime | None = None
+    listed_on: date | None = None
     beds: Count | None = None
     baths: Count | None = None
     car_spaces: Count | None = None

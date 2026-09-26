@@ -75,7 +75,7 @@ export default function CalendarSection() {
                   </span>
                   <a className="small" href={`/api/events/${e.type}/${e.id}.ics`} title="Download this one event">+ Calendar</a>
                   {e.type === "inspection" && (
-                    <ConfirmButton className="link icon-btn" title="Not going: take it off the list" label={<X aria-label="Remove" />}
+                    <ConfirmButton className="link icon-btn" title="Not going" label={<X aria-label="Remove" />}
                       question="Not going?" yes="Remove" onConfirm={() => remove(e)} />
                   )}
                 </li>
@@ -86,7 +86,7 @@ export default function CalendarSection() {
       ))}
       <div className="card stack">
         <h2>In your phone's calendar</h2>
-        <p className="small muted" style={{ margin: 0 }}>Subscribe once: inspections, auctions and EOI closings appear automatically, with a reminder an hour before. It refreshes whenever your phone can reach House Track.</p>
+        <p className="small muted" style={{ margin: 0 }}>Subscribe once and inspections, auctions and EOI closings appear in your calendar, with a reminder an hour before. It updates whenever your phone can reach House Track.</p>
         <div className="row">
           <a href={`webcal://${feed}`}><button className="primary">Subscribe</button></a>
           <button onClick={() => navigator.clipboard?.writeText(`${location.protocol}//${feed}`)}>Copy link</button>

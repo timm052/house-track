@@ -5,7 +5,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type Outcome, type SaleMethod, type Stance, type Status } from "../api";
-import { LABEL, money } from "../format";
+import { LABEL, money, saleEnded } from "../format";
+import { CLOSED } from "../colour";
 import type { OverviewPlace, OverviewRow } from "../overview/columns";
 import { applyOutcomeStatus, OutcomeForm, outcomeStatus, statusOutOfStep } from "../Outcome";
 import { usePeople } from "../people";
@@ -52,14 +53,15 @@ export default function ThisWeek() {
     return out.length ? [{ r, text: out.join(" · ") }] : [];
   });
   const { needsOutcome, outOfStep, needsVerdict, count } = useNeeds(rows, me);
-  const disagree = findDisagreements(rows.filter((r) => !["rejected", "lost", "withdrawn"].includes(String(r.status))), active);
+  // Nothing to argue about on a house we're done with, or one whose sale is over.
+  const disagree = findDisagreements(rows.filter((r) => !CLOSED.includes(r.status as Status) && !saleEnded(r.outcome, r.bought_by_us)), active);
   const shownOutOfStep = outOfStep.slice(0, allNeeds ? undefined : Math.max(0, 5 - needsOutcome.length));
 
   function markSeen() { const today = isoDay(new Date()); setSeen(today); store(seenKey, today); }
   async function fixStatus(r: OverviewRow) {
     setError(null);
     try {
-      await applyOutcomeStatus(r.id, outcomeStatus(r.outcome as Outcome, Boolean(r.bought_by_us))!, (r._v?.status as string | undefined) ?? null);
+      await applyOutcomeStatus(r.id, outcomeStatus(r.outcome as Outcome, Boolean(r.bought_by_us), r.status as Status)!, (r._v?.status as string | undefined) ?? null);
       queryClient.invalidateQueries({ queryKey: ["overview"] });
     } catch (e) { setError((e as Error).message); }
   }
@@ -89,7 +91,7 @@ export default function ThisWeek() {
               {shownOutOfStep.map((r) => (
                 <li key={`s-${r.id}`}>
                   <span className="grow">{addr(r)}: {LABEL.outcome[r.outcome as Outcome]}, still {LABEL.status[r.status as Status]}</span>
-                  <button className="link" onClick={() => fixStatus(r)}>Set to {LABEL.status[outcomeStatus(r.outcome as Outcome, Boolean(r.bought_by_us))!]}</button>
+                  <button className="link" onClick={() => fixStatus(r)}>Set to {LABEL.status[outcomeStatus(r.outcome as Outcome, Boolean(r.bought_by_us), r.status as Status)!]}</button>
                 </li>
               ))}
               {needsVerdict.map((r) => (

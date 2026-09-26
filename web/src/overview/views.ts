@@ -8,14 +8,12 @@ export type Filter = { column: string; op: FilterOp; value?: unknown };
 export type Sort = { column: string; dir: "asc" | "desc" };
 export type View = { id?: string; name: string; is_default: boolean; filters: Filter[]; sort: Sort[]; columns: string[] };
 
-export const CLOSED = ["rejected", "lost", "withdrawn", "bought"];
-
 /** Used until someone saves a default view of their own. */
 export function builtInDefault(cols: Column[]): View {
   return {
     name: "Active houses",
     is_default: true,
-    filters: [{ column: "status", op: "in", value: ["watching", "inspecting", "shortlisted", "bidding"] }],
+    filters: [{ column: "status", op: "in", value: ["watching", "interested", "shortlisted", "offering"] }],
     sort: [{ column: "sale_at", dir: "asc" }],
     columns: cols.filter((c) => c.byDefault).map((c) => c.key),
   };

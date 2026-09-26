@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, whilePending } from "../api";
-import { isSold, LABEL, landArea, money, moneyRange } from "../format";
+import { isSold, LABEL, landArea, money, moneyRange, saleEnded } from "../format";
 import SoldAgainst from "../SoldAgainst";
 import { STATUSES } from "../api";
 import { catalogue, display, type Column, type OverviewPlace, type OverviewRow } from "../overview/columns";
@@ -52,8 +52,12 @@ export default function PropertyList() {
   }).map((r) => r.id) : []);
   const sort: Sort[] = sortKey ? [{ column: sortKey, dir: ["created_at", "score_avg"].includes(sortKey) ? "desc" : "asc" }] : view.sort;
   const filterKey = JSON.stringify(filters), sortJson = JSON.stringify(sort);
-  const rows = useMemo(() => applyView(data?.rows ?? [], filters, sort, search, cols)
-    .filter((r) => !quick.myVerdicts.length || verdictRows.has(r.id)),
+  // Houses whose sale is over (to someone else) go to the bottom, in the same order among themselves.
+  const rows = useMemo(() => {
+    const shown = applyView(data?.rows ?? [], filters, sort, search, cols).filter((r) => !quick.myVerdicts.length || verdictRows.has(r.id));
+    const over = (r: OverviewRow) => saleEnded(r.outcome, r.bought_by_us);
+    return [...shown.filter((r) => !over(r)), ...shown.filter(over)];
+  },
     [data, filterKey, sortJson, search, cols, quick.myVerdicts]); // eslint-disable-line react-hooks/exhaustive-deps
   const tagNames = [...new Set((data?.rows ?? []).flatMap((r) => (r.tags as string[] | undefined) ?? []))].sort();
   const suburbs = [...new Set((data?.rows ?? []).map((r) => String(r.suburb)))].sort();
@@ -258,7 +262,7 @@ function Card({ r, people, favourites, cols, slots, tagColours, picked, onPick }
     : r.sale_at ? `${display(col("sale_method"), r.sale_method)} ${display(col("sale_at"), r.sale_at)}`
     : r.sale_method ? display(col("sale_method"), r.sale_method) : "Not listed";
   return (
-    <Link to={`/p/${r.id}`} className={`card property-card tint ${suburbClass(slots, r.suburb)} ${r.excluded || CLOSED.includes(r.status as never) ? "dim" : ""} ${picked ? "picked" : ""}`}
+    <Link to={`/p/${r.id}`} className={`card property-card tint ${suburbClass(slots, r.suburb)} ${r.excluded || CLOSED.includes(r.status as never) || saleEnded(r.outcome, r.bought_by_us) ? "dim" : ""} ${picked ? "picked" : ""}`}
       onClick={(e) => { if (picked !== undefined) { e.preventDefault(); onPick(r.id); } }} aria-pressed={picked}
       onTouchStart={() => { timer.current = window.setTimeout(() => setAgent(true), 500); }}
       onTouchEnd={() => window.clearTimeout(timer.current)}

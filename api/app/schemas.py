@@ -4,7 +4,7 @@ from datetime import date, datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
 Aud = Annotated[int, Field(gt=0, le=2_000_000_000)]
 Count = Annotated[int, Field(ge=0, le=20)]
@@ -14,7 +14,11 @@ PropertyType = Literal["house", "townhouse", "unit", "apartment", "land", "other
 BuildStatus = Literal["established", "off_the_plan", "under_construction"]
 SaleMethod = Literal["auction", "eoi", "private_sale", "other"]
 Outcome = Literal["sold_prior", "sold_at_auction", "sold_after_auction", "sold", "passed_in", "withdrawn", "disappeared"]
-Status = Literal["watching", "inspecting", "shortlisted", "bidding", "rejected", "lost", "withdrawn", "bought"]
+STATUSES = ("watching", "interested", "shortlisted", "offering", "bought", "missed_out", "ruled_out")
+# The names before 0.4.2 (migration 0017), from a phone still running the older app until it reloads.
+OLD_STATUS = {"inspecting": "interested", "bidding": "offering", "rejected": "ruled_out", "lost": "missed_out"}
+Status = Annotated[Literal["watching", "interested", "shortlisted", "offering", "bought", "missed_out", "ruled_out"],
+                   BeforeValidator(lambda v: OLD_STATUS.get(v, v))]
 Stage = Literal["pre_inspection", "post_inspection"]
 Stance = Literal["yes", "maybe", "no"]
 GuideSource = Literal["price_statement", "advertised", "agent_verbal", "other"]

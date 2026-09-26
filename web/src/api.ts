@@ -11,7 +11,8 @@ export type BuildStatus = "established" | "off_the_plan" | "under_construction";
 export type GuideSource = "price_statement" | "advertised" | "agent_verbal" | "other";
 export type JudgementKind = "estimated_reserve" | "expected_sale" | "walk_away";
 
-export const STATUSES = ["watching", "inspecting", "shortlisted", "bidding", "rejected", "lost", "withdrawn", "bought"] as const;
+// Where we're up to with a house (migration 0017). What happened to its sale is the campaign's outcome, not this.
+export const STATUSES = ["watching", "interested", "shortlisted", "offering", "bought", "missed_out", "ruled_out"] as const;
 export const OUTCOMES = ["sold_prior", "sold_at_auction", "sold_after_auction", "sold", "passed_in", "withdrawn", "disappeared"] as const;
 export const PROPERTY_TYPES = ["house", "townhouse", "unit", "apartment", "land", "other"] as const;
 

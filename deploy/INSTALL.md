@@ -97,6 +97,14 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.2
+
+- New statuses, about where you're up to with a house: **Watching**, **Interested**, **Shortlisted**, **Offering**, **Bought**, **Missed out** and **Ruled out**. What happened to the sale (sold, passed in, withdrawn) is shown beside the status, not as one. A house you only watched stays Watching when it sells. The app suggests **Missed out** only if you were Offering, and **Bought** if it's yours. Houses whose sale is over fade and move to the bottom of the list.
+- Your houses switch over by themselves when the update starts, after the app backs up the database. Inspecting becomes Interested, Bidding becomes Offering and Rejected becomes Ruled out. Lost becomes Missed out if you'd been bidding; otherwise, like Withdrawn, it goes back to the status the house had before. Saved grid views follow.
+- The photo at the top of a house page scrolls through every photo and floor plan. Tap one to see it full screen.
+- On phones, a **Map** button on the photo opens the map on the house. The Location tab's map has one too.
+- Map **Layers**: satellite photos, and height as hill shading with coarse or fine contour lines. The map's house panel shows the house's height above sea level.
+
 ### 0.4.1
 
 - Fix: Settings and Places could show one person's old copy of the household settings, and save it over someone else's change. The walking limit did this just by clicking in and out of it. These pages now get the latest values each time they open, and changes wait until those arrive.

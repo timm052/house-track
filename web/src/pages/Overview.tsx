@@ -13,6 +13,7 @@ import FilterPopover from "../overview/FilterPopover";
 import AddressSearch from "../AddressSearch";
 import { usePeople } from "../people";
 import { CLOSED, STATUS_COLOUR, budgetTone, changeTone, minutesTone, soonTone, suburbClass, suburbSlots, tagStyle, type Tone, useDarkMode, useTagColours } from "../colour";
+import { saleEnded } from "../format";
 import type { Status } from "../api";
 import ConfirmButton from "../ConfirmButton";
 
@@ -217,7 +218,7 @@ export default function Overview() {
   const slots = useMemo(() => suburbSlots(rows), [rows]);
   const rowClass = (m: OverviewRow) => [
     "tint", suburbClass(slots, m.suburb),
-    (m.excluded || CLOSED.includes(m.status as Status)) ? "dim" : "",
+    (m.excluded || CLOSED.includes(m.status as Status) || saleEnded(m.outcome, m.bought_by_us)) ? "dim" : "",
   ];
   const toneOf = (col: Column, v: unknown): Tone =>
     col.kind === "minutes" ? minutesTone(v, col.key.startsWith("drive") || col.key === "nearest_station_drive" ? "drive" : col.key.startsWith("transit") ? "transit" : "walk") : col.key === "guide_change" ? changeTone(v) : col.key === "sale_at" ? soonTone(v) : col.key === "budget" ? budgetTone(v) : "";

@@ -7,16 +7,29 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { TerraDraw, TerraDrawPolygonMode, TerraDrawSelectMode } from "terra-draw";
 import { TerraDrawMapLibreGLAdapter } from "terra-draw-maplibre-gl-adapter";
 import { STATUSES, api, whilePending, type AreaKind, type MapArea, type MapData, type MapProperty } from "../api";
-import { isSold, LABEL, money, streetLine } from "../format";
+import { isSold, LABEL, money, saleEnded, streetLine } from "../format";
 import type { OverviewRow } from "../overview/columns";
 import { basemapStyle } from "../map/basemap";
 import { colourFor, syncOverlays, type OverlayLayer } from "../map/overlays";
+import { contourTiles, dem, TERRAIN_ATTRIBUTION, type ContourDetail } from "../map/terrain";
 import { usePeople } from "../people";
-import { STATUS_COLOUR, useDarkMode } from "../colour";
+import { CLOSED, STATUS_COLOUR, useDarkMode } from "../colour";
 import { isDark as pageIsDark } from "../theme";
 import HouseSidePanel, { comparableLabel, type StationRoute, useComparables } from "../map/HouseSidePanel";
 
 const MELBOURNE: [number, number] = [145.0, -37.81];
+// Free satellite imagery (Esri World Imagery, street-level detail across Melbourne).
+const SATELLITE = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+// Our layers that go under the basemap's labels, so street and place names stay readable over them.
+const UNDER_LABELS = new Set(["hillshade", "contour-lines", "contour-labels"]);
+/** A basemap layer the satellite photo replaces: its land, water, buildings and roads (not its labels, which stay on
+ *  top). The styles mix labels in among these, so they're hidden rather than left to draw over the photo. */
+const underPhoto = (l: { type: string }) => l.type !== "symbol" && l.type !== "background";
+/** The basemap layers a style hides itself, so switching the photo off doesn't show them. */
+const hiddenIn = (layers: { id: string; layout?: unknown }[]) =>
+  new Set(layers.filter((l) => (l.layout as { visibility?: string } | undefined)?.visibility === "none").map((l) => l.id));
+const stored = (key: string) => { try { return localStorage.getItem(key); } catch { return null; } };
+const store = (key: string, value: string) => { try { localStorage.setItem(key, value); } catch { /* per-device nicety */ } };
 type Filter = "all" | "mine" | "either";
 
 type Selected = { kind: "property"; p: MapProperty } | { kind: "area"; a: MapArea } | null;
@@ -55,7 +68,7 @@ export default function MapPage() {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   // Layer and source ids that belong to the basemap, so a light/dark switch can swap them and keep ours.
-  const baseIds = useRef<{ layers: Set<string>; sources: Set<string> }>({ layers: new Set(), sources: new Set() });
+  const baseIds = useRef<{ layers: Set<string>; sources: Set<string>; hidden: Set<string> }>({ layers: new Set(), sources: new Set(), hidden: new Set() });
   const isDark = useDarkMode();
   const firstScheme = useRef(isDark);
   const drawRef = useRef<TerraDraw | null>(null);
@@ -69,6 +82,12 @@ export default function MapPage() {
   const [editing, setEditing] = useState<MapArea | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showLayers, setShowLayers] = useState(false);
+  // The base under the houses (map or satellite) and whether height shows: per device.
+  const [base, setBase] = useState<"map" | "satellite">(() => (stored("housetrack.map.base") === "satellite" ? "satellite" : "map"));
+  const [height, setHeight] = useState(() => stored("housetrack.map.height") === "1");
+  const baseRef = useRef(base);   // for the light/dark swap, which rebuilds the basemap
+  baseRef.current = base;
+  const [contourDetail, setContourDetail] = useState<ContourDetail>(() => (stored("housetrack.map.contours") === "fine" ? "fine" : "coarse"));
   const [showCommute, setShowCommute] = useState(false);
   // From: "house:<id>" (a house on the map) or "place:<id>" (a saved place or station).
   const [commute, setCommute] = useState<{ from: string; minutes: number; mode: "drive" | "walk" } | null>(null);
@@ -93,6 +112,7 @@ export default function MapPage() {
   useEffect(() => { try { localStorage.setItem("housetrack.map.colour", colourBy); } catch { /* per-device nicety */ } }, [colourBy]);
   const overview = useQuery({ queryKey: ["overview"], queryFn: () => api<{ rows: OverviewRow[] }>("/api/overview") });
   const priceById = useMemo(() => new Map((overview.data?.rows ?? []).map((r) => [r.id, priceOf(r)])), [overview.data]);
+  const endedById = useMemo(() => new Map((overview.data?.rows ?? []).map((r) => [r.id, saleEnded(r.outcome, r.bought_by_us)])), [overview.data]);
   // From the Places tab: tap to add a place (with the ways to get there chosen there), or to move one.
   const pick = params.get("pick");
   const pickPlace = pick === "place" || pick === "move"
@@ -118,7 +138,8 @@ export default function MapPage() {
       map.addControl(new maplibregl.GeolocateControl({ trackUserLocation: false }), "top-right");
       map.on("load", () => {
         const base = map!.getStyle();
-        baseIds.current = { layers: new Set(base.layers.map((l) => l.id)), sources: new Set(Object.keys(base.sources)) };
+        baseIds.current = { layers: new Set(base.layers.map((l) => l.id)), sources: new Set(Object.keys(base.sources)), hidden: hiddenIn(base.layers) };
+        addBaseLayers(map!, baseIds.current.layers);
         addLayers(map!);
         const draw = new TerraDraw({
           adapter: new TerraDrawMapLibreGLAdapter({ map: map! }),
@@ -179,7 +200,7 @@ export default function MapPage() {
           colour: colourBy === "price" ? priceColour(f.properties.id) : STATUS_COLOUR[f.properties.status],
           // On the light map the palest price shades need an outline to stand out; white is enough on the dark one.
           stroke: colourBy === "price" && !isDark ? "#4a1140" : "#ffffff",
-          dim: f.properties.excluded || ["rejected", "lost", "withdrawn"].includes(f.properties.status),
+          dim: f.properties.excluded || CLOSED.includes(f.properties.status) || !!endedById.get(f.properties.id),
           ring: f.properties.others_flags.length ? byId.get(f.properties.others_flags[0].owner_id)?.colour ?? "#888" : "",
           warned: f.properties.warned,
         },
@@ -209,7 +230,7 @@ export default function MapPage() {
       }
       fitted.current = true;
     }
-  }, [ready, data, visibleProperties, editing, byId, me, colourBy, breaks, priceById, isDark]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ready, data, visibleProperties, editing, byId, me, colourBy, breaks, priceById, endedById, isDark]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── all train stations ──────────────────────────────────────────────
   const stations = useQuery({ queryKey: ["stations"], queryFn: () => api<GeoJSON.FeatureCollection>("/api/stations"), staleTime: 3600_000 });
@@ -425,6 +446,28 @@ export default function MapPage() {
 
   const statusesShown = [...new Set((data?.properties.features ?? []).map((f) => f.properties.status))]
     .sort((a, b) => STATUSES.indexOf(a) - STATUSES.indexOf(b));
+  // Satellite and height on or off, with contours coloured to read on whichever is underneath.
+  useEffect(() => {
+    store("housetrack.map.base", base);
+    store("housetrack.map.height", height ? "1" : "0");
+    store("housetrack.map.contours", contourDetail);
+    const map = mapRef.current;
+    if (!ready || !map) return;
+    const source = map.getSource("contours") as maplibregl.VectorTileSource | undefined;
+    if (source && source.tiles?.[0] !== contourTiles[contourDetail]) source.setTiles([contourTiles[contourDetail]]);
+    const show = (id: string, on: boolean) => { if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", on ? "visible" : "none"); };
+    show("satellite", base === "satellite");
+    for (const l of map.getStyle().layers) {
+      if (baseIds.current.layers.has(l.id) && underPhoto(l)) show(l.id, base !== "satellite" && !baseIds.current.hidden.has(l.id));
+    }
+    for (const id of ["hillshade", "contour-lines", "contour-labels"]) show(id, height);
+    if (!map.getLayer("contour-lines")) return;
+    const photo = base === "satellite";
+    map.setPaintProperty("contour-lines", "line-color", photo ? "#ffffff" : isDark ? "#c9a878" : "#8a5a2b");
+    map.setPaintProperty("contour-labels", "text-color", photo ? "#ffffff" : isDark ? "#e2c9a4" : "#6b4420");
+    map.setPaintProperty("contour-labels", "text-halo-color", photo ? "rgba(0,0,0,0.65)" : isDark ? "#1c2326" : "#ffffff");
+  }, [ready, base, height, contourDetail, isDark]);
+
   // Follow the system's light/dark setting live: swap the basemap, carry over our pins, areas and overlays.
   useEffect(() => {
     const map = mapRef.current;
@@ -438,8 +481,16 @@ export default function MapPage() {
           if (!prev) return next;
           const ours = prev.layers.filter((l) => !baseIds.current.layers.has(l.id));
           const oursSources = Object.fromEntries(Object.entries(prev.sources).filter(([id]) => !baseIds.current.sources.has(id)));
-          baseIds.current = { layers: new Set(next.layers.map((l) => l.id)), sources: new Set(Object.keys(next.sources)) };
-          return { ...next, sources: { ...next.sources, ...oursSources }, layers: [...next.layers, ...ours] };
+          baseIds.current = { layers: new Set(next.layers.map((l) => l.id)), sources: new Set(Object.keys(next.sources)), hidden: hiddenIn(next.layers) };
+          const photo = ours.filter((l) => l.id === "satellite");
+          const under = ours.filter((l) => UNDER_LABELS.has(l.id)), over = ours.filter((l) => !UNDER_LABELS.has(l.id) && l.id !== "satellite");
+          const basemap = next.layers.map((l) => (baseRef.current === "satellite" && underPhoto(l) ? { ...l, layout: { ...l.layout, visibility: "none" as const } } : l));
+          const ground = basemap.filter((l) => l.type === "background").length;
+          const labels = basemap.findIndex((l) => l.type === "symbol");
+          const layers = labels < 0
+            ? [...basemap.slice(0, ground), ...photo, ...basemap.slice(ground), ...under, ...over]
+            : [...basemap.slice(0, ground), ...photo, ...basemap.slice(ground, labels), ...under, ...basemap.slice(labels), ...over];
+          return { ...next, sources: { ...next.sources, ...oursSources }, layers };
         },
       });
     });
@@ -478,7 +529,7 @@ export default function MapPage() {
             </> : statusesShown.map((st) => (
               <div key={st} className="small"><span className="status-dot" style={{ background: STATUS_COLOUR[st], marginRight: 6 }} />{LABEL.status[st]}</div>
             ))}
-            <div className="small muted">Faded: rejected, lost, withdrawn or excluded</div>
+            <div className="small muted">Faded: ruled out, missed out, sale over, or excluded</div>
             <div className="small" style={{ marginTop: 4 }}><span className="key-station" />Train station (named when zoomed in)</div>
           </details>
         )}
@@ -520,15 +571,34 @@ export default function MapPage() {
           )}
         </div>
       )}
-      {showLayers && overlayList.data && (
+      {showLayers && (
         <div className="sheet stack">
           <div className="row"><strong className="grow">Layers</strong><button className="link" onClick={() => setShowLayers(false)}>Done</button></div>
-          <p className="small muted">Shown when zoomed in to street level.</p>
-          {overlayList.data.map((l) => (
+          <div className="map-colour-by" role="group" aria-label="Base">
+            <button className={base === "map" ? "on" : ""} aria-pressed={base === "map"} onClick={() => setBase("map")}>Map</button>
+            <button className={base === "satellite" ? "on" : ""} aria-pressed={base === "satellite"} onClick={() => setBase("satellite")}>Satellite</button>
+          </div>
+          <label className="check"><input type="checkbox" checked={height} onChange={(e) => setHeight(e.target.checked)} />
+            Height: hill shading and contour lines</label>
+          {height && <>
+            <div className="row small" style={{ gap: 8 }}>Contours
+              <div className="map-colour-by" role="group" aria-label="Contour detail" style={{ margin: 0 }}>
+                <button className={contourDetail === "coarse" ? "on" : ""} aria-pressed={contourDetail === "coarse"} onClick={() => setContourDetail("coarse")}>Coarse</button>
+                <button className={contourDetail === "fine" ? "on" : ""} aria-pressed={contourDetail === "fine"} onClick={() => setContourDetail("fine")}>Fine</button>
+              </div>
+            </div>
+            <p className="small muted" style={{ margin: 0 }}>{contourDetail === "coarse"
+              ? "Every 5 m when zoomed in, labelled every 25 m."
+              : "Every 2 m when zoomed in, labelled every 10 m. Closer to the data, so expect small wiggles."}{" "}
+              Heights are in metres above sea level, from a 30 m satellite survey: the lie of the land, not the slope of a single block.</p>
+          </>}
+          {(overlayList.data?.length ?? 0) > 0 && <div className="section-title" style={{ margin: "6px 0 0" }}>Schools and planning</div>}
+          {(overlayList.data?.length ?? 0) > 0 && <p className="small muted" style={{ margin: 0 }}>Shown when zoomed in to street level.</p>}
+          {(overlayList.data ?? []).map((l) => (
             <label key={l.code} className="check">
               <input type="checkbox" checked={enabled.includes(l.code)}
                 onChange={(e) => setEnabled(e.target.checked ? [...enabled, l.code] : enabled.filter((c) => c !== l.code))} />
-              <span className="dot" style={{ background: colourFor(l.code, overlayList.data) }} />{l.title}
+              <span className="dot" style={{ background: colourFor(l.code, overlayList.data ?? []) }} />{l.title}
               {l.effect !== "info" && <span className="pill">{l.effect === "hard_exclude" ? "excludes" : "warns"}</span>}
             </label>
           ))}
@@ -546,7 +616,10 @@ export default function MapPage() {
             <option value="mine">Hide my exclusions</option>
             <option value="either">Hide anyone's exclusions</option>
           </select>
-          {(overlayList.data?.length ?? 0) > 0 && <button onClick={() => { setShowLayers(!showLayers); setShowCommute(false); }}>Layers{enabled.length ? ` (${enabled.length})` : ""}</button>}
+          {(() => {
+            const on = enabled.length + (base === "satellite" ? 1 : 0) + (height ? 1 : 0);
+            return <button onClick={() => { setShowLayers(!showLayers); setShowCommute(false); }}>Layers{on ? ` (${on})` : ""}</button>;
+          })()}
           <button className={commute ? "on-accent" : ""} onClick={() => {
             // Opening it with a house selected starts from that house.
             if (!showCommute && !commute && selected?.kind === "property") setCommute({ from: `house:${selected.p.id}`, minutes: 30, mode: "drive" });
@@ -577,6 +650,30 @@ function priceKey(breaks: number[], prices: number[]): [string, string][] {
   }
   return Array.from({ length: bands }, (_, i) => [bandColour(i, bands),
     i === 0 ? `Under ${money(breaks[0])}` : i === bands - 1 ? `${money(breaks[i - 1])} and over` : `${money(breaks[i - 1])}–${money(breaks[i])}`]);
+}
+
+/** Satellite imagery and height (hill shading, contour lines), hidden until chosen. The photo sits just above the
+ *  basemap's background (its other shapes are hidden while it shows); height goes under the basemap's labels. */
+function addBaseLayers(map: maplibregl.Map, basemapLayers: Set<string>) {
+  map.addSource("satellite", { type: "raster", tiles: [SATELLITE], tileSize: 256, maxzoom: 19,
+    attribution: "Imagery: Esri, Vantor, Earthstar Geographics" });
+  map.addSource("dem", { type: "raster-dem", encoding: "terrarium", tiles: [dem.sharedDemProtocolUrl], tileSize: 256, maxzoom: 15,
+    attribution: TERRAIN_ATTRIBUTION });
+  map.addSource("contours", { type: "vector", tiles: [contourTiles.coarse], maxzoom: 15 });
+  const style = map.getStyle().layers;
+  const labels = style.find((l) => basemapLayers.has(l.id) && l.type === "symbol")?.id;
+  const ground = style.find((l) => basemapLayers.has(l.id) && l.type !== "background")?.id;
+  const hidden = { visibility: "none" as const };
+  map.addLayer({ id: "satellite", type: "raster", source: "satellite", layout: hidden }, ground);
+  map.addLayer({ id: "hillshade", type: "hillshade", source: "dem", layout: hidden,
+    paint: { "hillshade-exaggeration": 0.45, "hillshade-shadow-color": "#3d3222", "hillshade-highlight-color": "#ffffff" } }, labels);
+  map.addLayer({ id: "contour-lines", type: "line", source: "contours", "source-layer": "contours", minzoom: 11, layout: hidden,
+    paint: { "line-color": "#8a5a2b", "line-opacity": ["match", ["get", "level"], 1, 0.75, 0.4], "line-width": ["match", ["get", "level"], 1, 1.3, 0.6] } }, labels);
+  map.addLayer({ id: "contour-labels", type: "symbol", source: "contours", "source-layer": "contours", minzoom: 13,
+    filter: [">", ["get", "level"], 0],
+    layout: { ...hidden, "symbol-placement": "line", "text-field": ["concat", ["number-format", ["get", "ele"], {}], " m"],
+              "text-size": 10, "text-font": ["Noto Sans Regular"] },
+    paint: { "text-color": "#6b4420", "text-halo-color": "#ffffff", "text-halo-width": 1.2 } }, labels);
 }
 
 function addLayers(map: maplibregl.Map) {

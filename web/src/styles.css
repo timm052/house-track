@@ -945,8 +945,30 @@ a.plan-open:active { transform: scale(0.98); transition-duration: 0ms; }
 @keyframes live-wait { to { opacity: 0.55; } }
 
 /* The map key's switch between colouring houses by price and by status. */
-.map-colour-by { display: inline-flex; gap: 2px; margin: 4px 0 6px; padding: 2px; border-radius: 999px; background: var(--surface-2); }
+.map-colour-by { display: inline-flex; align-self: flex-start; gap: 2px; margin: 4px 0 6px; padding: 2px; border-radius: 999px; background: var(--surface-2); }
 .map-colour-by button { min-height: 28px; padding: 2px 12px; border: 0; border-radius: 999px; background: none; color: var(--text); font-size: 0.8rem; }
 .map-colour-by button.on { background: var(--accent); color: var(--accent-text); font-weight: 600; }
 .price-dot { box-shadow: inset 0 0 0 1.5px #4a1140; }
 [data-theme="dark"] .price-dot { box-shadow: none; }
+
+/* The house page's banner gallery: one photo or floor plan at a time, swiped or scrolled sideways (snapping to each),
+   with arrows on hover where there's a mouse. Floor plans show whole, on white. */
+.gallery { overflow: hidden; }
+.gallery-strip { display: flex; height: 100%; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior-x: contain; }
+.gallery-strip::-webkit-scrollbar { display: none; }
+.gallery-strip:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
+.banner-media .gallery-slide { flex: 0 0 100%; height: 100%; min-height: 0; padding: 0; border: 0; border-radius: 0; background: none;
+  scroll-snap-align: start; scroll-snap-stop: always; cursor: zoom-in; display: block; }
+.banner-media .gallery-slide img.plan { object-fit: contain; background: #fff; }
+.gallery-doc { height: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; background: var(--surface-2); color: var(--text); }
+.banner-media button.gallery-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; min-height: 0; padding: 0;
+  border-radius: 50%; border: 0; background: rgba(0, 0, 0, 0.55); color: #fff; opacity: 0; transition: opacity 120ms; }
+.banner-media button.gallery-nav .lucide { width: 22px; height: 22px; }
+.gallery:hover button.gallery-nav:not(:disabled), .banner-media button.gallery-nav:focus-visible { opacity: 1; }
+.banner-media button.gallery-nav.prev { left: 10px; }
+.banner-media button.gallery-nav.next { right: 10px; }
+@media (hover: none) { .banner-media button.gallery-nav { display: none; } }
+.banner-badge.left { left: 10px; right: auto; }
+.banner-badge.map-link-phone { display: none; }
+@media (max-width: 700px) { .banner-badge.map-link-phone { display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; font-weight: 600; } }
+.banner-badge.map-link-phone .lucide { width: 15px; height: 15px; }

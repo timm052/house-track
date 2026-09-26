@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   api, PROPERTY_TYPES, STATUSES,
@@ -13,12 +13,14 @@ import { STATUS_COLOUR, changeTone, minutesTone, soonTone, suburbClass, tagStyle
 import { Checklist, Comparables, CostAt, PriceHistory } from "./MoneyExtras";
 import { Files, Inspections } from "./PropertyExtras";
 import { ScoresCard } from "./Decide";
-import { Bath, BedDouble, Building2, CalendarDays, CalendarPlus, Camera, Car, ChevronRight, CircleDollarSign, CircleHelp, DollarSign, FileText, Gavel, House, ImagePlus, LandPlot, MapPin, Paperclip, PartyPopper, Scale, School, Tag, ThumbsDown, ThumbsUp, TrainFront, TramFront, Trash2, TriangleAlert } from "lucide-react";
+import { Bath, BedDouble, Building2, CalendarDays, CalendarPlus, Camera, Car, ChevronLeft, ChevronRight, CircleDollarSign, CircleHelp, DollarSign, FileText, Gavel, House, ImagePlus, LandPlot, Map as MapIcon, MapPin, Paperclip, PartyPopper, Scale, School, Tag, ThumbsDown, ThumbsUp, TrainFront, TramFront, Trash2, TriangleAlert } from "lucide-react";
 import Commute from "../Commute";
 import ConfirmButton from "../ConfirmButton";
 import { OutcomeForm, outcomeStatus, statusOutOfStep } from "../Outcome";
 
 const MiniMap = lazy(() => import("../map/MiniMap"));
+const DocViewer = lazy(() => import("../DocViewer"));
+const REDUCED_MOTION = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
 /** Run a write, then refresh this property and the list. A conflict (someone else changed it first) also
  *  refreshes, so the page shows their value next to the message. */
@@ -96,8 +98,9 @@ export default function PropertyDetail() {
         {tab === "location" && (
           <>
             {p.lat != null && p.lon != null && (
-              <div className="card location-map">
+              <div className="card location-map" style={{ position: "relative" }}>
                 <Suspense fallback={<div className="map-frame" />}><MiniMap lon={p.lon} lat={p.lat} interactive zoom={15} className="map-frame" /></Suspense>
+                <Link className="banner-badge top" to={`/map?house=${p.id}`}>Open the full map</Link>
               </div>
             )}
             <WhereAndGettingAround p={p} />
@@ -127,22 +130,85 @@ const oldestFirst = (c: Campaign | null) => [...(c?.price_guides ?? [])].sort((a
 // ─── listing head ─────────────────────────────────────────────────────
 const isPhoto = (a: Detail["attachments"][number]) => a.kind === "photo" && !!a.sha256 && !!a.mime_type?.startsWith("image/");
 
-/** The newest photo and a map of the spot side by side (phones show the photo), else whichever exists,
- *  else a prompt to set the pin or fetch the listing's photo. */
+const fromListing = (a: Detail["attachments"][number]) => a.caption === "From the listing";
+type Slide = { id: string; title: string; mime: string | null; plan: boolean };
+
+/** The photos (cover first, then the listing's in its order, then everyone's own, newest first, as on the Photos tab)
+ *  followed by the floor plans kept in House Track. */
+function slidesOf(p: Detail): Slide[] {
+  const photos = p.attachments.filter(isPhoto).sort((a, b) =>
+    Number(b.id === p.cover_id) - Number(a.id === p.cover_id) || Number(fromListing(b)) - Number(fromListing(a))
+    || (fromListing(a) ? a.created_at.localeCompare(b.created_at) : b.created_at.localeCompare(a.created_at)));
+  const plans = p.attachments.filter((a) => a.kind === "floorplan" && !!a.sha256
+    && (!!a.mime_type?.startsWith("image/") || a.mime_type === "application/pdf"));
+  return [
+    ...photos.map((a) => ({ id: a.id, title: a.caption ?? "Photo", mime: a.mime_type, plan: false })),
+    ...plans.map((a, i) => ({ id: a.id, title: plans.length > 1 ? `Floor plan ${i + 1}` : "Floor plan", mime: a.mime_type, plan: true })),
+  ];
+}
+
+/** The house's photos and floor plans in the banner: swipe, scroll or use the arrows to step through; tap or click
+ *  one to see it full screen. On phones, where the map beside it is hidden, a Map button opens the full map. */
+function Gallery({ p, slides, hasPin }: { p: Detail; slides: Slide[]; hasPin: boolean }) {
+  const strip = useRef<HTMLDivElement>(null);
+  const [index, setIndex] = useState(0);
+  const [viewing, setViewing] = useState<number | null>(null);
+  // Where the arrows last sent it, until it gets there, so quick presses add up instead of reading a mid-scroll spot.
+  const aim = useRef<number | null>(null);
+  const go = (to: number) => {
+    const el = strip.current;
+    if (!el) return;
+    aim.current = Math.max(0, Math.min(slides.length - 1, to));
+    el.scrollTo({ left: aim.current * el.clientWidth, behavior: REDUCED_MOTION ? "auto" : "smooth" });
+  };
+  const step = (d: number) => go((aim.current ?? index) + d);
+  const handsOn = () => { aim.current = null; };   // a swipe or scroll of their own takes over from the arrows
+  const current = slides[Math.min(index, slides.length - 1)];
+  return (
+    <div className="banner-photo gallery" aria-roledescription="carousel" aria-label="Photos and floor plans">
+      <div ref={strip} className="gallery-strip" tabIndex={0}
+        onPointerDown={handsOn} onWheel={handsOn}
+        onScroll={(e) => {
+          const el = e.currentTarget, i = Math.round(el.scrollLeft / Math.max(1, el.clientWidth));
+          setIndex(i);
+          if (aim.current === i && Math.abs(el.scrollLeft - i * el.clientWidth) < 2) aim.current = null;
+        }}
+        onKeyDown={(e) => { if (e.key === "ArrowRight") { e.preventDefault(); step(1); } if (e.key === "ArrowLeft") { e.preventDefault(); step(-1); } }}>
+        {slides.map((s, i) => (
+          <button key={s.id} className="gallery-slide" onClick={() => setViewing(i)} aria-label={`${s.title}, ${i + 1} of ${slides.length}. Open full screen.`}>
+            {s.mime?.startsWith("image/")
+              ? <img src={`/api/attachments/${s.id}/file`} alt="" className={s.plan ? "plan" : ""} loading={i < 2 ? "eager" : "lazy"} draggable={false} />
+              : <span className="gallery-doc"><FileText /> {s.title}</span>}
+          </button>
+        ))}
+      </div>
+      {slides.length > 1 && <>
+        <button className="gallery-nav prev" onClick={() => step(-1)} disabled={index === 0} aria-label="Previous"><ChevronLeft /></button>
+        <button className="gallery-nav next" onClick={() => step(1)} disabled={index >= slides.length - 1} aria-label="Next"><ChevronRight /></button>
+      </>}
+      {current?.plan && <span className="banner-badge top left">{current.title}</span>}
+      {hasPin && <Link className="banner-badge top map-link-phone" to={`/map?house=${p.id}`}><MapIcon /> Map</Link>}
+      <span className="banner-badge"><Camera /> {slides.length > 1 ? `${index + 1} of ${slides.length}` : "1 photo"}</span>
+      {viewing != null && (
+        <Suspense fallback={null}>
+          <DocViewer items={slides.map((s) => ({ id: s.id, title: s.title, mime: s.mime }))} start={viewing} onClose={() => setViewing(null)} />
+        </Suspense>
+      )}
+    </div>
+  );
+}
+
+/** The photos and floor plans beside a map of the spot (phones show the photos), else whichever exists, else a
+ *  prompt to set the pin or fetch the listing's photo. */
 function Banner({ p }: { p: Detail }) {
-  const photos = p.attachments.filter(isPhoto);
+  const slides = slidesOf(p);
   const slots = useSuburbSlots();
-  const cover = photos.find((a) => a.id === p.cover_id) ?? photos[0];
+  const cover = slides.length > 0;
   const hasPin = p.lat != null && p.lon != null;
   const map = hasPin && <Suspense fallback={<div className="banner-empty" />}><MiniMap lon={p.lon!} lat={p.lat!} /></Suspense>;
   return (
     <div className={`banner-media ${cover && hasPin ? "split" : ""} ${suburbClass(slots, p.suburb)}`}>
-      {cover && (
-        <a href={`/api/attachments/${cover.id}/file`} target="_blank" rel="noreferrer" className="banner-photo">
-          <img src={`/api/attachments/${cover.id}/file`} alt={cover.caption ?? "Photo of the house"} />
-          <span className="banner-badge"><Camera /> {photos.length} {photos.length === 1 ? "photo" : "photos"}</span>
-        </a>
-      )}
+      {cover && <Gallery p={p} slides={slides} hasPin={hasPin} />}
       {cover && hasPin && <div className="banner-map">{map}<Link className="banner-badge top" to={`/map?house=${p.id}`}>Open the full map</Link></div>}
       {!cover && hasPin && <>{map}<Link className="banner-badge top" to={`/map?house=${p.id}`}>Open the full map</Link><ListingPhoto p={p} compact /></>}
       {!cover && !hasPin && (
@@ -619,9 +685,9 @@ function StatusCard({ p, bare = false }: { p: Detail; bare?: boolean }) {
         <p className="small tone-warn" style={{ margin: 0 }}>
           {LABEL.outcome[ended.outcome!]}, but the status still says {LABEL.status[p.status]}.{" "}
           <button className="link" onClick={() => write.mutate({ path: `/api/properties/${p.id}/status`, body: {
-            status: outcomeStatus(ended.outcome, ended.bought_by_us), reason: "Sale outcome recorded",
+            status: outcomeStatus(ended.outcome, ended.bought_by_us, p.status), reason: "Sale outcome recorded",
             check_latest: true, expected_latest_id: p.status_history[0]?.id ?? null } })}>
-            Set it to {LABEL.status[outcomeStatus(ended.outcome, ended.bought_by_us)!]}</button>
+            Set it to {LABEL.status[outcomeStatus(ended.outcome, ended.bought_by_us, p.status)!]}</button>
         </p>
       )}
       {p.status_history.length > 1 && (

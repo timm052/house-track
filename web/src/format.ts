@@ -44,6 +44,11 @@ export function soldAgainst(sold: number, firstLow: number | null, firstHigh: nu
 /** An outcome that means the house sold. */
 export const isSold = (outcome: unknown) => typeof outcome === "string" && outcome.startsWith("sold");
 
+/** Its sale is over and someone else has it (sold, withdrawn or gone; a pass-in can still sell): whatever our status,
+ *  it fades and sinks to the bottom of the list. */
+export const saleEnded = (outcome: unknown, boughtByUs: unknown) =>
+  typeof outcome === "string" && outcome !== "passed_in" && !boughtByUs;
+
 const dateTime = new Intl.DateTimeFormat("en-AU", { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
 const dateOnly = new Intl.DateTimeFormat("en-AU", { day: "numeric", month: "short", year: "numeric" });
 
@@ -69,8 +74,8 @@ export const fromLocalInput = (v: string): string | null => (v ? new Date(v).toI
 
 export const LABEL = {
   status: {
-    watching: "Watching", inspecting: "Inspecting", shortlisted: "Shortlisted", bidding: "Bidding",
-    rejected: "Rejected", lost: "Lost", withdrawn: "Withdrawn", bought: "Bought",
+    watching: "Watching", interested: "Interested", shortlisted: "Shortlisted", offering: "Offering",
+    bought: "Bought", missed_out: "Missed out", ruled_out: "Ruled out",
   } satisfies Record<Status, string>,
   method: { auction: "Auction", eoi: "EOI", private_sale: "Private sale", other: "Other" } satisfies Record<SaleMethod, string>,
   stage: { pre_inspection: "Before inspecting", post_inspection: "After inspecting" } satisfies Record<Stage, string>,

@@ -2,13 +2,14 @@
 // to judge it without leaving the map: photo, price and sale (as on the house card), rooms, commute times (the nearest
 // station's routes are drawn on the map), verdicts with their notes, the next inspection, the agent and any flags.
 import { useQuery } from "@tanstack/react-query";
-import { Bath, BedDouble, Building2, Car, ExternalLink, LandPlot, MapPin, Timer, UserRound, X } from "lucide-react";
+import { Bath, BedDouble, Building2, Car, ExternalLink, LandPlot, MapPin, Mountain, Timer, UserRound, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import Commute from "../Commute";
 import { api, type MapProperty, type PropertyDetail } from "../api";
 import { budgetTone, changeTone, soonTone, STATUS_COLOUR, tagStyle, useTagColours } from "../colour";
 import { isSold, km, LABEL, landArea, money, moneyRange, saleWhen, when } from "../format";
 import SoldAgainst from "../SoldAgainst";
+import { heightAt } from "./terrain";
 import type { OverviewRow } from "../overview/columns";
 import { usePeople } from "../people";
 
@@ -67,6 +68,8 @@ export default function HouseSidePanel({ p, route, routeError, onClose }: {
   const cover = p.cover_id ?? d?.cover_id ?? null;
   // The house list's row for this house (days listed, guide change, budget, score), from the shared cache.
   const overview = useQuery({ queryKey: ["overview"], queryFn: () => api<{ rows: OverviewRow[] }>("/api/overview") });
+  const { data: elevation } = useQuery({ queryKey: ["height", d?.lon, d?.lat], enabled: d?.lat != null && d?.lon != null, staleTime: Infinity,
+    queryFn: () => heightAt(d!.lon!, d!.lat!) });
   const row = overview.data?.rows.find((r) => r.id === p.id);
   const num = (k: string) => (row?.[k] == null ? null : Number(row[k]));
   const change = num("guide_change"), score = num("score_avg"), days = num("days_on_market");
@@ -117,6 +120,7 @@ export default function HouseSidePanel({ p, route, routeError, onClose }: {
             {d.land_m2 != null && <span><LandPlot /> {landArea(d.land_m2)}</span>}
             {d.building_m2 != null && <span><Building2 /> {d.building_m2.toLocaleString()} m²</span>}
             <span className="muted">{d.property_type[0].toUpperCase() + d.property_type.slice(1)}{d.build_status !== "established" ? `, ${d.build_status.replace(/_/g, " ")}` : ""}</span>
+            {elevation != null && <span title="Height above sea level, from 30 m survey data"><Mountain /> about {Math.round(elevation)} m</span>}
           </div>
         )}
 

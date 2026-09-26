@@ -3,20 +3,20 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, OUTCOMES, type Outcome, type SaleMethod, type Status } from "./api";
-import { CLOSED } from "./colour";
 import { LABEL, parseMoney } from "./format";
 
-/** The status a house should have once its sale ended this way (null: the outcome doesn't settle it, e.g. passed in). */
-export function outcomeStatus(outcome: Outcome | null | undefined, boughtByUs: boolean): Status | null {
-  if (!outcome) return null;
-  if (outcome.startsWith("sold")) return boughtByUs ? "bought" : "lost";
-  return outcome === "withdrawn" || outcome === "disappeared" ? "withdrawn" : null;
+/** The status a sale's end suggests, if any: bought when it's ours, missed out when someone else got it while we
+ *  were offering. Otherwise none: watching a house to see its result doesn't make it lost, and a withdrawal or
+ *  pass-in is the sale's news, not ours. */
+export function outcomeStatus(outcome: Outcome | null | undefined, boughtByUs: boolean, status: Status): Status | null {
+  if (!outcome?.startsWith("sold")) return null;
+  return boughtByUs ? "bought" : status === "offering" ? "missed_out" : null;
 }
 
-/** An outcome recorded, but the status still says the house is in play. */
+/** An outcome recorded that the status hasn't caught up with. */
 export const statusOutOfStep = (outcome: Outcome | null | undefined, boughtByUs: boolean, status: Status) => {
-  const want = outcomeStatus(outcome, boughtByUs);
-  return want != null && status !== want && !CLOSED.includes(status) && status !== "bought";
+  const want = outcomeStatus(outcome, boughtByUs, status);
+  return want != null && status !== want;
 };
 
 /** Set the status the outcome implies, checked against the status the person saw (latestStatusId). */
@@ -42,8 +42,8 @@ export function OutcomeForm({ propertyId, campaignId, saleMethod, status, latest
   const [busy, setBusy] = useState(false);
   const sold = outcome.startsWith("sold");
   const aud = parseMoney(price);
-  const next = outcomeStatus(outcome, ours);
-  const offerStatus = next != null && next !== status && (!CLOSED.includes(status) || next === "bought");
+  const next = outcomeStatus(outcome, ours, status);
+  const offerStatus = next != null && next !== status;
   const [alsoStatus, setAlsoStatus] = useState(true);
 
   async function save() {

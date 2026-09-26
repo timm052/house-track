@@ -269,7 +269,7 @@ def test_delete_a_person_hands_over_their_records(client, people):
     cid = client.get(f"/api/properties/{pid}").json()["campaigns"][0]["id"]
     client.post(f"/api/campaigns/{cid}/price-guides", headers=as_(c), json={"source": "advertised", "low_aud": 900_000, "high_aud": 950_000})
     client.post(f"/api/properties/{pid}/opinions", headers=as_(c), json={"stage": "pre_inspection", "stance": "yes"})
-    client.post(f"/api/properties/{pid}/status", headers=as_(c), json={"status": "inspecting"})
+    client.post(f"/api/properties/{pid}/status", headers=as_(c), json={"status": "interested"})
     area = client.post("/api/areas", headers=as_(c), json={"name": "Too far", "kind": "hard_exclude",
                 "geometry": {"type": "MultiPolygon", "coordinates": [[[[145, -37.8], [145.01, -37.8], [145.01, -37.81], [145, -37.8]]]]}})
     assert area.status_code == 201, area.text
@@ -280,9 +280,20 @@ def test_delete_a_person_hands_over_their_records(client, people):
     assert r.status_code == 204, r.text
     assert c["id"] not in [p["id"] for p in client.get("/api/persons").json()]
     p = client.get(f"/api/properties/{pid}").json()
-    assert p["status"] == "inspecting" and p["status_history"][0]["created_by"] == a["id"] and p["opinions"] == []
+    assert p["status"] == "interested" and p["status_history"][0]["created_by"] == a["id"] and p["opinions"] == []
     assert [g["created_by"] for g in p["campaigns"][0]["price_guides"]] == [a["id"]]
     assert all(x["properties"]["owner_id"] != c["id"] for x in client.get("/api/map", headers=as_(a)).json()["areas"]["features"])
+
+
+def test_old_status_names_still_work(client, people):
+    """A phone still on the app before 0.4.2 sends the old names until it reloads: they're taken as the new ones."""
+    a = people["a"]
+    pid = client.post("/api/properties", headers=as_(a), json={
+        "address": {"street_number": "7", "street": "Renamed Road", "suburb": "Blackburn", "postcode": "3130"}}).json()["id"]
+    for old, new in (("bidding", "offering"), ("lost", "missed_out"), ("rejected", "ruled_out")):
+        assert client.post(f"/api/properties/{pid}/status", headers=as_(a), json={"status": old}).status_code == 201
+        assert client.get(f"/api/properties/{pid}").json()["status"] == new
+    assert client.post(f"/api/properties/{pid}/status", headers=as_(a), json={"status": "withdrawn"}).status_code == 422
 
 
 def test_delete_a_house(client, people):

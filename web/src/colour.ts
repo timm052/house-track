@@ -56,12 +56,13 @@ export function useSuburbSlots(): Map<string, number> {
 }
 
 // ─── status ─────────────────────────────────────────────────────────────
-// Active stages get strong colours that build towards "bidding"; closed ones are greys; "bought" is gold.
+// Active stages get strong colours that build towards "offering"; closed ones are greys; "bought" is gold.
 export const STATUS_COLOUR: Record<Status, string> = {
-  watching: "#64748b", inspecting: "#0284c7", shortlisted: "#16a34a", bidding: "#9333ea",
-  rejected: "#9ca3af", lost: "#78716c", withdrawn: "#a8a29e", bought: "#ca8a04",
+  watching: "#64748b", interested: "#0284c7", shortlisted: "#16a34a", offering: "#9333ea",
+  bought: "#ca8a04", missed_out: "#78716c", ruled_out: "#9ca3af",
 };
-export const CLOSED: Status[] = ["rejected", "lost", "withdrawn"];
+/** Statuses that mean we're done with a house. (A sale that's over fades it too: see saleEnded.) */
+export const CLOSED: Status[] = ["ruled_out", "missed_out"];
 /** Guide against the max bid: within is good, only the top over is a stretch, the bottom over is out of reach. */
 export const budgetTone = (b: unknown): Tone => (b === "within" ? "good" : b === "stretch" ? "warn" : b === "over" ? "bad" : "");
 

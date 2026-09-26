@@ -310,6 +310,10 @@ def apply_cell(conn: psycopg.Connection, person: UUID, property_id: UUID, column
         return
 
     if column == "status":
+        from .schemas import OLD_STATUS, STATUSES
+        value = OLD_STATUS.get(value, value)
+        if value not in STATUSES:
+            raise HTTPException(422, f"Not a status: {value!r}")
         latest = conn.execute("SELECT id, status, created_by, created_at FROM status_event WHERE property_id = %s"
                               " ORDER BY occurred_at DESC, id DESC LIMIT 1", (property_id,)).fetchone()
         if check and not _same(latest and latest["id"], expected):

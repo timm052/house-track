@@ -184,10 +184,10 @@ def test_house_page_and_grid_follow_the_same_rules(client, people):
 
     # Status: same check as the grid's.
     seen = client.get(f"/api/properties/{pid}").json()["status_history"][0]["id"]
-    assert client.post(f"/api/properties/{pid}/status", headers=as_(b), json={"status": "inspecting"}).status_code == 201
+    assert client.post(f"/api/properties/{pid}/status", headers=as_(b), json={"status": "interested"}).status_code == 201
     r = client.post(f"/api/properties/{pid}/status", headers=as_(a),
                     json={"status": "shortlisted", "check_latest": True, "expected_latest_id": seen})
-    assert r.status_code == 409 and r.json()["detail"]["current"] == "inspecting"
+    assert r.status_code == 409 and r.json()["detail"]["current"] == "interested"
 
     # Re-opening a sale from the grid clears its result, as the house page does.
     assert cell("outcome", "sold").status_code == 200 and cell("sold_price_aud", 1200000).status_code == 200

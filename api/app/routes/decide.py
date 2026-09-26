@@ -241,7 +241,7 @@ def refresh_targets() -> list[dict]:
                JOIN campaign c ON c.id = l.campaign_id AND c.outcome IS NULL
                JOIN property p ON p.id = c.property_id
                JOIN property_status s ON s.property_id = p.id
-               WHERE l.portal = 'domain' AND s.status NOT IN ('rejected', 'lost', 'withdrawn', 'bought')
+               WHERE l.portal = 'domain' AND s.status NOT IN ('ruled_out', 'missed_out', 'bought')
                ORDER BY p.id, l.created_at DESC""").fetchall()
     out = [{"id": str(r.pop("id")), "url": r.pop("url"), "last_checked_at": r.pop("last_checked_at"), "address": display(Address(**r))}
            for r in rows]

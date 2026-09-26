@@ -243,9 +243,12 @@ function PhoneAdding() {
         <details open={ios}>
           <summary><strong>iPhone and iPad</strong></summary>
           <p className="small" style={{ margin: "6px 0" }}>
-            Apple doesn't let web apps into the Share menu, so a shortcut sends the listing to House Track in the background. No
-            browser opens: a notification says what happened. A Domain listing becomes a house straight away. A link without an address
-            (realestate.com.au) waits at the top of the Houses page for you to finish. Set it up once, on each person's phone:</p>
+            Apple doesn't let web apps into the Share menu, so a shortcut from the Shortcuts app does it. There are two kinds; set up
+            either or both, once on each person's phone, and give them different names.</p>
+          <h3 className="small" style={{ margin: "8px 0 2px" }}>Add in the background</h3>
+          <p className="small" style={{ margin: 0 }}>
+            No browser opens: a notification says what happened. A Domain listing becomes a house straight away. A link without an address
+            (realestate.com.au) waits at the top of the Houses page for you to finish.</p>
           <ol className="small steps">
             <li>Open <strong>Shortcuts</strong> and tap <strong>+</strong>. Tap the name at the top, <strong>Rename</strong> it
               to <strong>Add to House Track</strong>.</li>
@@ -269,8 +272,24 @@ function PhoneAdding() {
             <li>On a listing in the Domain app or your browser: <strong>Share → Add to House Track</strong>. The first time, allow it
               to connect to House Track.</li>
           </ol>
-          <p className="small muted" style={{ margin: 0 }}>The phone must be on Tailscale. Each person uses their own ID, so the house is
-            added in their name.</p>
+          <h3 className="small" style={{ margin: "12px 0 2px" }}>Check it first</h3>
+          <p className="small" style={{ margin: 0 }}>
+            Opens the <strong>Add a house</strong> form in your browser, filled in from the link, to check and save.</p>
+          <ol className="small steps">
+            <li>In <strong>Shortcuts</strong>, tap <strong>+</strong> and rename it, e.g. <strong>Check in House Track</strong>.</li>
+            <li>Tap the name → <strong>Details</strong> (or <strong>ⓘ</strong>) → turn on <strong>Show in Share Sheet</strong>, and in
+              the <em>Receive</em> block choose <strong>URLs</strong>, <strong>Safari web pages</strong> and <strong>Text</strong>.</li>
+            <li>Add <strong>Get URLs from Input</strong>, then <strong>URL Encode</strong> (it should say <em>URL Encode
+              <strong> URLs</strong></em>).</li>
+            <li>Add <strong>Text</strong>. Type this into it, then with the cursor at the end tap <strong>URL Encoded Text</strong> in the
+              variable bar above the keyboard, so it follows straight after <code>url=</code>:
+              <CopyLine text={`${location.origin}/add?url=`} /></li>
+            <li>Add <strong>Open URLs</strong>. It should say <em>Open <strong>Text</strong></em>. Tap <strong>Done</strong>.</li>
+            <li>On a listing: <strong>Share → Check in House Track</strong>. It opens in your default browser (iOS can't open links in a
+              home-screen app).</li>
+          </ol>
+          <p className="small muted" style={{ margin: 0 }}>Either way the phone must be on Tailscale. For the background shortcut, each
+            person uses their own ID, so the house is added in their name.</p>
         </details>
       )}
     </div>

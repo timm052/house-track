@@ -97,6 +97,12 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.3.9
+
+- Settings has iPhone steps for both shortcuts:
+  - **Add in the background** adds the house with just a notification;
+  - **Check it first** opens the filled-in Add form in the browser.
+
 ### 0.3.8
 
 - iPhone: share a listing to House Track with no browser. A shortcut sends it in the background and a notification says what happened.

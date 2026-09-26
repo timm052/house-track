@@ -50,7 +50,7 @@ def update_person(person_id: UUID, body: PersonPatch, _: Person) -> dict:
 REMOVE_WITH_PERSON = {("opinion", "person_id"), ("criterion_score", "person_id"), ("area", "owner_id"),
                       ("inspection_attendee", "person_id")}  # their own verdicts, scores, areas, attendance
 CLEAR = {("place", "person_id"), ("audit_log", "person_id")}  # "Sam's work" becomes a shared place; the log keeps the rest
-HAND_OVER = {("property", "manual_location_by"), ("checklist_item", "done_by")}
+HAND_OVER = {("property", "manual_location_by"), ("checklist_item", "done_by"), ("shared_link", "shared_by")}
 
 
 @router.delete("/persons/{person_id}", status_code=204)

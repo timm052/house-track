@@ -39,4 +39,6 @@ RUN apt-get update \
 COPY --from=stack compose.yaml .env.example /stack/
 COPY --from=stack deploy/ /stack/deploy/
 RUN sed '/^    build:/d' /stack/compose.yaml > /stack/docker-compose.yml && rm /stack/compose.yaml  && ! grep -q '^    build:' /stack/docker-compose.yml
-CMD ["python", "-m", "app.setup"]
+# An entrypoint, so the step names given to `docker compose run setup <steps>` reach setup as its arguments.
+ENTRYPOINT ["python", "-m", "app.setup"]
+CMD []

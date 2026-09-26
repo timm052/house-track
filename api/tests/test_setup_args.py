@@ -56,4 +56,23 @@ def test_overpass_falls_back_to_another_server(monkeypatch):
     monkeypatch.setattr(osm, "urlopen", fake_urlopen)
     monkeypatch.delenv("OVERPASS_URL", raising=False)
     got = osm.overpass_stations((144.0, -39.0, 146.0, -37.0))
-    assert [s["name"] for s in got] == ["Box Hill"] and len(asked) == 2
+    # Every piece: refused by the first server, answered by the next; the station on every piece is one station.
+    assert [s["name"] for s in got] == ["Box Hill"] and len(asked) == 2 * osm.TILES[0] * osm.TILES[1]
+
+
+def test_steps_given_the_old_way(monkeypatch):
+    """`setup python -m app.setup schools`, as scripts written for images without an entrypoint say it."""
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def stop(*args, **kwargs):
+        raise Stop
+    monkeypatch.setattr("sys.argv", ["setup", "python", "-m", "app.setup", "schools"])
+    monkeypatch.setenv("DATABASE_URL", "postgresql://nowhere/none")
+    monkeypatch.setattr(setup, "migrate", stop)
+    monkeypatch.setattr("builtins.print", lambda *a, **k: seen.setdefault("line", a[0]))
+    with pytest.raises(Stop):
+        setup.main()
+    assert seen["line"].endswith("steps ['schools']")

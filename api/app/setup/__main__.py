@@ -34,7 +34,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     # No default on the argument itself: newer Pythons check a list default against the choices as one value.
     parser.add_argument("steps", nargs="*", choices=("all", *STEPS), help="default: all")
-    args = parser.parse_args()
+    argv = sys.argv[1:]
+    # Up to 0.3.7 the image had no entrypoint, so steps had to be given as `setup python -m app.setup <steps>`.
+    # Scripts written that way keep working.
+    if argv[:3] == ["python", "-m", "app.setup"]:
+        argv = argv[3:]
+    args = parser.parse_args(argv)
     steps = DEFAULT_STEPS if not args.steps or "all" in args.steps else set(args.steps)
 
     region = regions.get(os.environ.get("REGION", "vic"))

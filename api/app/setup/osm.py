@@ -101,7 +101,7 @@ def _overpass(query: str, rounds: int = 3, pause_s: float = 30) -> list[dict]:
         for url in servers:
             try:
                 req = Request(url, data=body, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
-                with urlopen(req, timeout=240) as r:
+                with urlopen(req, timeout=120) as r:
                     return json.load(r)["elements"]
             except (HTTPError, URLError, TimeoutError, ValueError, KeyError) as e:
                 problem = f"{url.split('/')[2]}: {getattr(e, 'code', None) or e}"
@@ -113,13 +113,26 @@ def _overpass(query: str, rounds: int = 3, pause_s: float = 30) -> list[dict]:
     raise RuntimeError("no Overpass server answered (" + "; ".join(problems[-len(servers):]) + ")")
 
 
-def overpass_stations(bbox: Bbox) -> list[dict]:
+TILES = (4, 3)  # the search area is asked for in pieces: a busy server turns away a whole-state query (504)
+
+
+def overpass_stations(bbox: Bbox, rounds: int = 5, pause_s: float = 30) -> list[dict]:
     """Named railway stations in the search area from the public Overpass API: a few hundred records,
-    instead of downloading and clipping the national OpenStreetMap extract."""
-    south, west, north, east = bbox[1], bbox[0], bbox[3], bbox[2]
-    query = (f"[out:json][timeout:180];(node[railway=station]({south},{west},{north},{east});"
-             f"way[railway=station]({south},{west},{north},{east}););out center tags;")
-    elements = _overpass(query)
+    instead of downloading and clipping the national OpenStreetMap extract. Asked for a piece of the area at a
+    time; if any piece still fails after its retries, nothing is returned (a partial list would drop stations)."""
+    west, south, east, north = bbox
+    cols, rows = TILES
+    found: dict[tuple, dict] = {}
+    for i in range(cols):
+        for j in range(rows):
+            w, e = west + (east - west) * i / cols, west + (east - west) * (i + 1) / cols
+            s, n = south + (north - south) * j / rows, south + (north - south) * (j + 1) / rows
+            query = (f"[out:json][timeout:90];(node[railway=station]({s},{w},{n},{e});"
+                     f"way[railway=station]({s},{w},{n},{e}););out center tags;")
+            for el in _overpass(query, rounds, pause_s):
+                found[(el["type"], el["id"])] = el  # a station on a piece's edge comes back twice
+            print(f"osm: stations, piece {i * rows + j + 1} of {cols * rows}", flush=True)
+    elements = list(found.values())
     stations = []
     for e in elements:
         tags = e.get("tags", {})

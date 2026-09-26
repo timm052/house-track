@@ -62,7 +62,7 @@ def address_from_link(url: str) -> dict | None:
                 and str(hit.get("unit") or "").lower() == (unit or "")
                 and street and f" {street} " in slug_text and suburb and slug_text.endswith(f" {suburb} ")):
             return {"unit": hit.get("unit"), "street_number": hit["street_number"], "street": _title(hit["street"]),
-                    "suburb": _title(hit["suburb"]), "postcode": postcode}
+                    "suburb": _title(hit["suburb"]), "postcode": postcode, "gnaf_pid": hit.get("pid")}
 
     # "street", "road" and the like end a street; "glen", "view", "heights" and the like are just as often part of a
     # name (Glen Street, Hill View Road, Glen Waverley), so they only end it when nothing clearer does.

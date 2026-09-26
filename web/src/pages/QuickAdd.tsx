@@ -215,7 +215,7 @@ export default function QuickAdd() {
         },
       }),
     onSuccess: async ({ id }) => {
-      for (const key of [["overview"], ["tags"]]) queryClient.invalidateQueries({ queryKey: key });
+      for (const key of [["overview"], ["tags"], ["shared-links"]]) queryClient.invalidateQueries({ queryKey: key });
       navigate(`/p/${id}`);
     },
   });

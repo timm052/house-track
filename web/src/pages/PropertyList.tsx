@@ -1,6 +1,6 @@
 // Houses (phone-first). Built on the same rows, filters and shared saved views as Overview (D18),
 // with quick filter chips and a sort picker for one-handed use.
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, whilePending } from "../api";
@@ -83,6 +83,7 @@ export default function PropertyList() {
 
   return (
     <>
+      <SharedLinks />
       {needs.count > 0 && (
         <Link to="/week" className="week-nudge">
           <span className="count-badge">{needs.count}</span>
@@ -309,5 +310,36 @@ function Card({ r, people, favourites, cols, slots, tagColours, picked, onPick }
       )}
       </div>
     </Link>
+  );
+}
+
+
+type SharedLink = { id: string; url: string; shared_by: string | null; shared_at: string };
+
+/** Listings shared from a phone that couldn't become a house on their own (the link had no address in it). */
+function SharedLinks() {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const { byId } = usePeople();
+  const { data = [] } = useQuery({ queryKey: ["shared-links"], queryFn: () => api<SharedLink[]>("/api/shared-links") });
+  if (!data.length) return null;
+  const where = (u: string) => { try { const x = new URL(u); return x.hostname.replace(/^www\./, "") + x.pathname; } catch { return u; } };
+  async function dismiss(id: string) {
+    await api(`/api/shared-links/${id}`, { method: "DELETE" });
+    queryClient.invalidateQueries({ queryKey: ["shared-links"] });
+  }
+  return (
+    <div className="card stack shared-links">
+      <strong>Shared from a phone, still to add</strong>
+      {data.map((l) => (
+        <div key={l.id} className="row small">
+          <span className="grow" style={{ minWidth: 0, overflowWrap: "anywhere" }}>
+            <a href={l.url} target="_blank" rel="noreferrer">{where(l.url)}</a>
+            {l.shared_by && <span className="muted"> · {byId.get(l.shared_by)?.display_name}</span>}</span>
+          <button className="primary small-btn" onClick={() => navigate(`/add?url=${encodeURIComponent(l.url)}`)}>Add</button>
+          <button className="small-btn" onClick={() => dismiss(l.id)}>Dismiss</button>
+        </div>
+      ))}
+    </div>
   );
 }

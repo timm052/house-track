@@ -131,6 +131,68 @@ def from_link(body: LinkIn, _: Person) -> dict:
     return with_existing({"url": url, "address_parts": address_from_link(url)})
 
 
+class ShareIn(BaseModel):
+    """What an iPhone shortcut sends: the link (or links) it was given, or text with a link in it."""
+    url: str | list[str] | None = None
+    text: str | None = None
+
+
+@router.post("/share")
+def share(body: ShareIn, person: Person) -> dict:
+    """A listing shared from a phone, with no browser (the iPhone shortcut): added as a house straight away when
+    its link spells out the address (Domain's do), otherwise kept on the Shared links list to finish in the app.
+    Always answers with a `message` for the phone's notification."""
+    import re
+    from ..listing import address_from_link, clean_url
+    from ..schemas import AddressIn, PropertyIn, QuickCampaignIn
+    from .properties import create_property
+    shared = ([body.url] if isinstance(body.url, str) else list(body.url or [])) + [body.text or ""]
+    link = next((m[0] for s in shared if (m := re.search(r"https?://[^\s\"<>]+", s or ""))), None)
+    if not link:
+        return {"status": "no_link", "message": "Nothing to add: what was shared had no link in it."}
+    url = clean_url(link)
+    known = with_existing({"url": url})
+    if known["existing_property_id"]:
+        return {"status": "exists", "property_id": known["existing_property_id"],
+                "message": f"Already in House Track: {known['existing_address']}"}
+    parts = address_from_link(url)
+    if parts:
+        gnaf_pid = parts.pop("gnaf_pid", None)
+        try:
+            # Private sale until the weekly refresh reads the listing (it switches to auction or EOI if need be).
+            created = create_property(PropertyIn(address=AddressIn(**parts), gnaf_pid=gnaf_pid,
+                                                 campaign=QuickCampaignIn(sale_method="private_sale", url=url)), person)
+        except HTTPException as e:
+            if e.status_code != 409:
+                raise
+            return {"status": "exists", "property_id": e.detail["existing_property_id"],
+                    "message": f"Already in House Track: {display(Address(**{k: parts.get(k) for k in ('unit', 'street_number', 'street', 'suburb', 'postcode')}))}"}
+        address = display(Address(**{k: parts.get(k) for k in ("unit", "street_number", "street", "suburb", "postcode")}))
+        return {"status": "added", "property_id": str(created["id"]),
+                "message": f"Added {address}. The rooms, price and photos come in with the weekly refresh."}
+    with tx(person) as conn:
+        conn.execute("""INSERT INTO shared_link (url, shared_by) VALUES (%s, %s)
+                        ON CONFLICT (url) DO UPDATE SET shared_at = now(), shared_by = EXCLUDED.shared_by, dismissed_at = NULL""",
+                     (url, person))
+    return {"status": "saved", "message": "Saved the link. Open House Track to finish adding it: this link doesn't include the address."}
+
+
+@router.get("/shared-links")
+def shared_links() -> list[dict]:
+    """Links shared from a phone still waiting to be added (not dismissed, and not yet on any house)."""
+    with tx() as conn:
+        return conn.execute(
+            """SELECT s.id, s.url, s.shared_by, s.shared_at FROM shared_link s
+               WHERE s.dismissed_at IS NULL AND NOT EXISTS (SELECT 1 FROM campaign_link l WHERE l.url = s.url)
+               ORDER BY s.shared_at DESC""").fetchall()
+
+
+@router.delete("/shared-links/{link_id}", status_code=204)
+def dismiss_shared_link(link_id: UUID, person: Person) -> None:
+    with tx(person) as conn:
+        conn.execute("UPDATE shared_link SET dismissed_at = now() WHERE id = %s", (link_id,))
+
+
 @router.post("/listing/parse")
 def parse_capture(body: CaptureIn, _: Person) -> dict:
     with tx() as conn:

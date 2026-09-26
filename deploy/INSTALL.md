@@ -97,6 +97,15 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.3.8
+
+- iPhone: share a listing to House Track with no browser. A shortcut sends it in the background and a notification says what happened.
+  - A Domain listing becomes a house straight away.
+  - A link without an address waits in **Shared from a phone** at the top of the Houses page.
+  - The new steps are in the app under **Settings → Adding houses from your phone**. Each person uses their own ID.
+- Region data: the stations are downloaded a piece of Victoria at a time, because a busy map server turns away a whole-state request.
+- `docker compose --profile setup run --rm setup stations` (naming the steps) now works. Before, the step name was taken as a command.
+
 ### 0.3.7
 
 - Region data setup copes with a busy OpenStreetMap server: the stations are asked for again after a pause, and from two other public servers.

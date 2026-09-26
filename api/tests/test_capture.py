@@ -270,3 +270,33 @@ def test_shared_link_finds_a_tracked_listing(client, people, monkeypatch):
         "address": {"street_number": "8", "street": "Shared Street", "suburb": "Mitcham", "postcode": "3132"},
         "campaign": {"sale_method": "private_sale", "url": url}}).json()["id"]
     assert client.post("/api/listing/from-link", headers=a, json={"url": url}).json()["existing_property_id"] == pid
+
+
+def test_share_from_a_phone_adds_the_house_or_keeps_the_link(client, people, monkeypatch):
+    from app import gnaf
+    monkeypatch.setattr(gnaf, "search", lambda q, limit=8: [])
+    a = as_(people["a"])
+    domain = "https://www.domain.com.au/9-phone-street-mitcham-vic-3132-2029990099"
+    # The shortcut sends the list its "Get URLs" step made; the Domain app shares text with the link in it.
+    r = client.post("/api/share", headers=a, json={"url": [domain + "?utm_medium=share"]}).json()
+    assert r["status"] == "added" and r["message"].startswith("Added 9 Phone Street, Mitcham 3132")
+    house = client.get(f"/api/properties/{r['property_id']}").json()
+    assert house["campaigns"][0]["sale_method"] == "private_sale" and house["campaigns"][0]["links"][0]["url"] == domain
+    again = client.post("/api/share", headers=a, json={"text": f"Check out this property on Domain: {domain}"}).json()
+    assert again["status"] == "exists" and again["property_id"] == r["property_id"]
+
+    rea = "https://www.realestate.com.au/property-house-vic-mitcham-145678909"
+    kept = client.post("/api/share", headers=a, json={"url": rea}).json()
+    assert kept["status"] == "saved" and "finish adding" in kept["message"]
+    [waiting] = [x for x in client.get("/api/shared-links").json() if x["url"] == rea]
+    assert waiting["shared_by"] == people["a"]["id"]
+    # Once it's on a house, it's no longer waiting; a dismissed one isn't either.
+    client.post("/api/properties", headers=a, json={
+        "address": {"street_number": "10", "street": "Phone Street", "suburb": "Mitcham", "postcode": "3132"},
+        "campaign": {"sale_method": "auction", "url": rea}})
+    assert rea not in [x["url"] for x in client.get("/api/shared-links").json()]
+    other = client.post("/api/share", headers=a, json={"url": "https://www.realestate.com.au/property-unit-vic-mitcham-145678910"}).json()
+    [link] = [x for x in client.get("/api/shared-links").json() if x["url"].endswith("145678910")]
+    assert other["status"] == "saved" and client.delete(f"/api/shared-links/{link['id']}", headers=a).status_code == 204
+    assert not [x for x in client.get("/api/shared-links").json() if x["url"].endswith("145678910")]
+    assert client.post("/api/share", headers=a, json={"text": "no link here"}).json()["status"] == "no_link"

@@ -203,20 +203,30 @@ export function refreshBookmarklet() {
 
 /** Adding a house from a phone: the Share menu (Android, once the app is installed) or an Apple Shortcut (iPhone),
  *  both opening /add with the listing's link. Phone browsers make bookmarklets awkward, so this is the phone path. */
+/** A line to copy into the phone's shortcut (tap Copy, or select it by hand). */
+function CopyLine({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2500); } catch { /* select it by hand */ }
+  }
+  return (
+    <div className="row" style={{ marginTop: 4 }}>
+      <code className="grow" style={{ wordBreak: "break-all" }}>{text}</code>
+      <button className="small-btn" onClick={copy}>{copied ? "Copied ✓" : "Copy"}</button>
+    </div>
+  );
+}
+
 function PhoneAdding() {
   const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const android = /Android/.test(navigator.userAgent);
-  const shortcutUrl = `${location.origin}/add?url=`;
-  const [copied, setCopied] = useState(false);
-  async function copy() {
-    try { await navigator.clipboard.writeText(shortcutUrl); setCopied(true); setTimeout(() => setCopied(false), 2500); } catch { /* select it by hand */ }
-  }
+  const { me } = usePeople();
   return (
     <div className="card stack" id="phone">
       <h2>Adding houses from your phone</h2>
       <p className="small" style={{ margin: 0 }}>
         Share a listing to House Track from the Domain or realestate.com.au app, or from your phone's browser. A Domain listing's
-        address is filled in from its link. Its rooms, price guide, photos and floor plan come in with the next weekly refresh, as long
+        address is read from its link. Its rooms, price guide, photos and floor plan come in with the next weekly refresh, as long
         as <strong>Fill in what's missing</strong> is ticked. A realestate.com.au link doesn't include the address, so you type that.
       </p>
       {!ios && (
@@ -232,21 +242,35 @@ function PhoneAdding() {
       {!android && (
         <details open={ios}>
           <summary><strong>iPhone and iPad</strong></summary>
-          <p className="small" style={{ margin: "6px 0" }}>Apple doesn't let web apps into the Share menu, so a shortcut does it. Set it up once:</p>
+          <p className="small" style={{ margin: "6px 0" }}>
+            Apple doesn't let web apps into the Share menu, so a shortcut sends the listing to House Track in the background. No
+            browser opens: a notification says what happened. A Domain listing becomes a house straight away. A link without an address
+            (realestate.com.au) waits at the top of the Houses page for you to finish. Set it up once, on each person's phone:</p>
           <ol className="small steps">
-            <li>Open the <strong>Shortcuts</strong> app and tap <strong>+</strong>. Name the shortcut <strong>Add to House Track</strong>.</li>
-            <li>Tap <strong>ⓘ</strong> and turn on <strong>Show in Share Sheet</strong>. At the top of the shortcut, set what it receives to
-              <strong> URLs</strong>, <strong>Safari web pages</strong> and <strong>Text</strong>.</li>
-            <li>Add the action <strong>URL Encode</strong>. It encodes the <em>Shortcut Input</em>.</li>
-            <li>Add the action <strong>Open URLs</strong>. In its box, paste this address, then tap the variables bar and add
-              <strong> URL Encoded Text</strong> straight after it:
-              <div className="row" style={{ marginTop: 4 }}>
-                <code className="grow" style={{ wordBreak: "break-all" }}>{shortcutUrl}</code>
-                <button className="small-btn" onClick={copy}>{copied ? "Copied ✓" : "Copy"}</button>
-              </div>
-            </li>
-            <li>On a listing, tap <strong>Share → Add to House Track</strong>.</li>
+            <li>Open <strong>Shortcuts</strong> and tap <strong>+</strong>. Tap the name at the top, <strong>Rename</strong> it
+              to <strong>Add to House Track</strong>.</li>
+            <li>Tap the name again → <strong>Details</strong> (or <strong>ⓘ</strong> at the bottom) and turn on <strong>Show in Share
+              Sheet</strong>. In the <em>Receive</em> block that appears, choose <strong>URLs</strong>, <strong>Safari web pages</strong>
+              and <strong>Text</strong>.</li>
+            <li>Add <strong>Get URLs from Input</strong> (from <em>Shortcut Input</em>).</li>
+            <li>Add <strong>URL</strong>, and type this address into it:
+              <CopyLine text={`${location.origin}/api/share`} /></li>
+            <li>Add <strong>Get Contents of URL</strong>. Tap <strong>Show More</strong> (the ⌄) and set:
+              <ul>
+                <li><strong>Method</strong>: POST</li>
+                <li><strong>Headers</strong> → Add new header: key <code>X-Person-Id</code>, value your ID:
+                  {me ? <CopyLine text={me.id} /> : <span className="muted"> (pick who you are first)</span>}</li>
+                <li><strong>Request Body</strong>: JSON → Add new field → <strong>Text</strong>: key <code>url</code>, and for the value
+                  tap the variable bar and choose <strong>URLs</strong> (from Get URLs from Input).</li>
+              </ul></li>
+            <li>Add <strong>Get Dictionary Value</strong>: <em>Get <strong>Value</strong> for</em> <code>message</code> <em>in
+              <strong> Contents of URL</strong></em>.</li>
+            <li>Add <strong>Show Notification</strong> with <strong>Dictionary Value</strong>. Tap <strong>Done</strong>.</li>
+            <li>On a listing in the Domain app or your browser: <strong>Share → Add to House Track</strong>. The first time, allow it
+              to connect to House Track.</li>
           </ol>
+          <p className="small muted" style={{ margin: 0 }}>The phone must be on Tailscale. Each person uses their own ID, so the house is
+            added in their name.</p>
         </details>
       )}
     </div>

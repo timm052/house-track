@@ -59,6 +59,15 @@ def test_photo_upload_thumbnail_and_dedup(client, people, tmp_path, monkeypatch)
     thumb = client.get(f"/api/attachments/{atts[0]['id']}/thumb")
     assert thumb.status_code == 200 and max(Image.open(io.BytesIO(thumb.content)).size) <= 480
     assert client.get(f"/api/attachments/{atts[0]['id']}/file").content == data
+    assert (atts[0]["width"], atts[0]["height"]) == (1200, 900)  # for the photo viewer, before it loads
+    # A portrait phone photo is stored sideways with an EXIF tag to turn it: its size is as it's shown, upright.
+    buf, exif = io.BytesIO(), Image.Exif()
+    exif[0x0112] = 6
+    Image.new("RGB", (1200, 900), (60, 120, 180)).save(buf, "JPEG", exif=exif)
+    client.post(f"/api/properties/{pid}/attachments", headers=as_(a), files={"file": ("tall.jpg", buf.getvalue(), "image/jpeg")},
+                data={"kind": "photo"})
+    tall = next(x for x in client.get(f"/api/properties/{pid}").json()["attachments"] if x["original_name"] == "tall.jpg")
+    assert (tall["width"], tall["height"]) == (900, 1200)
 
     # A vendor statement link works without a file; nothing at all is refused.
     r = client.post(f"/api/properties/{pid}/attachments", headers=as_(a),

@@ -383,7 +383,8 @@ table.compare thead th { font-weight: 700; }
 .banner-empty a { font-size: 0.95rem; }
 .banner-badge { position: absolute; right: 10px; bottom: 10px; background: rgba(0,0,0,.6); color: #fff; text-decoration: none;
   font-size: 0.85rem; padding: 4px 10px; border-radius: 999px; }
-@media (max-width: 600px) { .banner-media { height: 180px; } }
+/* Phones: the photo at 4:3 across the screen, not a letterbox strip. */
+@media (max-width: 600px) { .banner-media { height: auto; aspect-ratio: 4 / 3; max-height: 55vh; } }
 .listing-title { margin: 14px 0 4px; }
 .listing-title h1 { font-size: 1.7rem; margin-bottom: 2px; }
 .facts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
@@ -972,3 +973,17 @@ a.plan-open:active { transform: scale(0.98); transition-duration: 0ms; }
 .banner-badge.map-link-phone { display: none; }
 @media (max-width: 700px) { .banner-badge.map-link-phone { display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; font-weight: 600; } }
 .banner-badge.map-link-phone .lucide { width: 15px; height: 15px; }
+
+/* The photo viewer (PhotoSwipe) opens over everything, the app's header included. */
+.pswp { --pswp-bg: #000; z-index: 2000; }
+.banner-media .gallery-slide[aria-label*="floor plan"] { cursor: pointer; }
+
+/* Houses grouped by street: a small heading over each street's cards. */
+.street-group + .street-group { margin-top: 6px; }
+.street-heading { margin: 14px 0 6px; font-size: 1rem; }
+.street-heading .muted { font-weight: 500; font-size: 0.85rem; }
+/* Add a house: the title and Add button stay in reach at the top while the form scrolls. */
+.add-head { position: sticky; top: var(--topbar-h, 57px); z-index: 4; display: flex; align-items: center; gap: 12px;
+  margin: 0 -4px 4px; padding: 8px 4px; background: var(--bg); }
+.add-head h1 { margin: 0; }
+.add-head button { min-width: 130px; }

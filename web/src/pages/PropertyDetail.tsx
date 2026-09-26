@@ -19,7 +19,7 @@ import ConfirmButton from "../ConfirmButton";
 import { OutcomeForm, outcomeStatus, statusOutOfStep } from "../Outcome";
 
 const MiniMap = lazy(() => import("../map/MiniMap"));
-const DocViewer = lazy(() => import("../DocViewer"));
+const PhotoViewer = lazy(() => import("../PhotoViewer"));
 const REDUCED_MOTION = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
 /** Run a write, then refresh this property and the list. A conflict (someone else changed it first) also
@@ -131,7 +131,7 @@ const oldestFirst = (c: Campaign | null) => [...(c?.price_guides ?? [])].sort((a
 const isPhoto = (a: Detail["attachments"][number]) => a.kind === "photo" && !!a.sha256 && !!a.mime_type?.startsWith("image/");
 
 const fromListing = (a: Detail["attachments"][number]) => a.caption === "From the listing";
-type Slide = { id: string; title: string; mime: string | null; plan: boolean };
+type Slide = { id: string; title: string; mime: string | null; plan: boolean; width: number | null; height: number | null };
 
 /** The photos (cover first, then the listing's in its order, then everyone's own, newest first, as on the Photos tab)
  *  followed by the floor plans kept in House Track. */
@@ -142,14 +142,18 @@ function slidesOf(p: Detail): Slide[] {
   const plans = p.attachments.filter((a) => a.kind === "floorplan" && !!a.sha256
     && (!!a.mime_type?.startsWith("image/") || a.mime_type === "application/pdf"));
   return [
-    ...photos.map((a) => ({ id: a.id, title: a.caption ?? "Photo", mime: a.mime_type, plan: false })),
-    ...plans.map((a, i) => ({ id: a.id, title: plans.length > 1 ? `Floor plan ${i + 1}` : "Floor plan", mime: a.mime_type, plan: true })),
+    ...photos.map((a) => ({ id: a.id, title: a.caption ?? "Photo", mime: a.mime_type, plan: false, width: a.width ?? null, height: a.height ?? null })),
+    ...plans.map((a, i) => ({ id: a.id, title: plans.length > 1 ? `Floor plan ${i + 1}` : "Floor plan", mime: a.mime_type, plan: true,
+                              width: null, height: null })),
   ];
 }
 
-/** The house's photos and floor plans in the banner: swipe, scroll or use the arrows to step through; tap or click
- *  one to see it full screen. On phones, where the map beside it is hidden, a Map button opens the full map. */
+/** The house's photos and floor plans in the banner: swipe, scroll or use the arrows to step through. A photo opens
+ *  full screen in the photo viewer (pinch to zoom), a floor plan in the floor plan viewer. On phones, where the map
+ *  beside it is hidden, a Map button opens the full map. */
 function Gallery({ p, slides, hasPin }: { p: Detail; slides: Slide[]; hasPin: boolean }) {
+  const navigate = useNavigate();
+  const photos = slides.filter((s) => !s.plan);
   const strip = useRef<HTMLDivElement>(null);
   const [index, setIndex] = useState(0);
   const [viewing, setViewing] = useState<number | null>(null);
@@ -175,7 +179,8 @@ function Gallery({ p, slides, hasPin }: { p: Detail; slides: Slide[]; hasPin: bo
         }}
         onKeyDown={(e) => { if (e.key === "ArrowRight") { e.preventDefault(); step(1); } if (e.key === "ArrowLeft") { e.preventDefault(); step(-1); } }}>
         {slides.map((s, i) => (
-          <button key={s.id} className="gallery-slide" onClick={() => setViewing(i)} aria-label={`${s.title}, ${i + 1} of ${slides.length}. Open full screen.`}>
+          <button key={s.id} className="gallery-slide" onClick={() => (s.plan ? navigate(`/p/${p.id}/plan/${s.id}`) : setViewing(photos.indexOf(s)))}
+            aria-label={`${s.title}, ${i + 1} of ${slides.length}. ${s.plan ? "Open the floor plan" : "Open full screen"}.`}>
             {s.mime?.startsWith("image/")
               ? <img src={`/api/attachments/${s.id}/file`} alt="" className={s.plan ? "plan" : ""} loading={i < 2 ? "eager" : "lazy"} draggable={false} />
               : <span className="gallery-doc"><FileText /> {s.title}</span>}
@@ -191,7 +196,7 @@ function Gallery({ p, slides, hasPin }: { p: Detail; slides: Slide[]; hasPin: bo
       <span className="banner-badge"><Camera /> {slides.length > 1 ? `${index + 1} of ${slides.length}` : "1 photo"}</span>
       {viewing != null && (
         <Suspense fallback={null}>
-          <DocViewer items={slides.map((s) => ({ id: s.id, title: s.title, mime: s.mime }))} start={viewing} onClose={() => setViewing(null)} />
+          <PhotoViewer photos={photos.map((s) => ({ id: s.id, width: s.width, height: s.height, caption: s.title }))} start={viewing} onClose={() => setViewing(null)} />
         </Suspense>
       )}
     </div>

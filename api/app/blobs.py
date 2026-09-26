@@ -2,6 +2,7 @@
 backups are a copy that skips files already there. Image uploads also get a small WebP thumbnail
 under blobs/thumbs/<sha256>.webp."""
 
+import functools
 import hashlib
 import io
 import os
@@ -34,6 +35,20 @@ def store(data: bytes) -> str:
         tmp.write_bytes(data)
         tmp.replace(target)
     return sha
+
+
+@functools.lru_cache(maxsize=4096)
+def image_size(sha: str) -> tuple[int, int] | None:
+    """Width and height as a browser shows the photo: turned upright by its EXIF orientation, as phone photos taken
+    in portrait are stored sideways with a tag saying so. Read from the header only; files never change, so cached."""
+    try:
+        with Image.open(path_for(sha)) as img:
+            w, h = img.size
+            if img.getexif().get(ExifTags.Base.Orientation) in (5, 6, 7, 8):
+                w, h = h, w
+            return w, h
+    except Exception:
+        return None
 
 
 def image_facts(data: bytes, sha: str) -> dict:

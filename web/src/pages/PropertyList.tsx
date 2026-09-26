@@ -31,7 +31,10 @@ export default function PropertyList() {
 
   const [viewId, setViewId] = useState<string | null>(null);
   const view = views.data?.find((v) => v.id === viewId) ?? views.data?.find((v) => v.is_default) ?? builtInDefault(cols);
-  const [sortKey, setSortKey] = useState<string>("");
+  // Remembered on this device: grouping by street, say, stays as chosen.
+  const [sortKey, setSortKey] = useState<string>(() => { try { return localStorage.getItem("housetrack.houses.sort") ?? ""; } catch { return ""; } });
+  useEffect(() => { try { localStorage.setItem("housetrack.houses.sort", sortKey); } catch { /* per-device nicety */ } }, [sortKey]);
+  const byStreet = sortKey === "street";
   const [search, setSearch] = useState("");
   const [quick, setQuick] = useState<Quick>(NO_QUICK);
   const [extra, setExtra] = useState<Filter[]>([]);
@@ -50,7 +53,8 @@ export default function PropertyList() {
     const v = (r[`v:${me.id}:post`] ?? r[`v:${me.id}:pre`]) as string | undefined;
     return quick.myVerdicts.includes(v ?? "unset");
   }).map((r) => r.id) : []);
-  const sort: Sort[] = sortKey ? [{ column: sortKey, dir: ["created_at", "score_avg"].includes(sortKey) ? "desc" : "asc" }] : view.sort;
+  const sort: Sort[] = byStreet ? view.sort
+    : sortKey ? [{ column: sortKey, dir: ["created_at", "score_avg"].includes(sortKey) ? "desc" : "asc" }] : view.sort;
   const filterKey = JSON.stringify(filters), sortJson = JSON.stringify(sort);
   // Houses whose sale is over (to someone else) go to the bottom, in the same order among themselves.
   const rows = useMemo(() => {
@@ -79,6 +83,13 @@ export default function PropertyList() {
   useEffect(() => { try { localStorage.setItem("housetrack.showInspected", showInspected ? "1" : "0"); } catch { /* ignore */ } }, [showInspected]);
   const card = (r: OverviewRow) => <Card key={r.id} r={r} people={active} favourites={favourites} cols={cols} slots={slots} tagColours={tagColours}
     picked={comparing ? comparing.includes(r.id) : undefined} onPick={pick} />;
+  // Grouped by street (a heading for each, streets A to Z, houses by number), or one grid in the chosen order.
+  const cards = (list: OverviewRow[]) => !byStreet ? <div className="card-grid">{list.map(card)}</div> : streetGroups(list).map((g) => (
+    <section key={g.key} className="street-group">
+      <h3 className="street-heading">{g.street}<span className="muted"> · {g.suburb} · {g.rows.length}</span></h3>
+      <div className="card-grid">{g.rows.map(card)}</div>
+    </section>
+  ));
   // Compare: tap "Compare", tap up to four cards, then open them side by side.
   const navigate = useNavigate();
   const [comparing, setComparing] = useState<string[] | null>(null);
@@ -111,6 +122,7 @@ export default function PropertyList() {
         </select>
         <select value={sortKey} onChange={(e) => setSortKey(e.target.value)} aria-label="Sort">
           <option value="">Sort: view's order</option>
+          <option value="street">Sort: street, grouped</option>
           <option value="sale_at">Sort: auction / EOI date</option>
           <option value="guide_high">Sort: guide price</option>
           <option value="created_at">Sort: newest first</option>
@@ -206,13 +218,13 @@ export default function PropertyList() {
         <div className="card empty">No houses match these filters. <button className="link" onClick={() => { setQuick(NO_QUICK); setExtra([]); setSearch(""); }}>Clear filters</button></div>
       )}
       {/* Houses nobody has inspected yet come first; the ones you've been through sit in their own section. */}
-      <div className="card-grid">{toSee.map(card)}</div>
+      {cards(toSee)}
       {seenRows.length > 0 && (
         <section className="inspected-section">
           <button className="section-toggle" aria-expanded={showInspected} onClick={() => setShowInspected(!showInspected)}>
             {showInspected ? <ChevronDown /> : <ChevronRight />} Inspected <span className="muted">({seenRows.length})</span>
           </button>
-          {showInspected && <div className="card-grid">{seenRows.map(card)}</div>}
+          {showInspected && cards(seenRows)}
         </section>
       )}
       {comparing && (
@@ -224,6 +236,26 @@ export default function PropertyList() {
       )}
     </>
   );
+}
+
+/** A house's place along its street: number, then any letter (12, 12A, 12B), then unit (1/12 before 2/12). */
+function streetOrder(r: OverviewRow): [number, string, number] {
+  const m = String(r.street_number ?? "").match(/^(\d+)\s*([A-Za-z]?)/);
+  return [m ? Number(m[1]) : Number.MAX_SAFE_INTEGER, (m?.[2] ?? "").toUpperCase(), Number(String(r.unit ?? "").match(/\d+/)?.[0] ?? 0)];
+}
+
+/** Houses in groups by street (and suburb, as names repeat), streets A to Z, each street's houses by number. */
+function streetGroups(rows: OverviewRow[]) {
+  const groups = new Map<string, { key: string; street: string; suburb: string; rows: OverviewRow[] }>();
+  for (const r of rows) {
+    const street = String(r.street || r.address), suburb = String(r.suburb ?? ""), key = `${street.toLowerCase()}|${suburb.toLowerCase()}`;
+    if (!groups.has(key)) groups.set(key, { key, street, suburb, rows: [] });
+    groups.get(key)!.rows.push(r);
+  }
+  const cmp = (a: [number, string, number], b: [number, string, number]) => a[0] - b[0] || a[1].localeCompare(b[1]) || a[2] - b[2];
+  return [...groups.values()]
+    .sort((a, b) => a.street.localeCompare(b.street, "en-AU", { numeric: true }) || a.suburb.localeCompare(b.suburb))
+    .map((g) => ({ ...g, rows: g.rows.sort((a, b) => cmp(streetOrder(a), streetOrder(b))) }));
 }
 
 /** The cover photo, then: address and status; rooms and travel; sale and price; verdicts (once there are any).

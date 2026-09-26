@@ -223,7 +223,20 @@ export default function QuickAdd() {
 
   return (
     <div className="stack" style={{ marginTop: 12 }}>
-      <h1>Add a house</h1>
+      {/* The Add button stays at the top while the form scrolls, with any problem saving beside it. */}
+      <div className="add-head">
+        <h1 className="grow">Add a house</h1>
+        {!capture?.existing_property_id && (
+          <button className="primary" disabled={save.isPending || !!priceProblem} onClick={() => save.mutate()}>
+            {save.isPending ? "Adding…" : "Add house"}</button>
+        )}
+      </div>
+      {err && !capture?.existing_property_id && (
+        <p className="error small" style={{ marginTop: 0 }}>
+          {err.message}{" "}
+          {err.existingPropertyId && <Link to={`/p/${err.existingPropertyId}`}>Open it</Link>}
+        </p>
+      )}
       <p className="muted small">Only the address is needed. The + House Track button on a listing fills in most of the rest.</p>
 
       {capture?.existing_property_id && (
@@ -364,7 +377,7 @@ export default function QuickAdd() {
       <div className="row" style={{ justifyContent: "flex-end" }}>
         <Link to="/"><button>Cancel</button></Link>
         <button className="primary" style={{ minWidth: 160 }} disabled={save.isPending || !!priceProblem} onClick={() => save.mutate()}>
-          {save.isPending ? "Saving…" : "Save house"}
+          {save.isPending ? "Adding…" : "Add house"}
         </button>
       </div>
       </>}

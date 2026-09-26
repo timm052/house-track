@@ -204,8 +204,12 @@ ATTACHMENT_SELECT = """SELECT id, property_id, campaign_id, inspection_id, kind,
 
 
 def attachments_for(conn, property_id: UUID) -> list[dict]:
-    return conn.execute(ATTACHMENT_SELECT + " WHERE property_id = %s ORDER BY coalesce(taken_at, created_at) DESC",
+    rows = conn.execute(ATTACHMENT_SELECT + " WHERE property_id = %s ORDER BY coalesce(taken_at, created_at) DESC",
                         (property_id,)).fetchall()
+    for r in rows:  # images carry their size, which the photo viewer needs before they load
+        size = blobs.image_size(r["sha256"]) if r["sha256"] and (r["mime_type"] or "").startswith("image/") else None
+        r["width"], r["height"] = size or (None, None)
+    return rows
 
 
 @router.post("/properties/{property_id}/attachments", status_code=201)

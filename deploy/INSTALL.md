@@ -97,6 +97,13 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.3
+
+- Photos open full screen in a new viewer: swipe between them, pinch or double-tap to zoom, and drag around a zoomed photo. Portrait photos from phones now show the right way up and the right shape. On a phone, Back closes the viewer. Floor plans open in the floor plan viewer.
+- On phones, the photo at the top of a house page is taller (4:3).
+- Houses can be grouped by street (**Sort: street, grouped**), streets A to Z and houses by number. The sort you choose is remembered on each device.
+- **Add a house** keeps its **Add house** button at the top while you scroll the form.
+
 ### 0.4.2
 
 - New statuses, about where you're up to with a house: **Watching**, **Interested**, **Shortlisted**, **Offering**, **Bought**, **Missed out** and **Ruled out**. What happened to the sale (sold, passed in, withdrawn) is shown beside the status, not as one. A house you only watched stays Watching when it sells. The app suggests **Missed out** only if you were Offering, and **Bought** if it's yours. Houses whose sale is over fade and move to the bottom of the list.

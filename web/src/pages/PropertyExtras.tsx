@@ -11,6 +11,7 @@ import ConfirmButton from "../ConfirmButton";
 import type { ViewerItem } from "../DocViewer";
 
 const DocViewer = lazy(() => import("../DocViewer"));
+const PhotoViewer = lazy(() => import("../PhotoViewer"));
 
 export type Inspection = {
   id: string; kind: string; starts_at: string; ends_at: string | null; state: string; inspector: string | null;
@@ -19,6 +20,7 @@ export type Inspection = {
 export type Attachment = {
   id: string; kind: string; sha256: string | null; mime_type: string | null; original_name: string | null;
   url: string | null; caption: string | null; taken_at: string | null; created_at: string; created_by: string;
+  width?: number | null; height?: number | null;  // images: as shown, upright
   markups?: number;  // floor plan markup versions (floorplan/FloorplanEditor.tsx)
 };
 
@@ -163,8 +165,9 @@ export function Files({ propertyId, attachments, coverId, address }: { propertyI
     || (fromListing(a) ? a.created_at.localeCompare(b.created_at) : b.created_at.localeCompare(a.created_at)));
   const docs = attachments.filter((a) => !isPhoto(a)).sort((a, b) => Number(b.kind === "floorplan") - Number(a.kind === "floorplan"));
   // The viewer steps through photos, or through documents kept in House Track (links open on their own site).
+  // Photos open in the photo viewer (swipe, pinch to zoom); documents, floor plans among them, in the document viewer.
   const [viewing, setViewing] = useState<{ items: ViewerItem[]; start: number } | null>(null);
-  const photoItems: ViewerItem[] = photos.map((p) => ({ id: p.id, title: p.caption ?? p.original_name ?? "Photo", mime: p.mime_type }));
+  const [photoAt, setPhotoAt] = useState<number | null>(null);
   const fileDocs = docs.filter((d) => !d.url);
   const docItems: ViewerItem[] = fileDocs.map((d) => ({ id: d.id, title: d.caption ?? d.original_name ?? DOC_KINDS[d.kind] ?? "Document", mime: d.mime_type }));
   const [keeping, setKeeping] = useState<string | null>(null);
@@ -183,7 +186,7 @@ export function Files({ propertyId, attachments, coverId, address }: { propertyI
           {photos.map((p) => (
             <div key={p.id} className={`thumb ${p.id === coverId ? "is-cover" : ""}`}>
               <a href={`/api/attachments/${p.id}/file`} title={p.caption ?? p.original_name ?? ""}
-                onClick={(e) => { e.preventDefault(); setViewing({ items: photoItems, start: photos.indexOf(p) }); }}>
+                onClick={(e) => { e.preventDefault(); setPhotoAt(photos.indexOf(p)); }}>
                 <img src={`/api/attachments/${p.id}/thumb`} alt={p.caption ?? DOC_KINDS[p.kind]} loading="lazy" />
               </a>
               {p.id === coverId && <span className="thumb-badge">Cover</span>}
@@ -222,6 +225,9 @@ export function Files({ propertyId, attachments, coverId, address }: { propertyI
       ))}
       {viewing && (
         <Suspense fallback={null}><DocViewer items={viewing.items} start={viewing.start} onClose={() => setViewing(null)} /></Suspense>
+      )}
+      {photoAt != null && (
+        <Suspense fallback={null}><PhotoViewer photos={photos} start={photoAt} onClose={() => setPhotoAt(null)} /></Suspense>
       )}
       <div className="grid2">
         <select value={kind} onChange={(e) => setKind(e.target.value)} aria-label="Kind">

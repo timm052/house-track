@@ -155,6 +155,7 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
         row: dict[str, Any] = {
             "id": str(pid),
             "address": _street(p),
+            "street": p["street"], "street_number": p["street_number"], "unit": p["unit"],  # for grouping by street
             "full_address": display(Address(**{k: p[k] for k in ("unit", "street_number", "street", "suburb",
                                                                    "postcode", "plan_number", "lot_number")})),
             "suburb": p["suburb"], "postcode": p["postcode"],

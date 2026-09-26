@@ -24,6 +24,7 @@ import Plan from "./pages/Plan";
 const MapPage = lazy(() => import("./pages/MapPage"));
 const Overview = lazy(() => import("./pages/Overview"));
 const Trends = lazy(() => import("./pages/Trends"));
+const FloorplanEditor = lazy(() => import("./floorplan/FloorplanEditor"));
 
 // Lists, the house page and dashboards use the full width; forms and settings stay narrow.
 const WIDE = [/^\/$/, /^\/week/, /^\/p\//, /^\/trends/, /^\/compare/, /^\/plan/];
@@ -100,6 +101,7 @@ export default function App() {
           <Route path="/" element={<PropertyList />} />
           <Route path="/add" element={<QuickAdd />} />
           <Route path="/p/:id" element={<PropertyDetail />} />
+          <Route path="/p/:id/plan/:attachmentId" element={<Suspense fallback={<p className="muted">Loading…</p>}><FloorplanEditor /></Suspense>} />
           <Route path="/map" element={<Suspense fallback={<p className="muted">Loading map…</p>}><MapPage /></Suspense>} />
           <Route path="/overview" element={<Suspense fallback={<p className="muted">Loading…</p>}><Overview /></Suspense>} />
           <Route path="/places" element={<Places />} />

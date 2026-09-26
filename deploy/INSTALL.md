@@ -97,6 +97,11 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.0
+
+- Floor plans: open a house's floor plan with the **Floor plan** button on its About tab. Look through the saved versions and measure rooms. Press **Edit** to set the scale, draw walls and areas, and try furniture at real size. Everyone in the household sees every version.
+- A floor plan can be an image or a PDF, from the listing or uploaded under **Photos & docs**. **Mark up** there opens it ready to edit.
+
 ### 0.3.10
 
 - Fix: updating a house from its listing added another copy of the Statement of Information each time. The update merges the copies already added into one. The app backs up the database before it does.

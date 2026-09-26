@@ -1,7 +1,8 @@
 // Property page sections for milestone 3: inspections (with each person's notes) and photos/documents.
 import { useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useState } from "react";
-import { FileText } from "lucide-react";
+import { FileText, PencilRuler } from "lucide-react";
+import { Link } from "react-router-dom";
 import { api } from "../api";
 import { fromLocalInput, INSPECTION_KINDS, when } from "../format";
 import { newId, sendOrQueue, uploadFiles, uploadMessage } from "../outbox";
@@ -18,6 +19,7 @@ export type Inspection = {
 export type Attachment = {
   id: string; kind: string; sha256: string | null; mime_type: string | null; original_name: string | null;
   url: string | null; caption: string | null; taken_at: string | null; created_at: string; created_by: string;
+  markups?: number;  // floor plan markup versions (floorplan/FloorplanEditor.tsx)
 };
 
 const KINDS = INSPECTION_KINDS;
@@ -209,6 +211,10 @@ export function Files({ propertyId, attachments, coverId, address }: { propertyI
           ) : (
             <button className="link grow doc-open" onClick={() => setViewing({ items: docItems, start: fileDocs.indexOf(d) })}>
               <FileText /> {d.caption ?? d.original_name ?? "Document"}</button>
+          )}
+          {!d.url && (d.kind === "floorplan" || (d.markups ?? 0) > 0) && (d.mime_type?.startsWith("image/") || d.mime_type === "application/pdf") && (
+            <Link className="small-btn-link" to={`/p/${propertyId}/plan/${d.id}?edit=1`} title="Measure rooms and try furniture">
+              <PencilRuler /> Mark up{(d.markups ?? 0) > 0 && ` (${d.markups})`}</Link>
           )}
           <ConfirmButton className="link" label="Remove" question="Remove it?" yes="Remove"
             onConfirm={() => api(`/api/attachments/${d.id}`, { method: "DELETE" }).then(refresh)} />

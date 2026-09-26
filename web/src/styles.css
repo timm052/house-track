@@ -797,3 +797,143 @@ button.commute-pt:hover, button.commute-pt.on { border-color: var(--border-stron
 .commute-legs li.walk { color: var(--muted); }
 .commute-legs li.arrive { font-weight: 600; }
 .commute-leg-at { flex: none; width: 4.2em; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+
+/* ─── floor plan markup (floorplan/FloorplanEditor.tsx) ─────────────── */
+.fp-page { position: fixed; top: var(--topbar-h, 57px); left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; background: var(--bg); z-index: 1; }
+.fp-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.fp-tools { display: flex; flex-wrap: wrap; gap: 2px; }
+.fp-tools button, .fp-bar > .link { min-height: 36px; padding: 4px 8px; display: inline-flex; align-items: center; gap: 4px; background: none; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--text); }
+.fp-tools button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.fp-tools .lucide, .fp-bar .lucide { width: 18px; height: 18px; }
+.fp-tool-label { font-size: 0.8rem; }
+@media (max-width: 899px) { .fp-tool-label { display: none; } }
+.fp-colours { display: flex; gap: 4px; margin-left: auto; }
+.fp-colours button { width: 22px; height: 22px; min-height: 0; padding: 0; border-radius: 50%; border: 2px solid var(--surface); box-shadow: 0 0 0 1px var(--border-strong); }
+.fp-colours button.on { box-shadow: 0 0 0 2px var(--text); }
+.fp-main { flex: 1; display: flex; min-height: 0; }
+.fp-canvas { position: relative; flex: 1; min-width: 0; overflow: hidden; background: #f3f1ec; user-select: none; }
+[data-theme="dark"] .fp-canvas { background: #2a2f31; }
+.fp-canvas svg { display: block; cursor: crosshair; }
+/* Cursors say what a press will do: an arrow to select (a drag on empty space pans), grab to pan, move over a shape,
+   grabbing while the plan is being dragged. */
+.fp-canvas.tool-select svg { cursor: default; }
+.fp-canvas.tool-pan svg, .fp-canvas.space svg, .fp-canvas.space .fp-shape { cursor: grab; }
+.fp-canvas.panning svg, .fp-canvas.panning .fp-shape { cursor: grabbing !important; }
+.fp-canvas.tool-select .fp-shape { cursor: move; }
+.fp-handle { cursor: pointer; }
+.fp-handle.rotate { cursor: grab; }
+.fp-handle-dot { transform-box: fill-box; transform-origin: center; transition: transform 120ms cubic-bezier(0.2, 0, 0, 1); }
+@media (hover: hover) {
+  /* What a click would pick lights up first; handles grow as the pointer reaches them. */
+  .fp-canvas.tool-select:not(.panning) .fp-shape:hover:not(.sel) > :not(text) { filter: drop-shadow(0 0 2px rgb(28 126 214 / 0.7)); }
+  .fp-handle:hover .fp-handle-dot { transform: scale(1.35); }
+}
+.fp-loupe { position: absolute; z-index: 5; border-radius: 50%; overflow: hidden; pointer-events: none; background: #fff;
+  border: 3px solid var(--surface); box-shadow: 0 6px 20px rgb(0 0 0 / 0.35); }
+.fp-loupe svg { display: block; }
+.fp-float-hint { padding-right: 2px; }
+/* Press feedback paints on the way down (0 ms) and springs back over 120 ms. */
+.fp-tools button, .fp-selbar button, .fp-palette button, .fp-colours button { transition: transform 120ms cubic-bezier(0.2, 0, 0, 1), background-color 120ms; }
+.fp-tools button:active, .fp-selbar button:active, .fp-palette button:active, .fp-colours button:active { transform: scale(0.94); transition-duration: 0ms; }
+.fp-tools button:active:not(.on) { background: var(--surface-2); }
+.fp-shape.sel > :not(text) { filter: drop-shadow(0 0 3px var(--accent)); }
+.fp-label { font-family: var(--font-body); font-weight: 600; pointer-events: none; }
+.fp-hint { position: absolute; left: 12px; right: 12px; bottom: 12px; max-width: 520px; margin: 0 auto; padding: 10px 12px; font-size: 0.85rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-lift); }
+.fp-float { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; }
+.fp-dialog { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(340px, calc(100% - 24px)); display: grid; gap: 8px; padding: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lift); }
+.fp-side { width: 300px; flex: none; overflow-y: auto; padding: 10px 12px 20px; border-left: 1px solid var(--border); background: var(--surface); display: grid; gap: 14px; align-content: start; }
+.fp-side section { display: grid; gap: 6px; }
+.fp-side .section-title { display: flex; align-items: center; gap: 6px; margin: 0; }
+.fp-side .section-title .lucide, .fp-side button .lucide { width: 15px; height: 15px; }
+.fp-group summary { padding: 4px 0; }
+.fp-palette { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 4px; }
+.fp-palette button { display: grid; justify-items: center; align-content: start; gap: 1px; min-height: 0; padding: 6px 4px 5px; text-align: center; font-size: 0.78rem; line-height: 1.2; border-left-width: 4px; cursor: grab; }
+.fp-palette button .fp-preview { margin-bottom: 2px; }
+.fp-pal-name { font-weight: 550; }
+.fp-palette button.on { background: var(--accent-soft); }
+.small-btn-link { display: inline-flex; align-items: center; gap: 4px; font-size: 0.85rem; white-space: nowrap; }
+.small-btn-link .lucide { width: 15px; height: 15px; }
+@media (max-width: 799px) {
+  .fp-main { flex-direction: column; }
+  .fp-side { width: auto; max-height: 38vh; border-left: 0; border-top: 1px solid var(--border); }
+}
+.fp-selbar { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: 4px; padding: 5px 6px; max-width: calc(100% - 20px); overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; box-shadow: var(--shadow-lift); }
+.fp-selbar button { min-height: 40px; min-width: 40px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; white-space: nowrap; }
+.fp-selbar .lucide { width: 17px; height: 17px; }
+.fp-selname { padding: 0 6px; font-weight: 600; white-space: nowrap; }
+.fp-float { align-items: center; background: var(--surface); padding: 4px 6px 4px 12px; border: 1px solid var(--border); border-radius: 999px; box-shadow: var(--shadow-lift); white-space: nowrap; }
+.fp-float .lucide { width: 16px; height: 16px; }
+.fp-quicksave .lucide { width: 16px; height: 16px; }
+/* (.fp-page raises these above the icon-button rule, button:has(> .lucide).) */
+.fp-page .fp-sheet-toggle, .fp-page .fp-sheet-close, .fp-page .fp-mobile-only { display: none; }
+@media (max-width: 799px) {
+  /* Phones: one swipeable row of tools; the panel is a sheet over the bottom of the plan, closed until wanted. */
+  .fp-bar { flex-wrap: nowrap; overflow-x: auto; padding: 4px 6px; gap: 4px; scrollbar-width: none; }
+  .fp-bar::-webkit-scrollbar { display: none; }
+  .fp-tools { flex-wrap: nowrap; }
+  .fp-tools button, .fp-bar > .link { min-height: 42px; min-width: 42px; justify-content: center; }
+  .fp-colours { margin-left: 4px; }
+  .fp-colours button { width: 26px; height: 26px; }
+  .fp-main { flex-direction: column; position: relative; }
+  /* The sheet opens over duration.medium with easing.decelerate and leaves faster (duration.short, easing.accelerate). */
+  .fp-side { position: absolute; left: 0; right: 0; bottom: 0; width: auto; max-height: 62%; border-left: 0; border-top: 1px solid var(--border);
+    border-radius: 16px 16px 0 0; box-shadow: 0 -8px 28px rgb(0 0 0 / 0.22); transform: translateY(100%); z-index: 3; padding-top: 44px;
+    transition: transform 180ms cubic-bezier(0.4, 0, 1, 1), visibility 0s linear 180ms; visibility: hidden; }
+  .fp-side.open { transform: none; visibility: visible; transition: transform 260ms cubic-bezier(0, 0, 0.2, 1), visibility 0s; }
+  .fp-page .fp-sheet-toggle { display: flex; align-items: center; justify-content: center; gap: 6px; position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 4;
+    max-width: calc(100% - 20px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 40px; padding: 6px 14px; border-radius: 999px;
+    background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-lift); font-size: 0.85rem; }
+  .fp-sheet-toggle .lucide { width: 16px; height: 16px; flex: none; }
+  .fp-page .fp-sheet-close { display: flex; position: sticky; top: -44px; margin: -44px -12px 0; z-index: 1; justify-content: center; align-items: center; gap: 4px;
+    min-height: 40px; background: var(--surface); border: 0; border-bottom: 1px solid var(--border); border-radius: 16px 16px 0 0; font-size: 0.85rem; }
+  .fp-sheet-close .lucide { width: 16px; height: 16px; }
+  .fp-selbar { bottom: 60px; }
+  /* Save stays in reach instead of scrolling away with the tools. */
+  .fp-quicksave { position: absolute; right: 8px; top: 58px; z-index: 3; box-shadow: var(--shadow-lift); }
+  .fp-page .fp-mobile-only { display: inline-flex; }
+  .fp-dialog { top: 18%; transform: translate(-50%, 0); }
+  .fp-palette button { min-height: 44px; }
+  .fp-hint { bottom: 60px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fp-tools button:active, .fp-selbar button:active, .fp-palette button:active, .fp-colours button:active { transform: none; }
+}
+@media (max-width: 799px) and (prefers-reduced-motion: reduce) {
+  /* Reduced motion: the phone sheet fades (100 ms) instead of sliding. */
+  .fp-side, .fp-side.open { transform: none !important; }
+  .fp-side { opacity: 0; transition: opacity 100ms linear, visibility 0s linear 100ms !important; }
+  .fp-side.open { opacity: 1; transition: opacity 100ms linear, visibility 0s !important; }
+}
+.fp-keys { display: grid; gap: 4px; }
+.fp-keys p { margin: 0; }
+
+/* Viewing a floor plan: the saved versions as a row of chips, and Edit as the one big button over the plan. */
+.fp-versions { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--surface);
+  overflow-x: auto; scrollbar-width: none; }
+.fp-versions::-webkit-scrollbar { display: none; }
+.fp-page .fp-chip { flex: none; min-height: 34px; padding: 4px 14px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--surface);
+  color: var(--text); font-size: 0.85rem; white-space: nowrap; transition: transform 120ms cubic-bezier(0.2, 0, 0, 1), background-color 120ms; }
+.fp-page .fp-chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+.fp-page .fp-chip:active { transform: scale(0.95); transition-duration: 0ms; }
+.fp-versions-by { flex: none; white-space: nowrap; margin-left: 4px; }
+.fp-page button.fp-edit { position: absolute; right: 16px; bottom: 16px; z-index: 4; display: inline-flex; align-items: center; gap: 8px; min-height: 54px;
+  padding: 10px 26px; border-radius: 999px; font-size: 1.1rem; box-shadow: 0 8px 22px rgb(0 0 0 / 0.28);
+  transition: transform 120ms cubic-bezier(0.2, 0, 0, 1), filter 120ms; }
+.fp-page button.fp-edit .lucide { width: 21px; height: 21px; }
+.fp-page button.fp-edit:active { transform: scale(0.96); transition-duration: 0ms; }
+.fp-page .fp-hint.top { top: 12px; bottom: auto; }
+
+/* The house page's way into its floor plan: big enough to find at a glance. */
+a.plan-open, a.plan-open:hover { display: flex; align-items: center; gap: 14px; min-height: 76px; margin-bottom: 14px; padding: 10px 16px 10px 10px;
+  border-radius: var(--radius); background: var(--accent); color: var(--accent-text); text-decoration: none; box-shadow: var(--shadow-lift);
+  transition: transform 120ms cubic-bezier(0.2, 0, 0, 1), filter 120ms; }
+a.plan-open:hover { filter: brightness(1.08); }
+a.plan-open:active { transform: scale(0.98); transition-duration: 0ms; }
+.plan-open img, .plan-open-icon { width: 58px; height: 58px; flex: none; border-radius: var(--radius-sm); object-fit: cover; background: #fff; }
+.plan-open-icon { display: grid; place-items: center; background: rgb(255 255 255 / 0.18); }
+.plan-open strong { display: block; font-size: 1.15rem; line-height: 1.25; }
+.plan-open-sub { display: block; font-size: 0.85rem; opacity: 0.88; }
+.plan-open > .lucide { width: 22px; height: 22px; flex: none; }
+@media (prefers-reduced-motion: reduce) {
+  a.plan-open:active, .fp-page button.fp-edit:active, .fp-page .fp-chip:active { transform: none; }
+}

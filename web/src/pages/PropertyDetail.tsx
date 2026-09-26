@@ -12,7 +12,7 @@ import { STATUS_COLOUR, changeTone, minutesTone, soonTone, suburbClass, tagStyle
 import { Checklist, Comparables, CostAt, PriceHistory } from "./MoneyExtras";
 import { Files, Inspections } from "./PropertyExtras";
 import { ScoresCard } from "./Decide";
-import { Bath, BedDouble, Building2, CalendarDays, CalendarPlus, Camera, Car, CircleDollarSign, CircleHelp, DollarSign, Gavel, House, ImagePlus, LandPlot, MapPin, Paperclip, PartyPopper, Scale, School, Tag, ThumbsDown, ThumbsUp, TrainFront, TramFront, Trash2, TriangleAlert } from "lucide-react";
+import { Bath, BedDouble, Building2, CalendarDays, CalendarPlus, Camera, Car, ChevronRight, CircleDollarSign, CircleHelp, DollarSign, FileText, Gavel, House, ImagePlus, LandPlot, MapPin, Paperclip, PartyPopper, Scale, School, Tag, ThumbsDown, ThumbsUp, TrainFront, TramFront, Trash2, TriangleAlert } from "lucide-react";
 import Commute from "../Commute";
 import ConfirmButton from "../ConfirmButton";
 import { OutcomeForm, outcomeStatus, statusOutOfStep } from "../Outcome";
@@ -77,7 +77,7 @@ export default function PropertyDetail() {
       <div className="listing-body" role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
         {tab === "about" && (
           <div className="tab-grid">
-            <div><About p={p} /><DetailsTable p={p} /></div>
+            <div><FloorPlanButtons p={p} /><About p={p} /><DetailsTable p={p} /></div>
             <div><AtAGlance p={p} c={latest} setTab={setTab} /><Timeline p={p} /></div>
           </div>
         )}
@@ -461,6 +461,27 @@ function VerdictHistory({ p }: { p: Detail }) {
 }
 
 // ─── about: notes, tags, details ──────────────────────────────────────
+/** The way into each floor plan: opens it to look through the saved versions and measure, with Edit from there. */
+function FloorPlanButtons({ p }: { p: Detail }) {
+  const plans = p.attachments.filter((a) => !a.url && (a.kind === "floorplan" || (a.markups ?? 0) > 0)
+    && (a.mime_type?.startsWith("image/") || a.mime_type === "application/pdf"));
+  return plans.map((a, i) => {
+    const n = a.markups ?? 0;
+    return (
+      <Link key={a.id} className="plan-open" to={`/p/${p.id}/plan/${a.id}`}>
+        {a.mime_type?.startsWith("image/")
+          ? <img src={`/api/attachments/${a.id}/thumb`} alt="" onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
+          : <span className="plan-open-icon"><FileText /></span>}
+        <span className="grow">
+          <strong>{plans.length > 1 ? `Floor plan ${i + 1}` : "Floor plan"}</strong>
+          <span className="plan-open-sub">{n ? `${n} saved ${n === 1 ? "version" : "versions"} · measure and compare` : "Measure rooms and try furniture"}</span>
+        </span>
+        <ChevronRight />
+      </Link>
+    );
+  });
+}
+
 function About({ p }: { p: Detail }) {
   const [editing, setEditing] = useState(false);
   return (

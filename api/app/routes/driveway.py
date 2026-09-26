@@ -198,7 +198,9 @@ def one_event(event_type: str, event_id: UUID, request: Request) -> Response:
 
 # ─── photos & documents ───────────────────────────────────────────────
 ATTACHMENT_SELECT = """SELECT id, property_id, campaign_id, inspection_id, kind, sha256, mime_type, byte_size,
-                              original_name, url, source_url, caption, taken_at, created_at, created_by FROM attachment"""
+                              original_name, url, source_url, caption, taken_at, created_at, created_by,
+                              (SELECT count(*) FROM floorplan_markup m WHERE m.attachment_id = attachment.id) AS markups
+                       FROM attachment"""
 
 
 def attachments_for(conn, property_id: UUID) -> list[dict]:

@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as maplibregl from "maplibre-gl";
 import type { GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { Ban, Landmark, Layers, PenLine, Search, Timer, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { TerraDraw, TerraDrawPolygonMode, TerraDrawSelectMode } from "terra-draw";
@@ -10,7 +11,8 @@ import { STATUSES, api, whilePending, type AreaKind, type MapArea, type MapData,
 import { isSold, LABEL, money, saleEnded, streetLine } from "../format";
 import type { OverviewRow } from "../overview/columns";
 import { basemapStyle } from "../map/basemap";
-import { colourFor, syncOverlays, type OverlayLayer } from "../map/overlays";
+import { syncOverlays, type OverlayLayer } from "../map/overlays";
+import { overlayStyle, PALETTES, type Look, type MapPalette } from "../map/palette";
 import { contourTiles, dem, TERRAIN_ATTRIBUTION, type ContourDetail } from "../map/terrain";
 import { usePeople } from "../people";
 import { CLOSED, STATUS_COLOUR, useDarkMode } from "../colour";
@@ -25,6 +27,17 @@ const UNDER_LABELS = new Set(["hillshade", "contour-lines", "contour-labels"]);
 /** A basemap layer the satellite photo replaces: its land, water, buildings and roads (not its labels, which stay on
  *  top). The styles mix labels in among these, so they're hidden rather than left to draw over the photo. */
 const underPhoto = (l: { type: string }) => l.type !== "symbol" && l.type !== "background";
+/** The basemap's labels over a photo: white with a soft dark outline (its own styles put grey text on solid black, or
+ *  on white, which on a photo read as bars), and no one-way arrows. */
+const PHOTO_LABELS: Record<string, unknown> = { "text-color": "#ffffff", "text-halo-color": "rgba(0, 0, 0, 0.85)", "text-halo-width": 2,
+  "text-halo-blur": 0.5, "icon-opacity": 0 };
+/** On the dark street map its own labels are dim grey on near-black: lifted to a readable grey, still quieter than ours. */
+const DARK_LABELS: Record<string, unknown> = { "text-color": "#a3acb0", "text-halo-color": "rgba(12, 12, 12, 0.9)", "text-halo-width": 1.2 };
+/** The basemap label colours for a look: the photo's, the dark map's lift, or (null) the style's own. */
+const labelsFor = (photo: boolean, dark: boolean) => (photo ? PHOTO_LABELS : dark ? DARK_LABELS : null);
+const LABEL_KEYS = [...new Set([...Object.keys(PHOTO_LABELS), ...Object.keys(DARK_LABELS)])];
+const labelPaints = (layers: { id: string; type: string; paint?: unknown }[]) =>
+  new Map(layers.filter((l) => l.type === "symbol").map((l) => [l.id, { ...(l.paint as Record<string, unknown> | undefined) }]));
 /** The basemap layers a style hides itself, so switching the photo off doesn't show them. */
 const hiddenIn = (layers: { id: string; layout?: unknown }[]) =>
   new Set(layers.filter((l) => (l.layout as { visibility?: string } | undefined)?.visibility === "none").map((l) => l.id));
@@ -33,15 +46,16 @@ const store = (key: string, value: string) => { try { localStorage.setItem(key, 
 type Filter = "all" | "mine" | "either";
 
 type Selected = { kind: "property"; p: MapProperty } | { kind: "area"; a: MapArea } | null;
+type Panel = "key" | "layers" | "planning" | "travel" | "draw" | null;
+const PANEL_TITLE: Record<Exclude<Panel, null>, string> = { key: "Key", layers: "Layers", planning: "Schools and planning", travel: "Travel time",
+  draw: "Mark an area" };
+const REDUCED_MOTION = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
 
 const addressOf = (p: Pick<MapProperty, "unit" | "street_number" | "street" | "suburb" | "lot_number">) => `${streetLine(p)}, ${p.suburb}`;
 
 // ─── colouring houses by price ─────────────────────────────────────────
-// One hue, light (cheaper) to dark (dearer), in even OKLCH lightness steps (0.84 to 0.39, hue 340): nothing like the
-// stations' white and teal. Houses with no price yet are grey.
-const PRICE_RAMP = ["#efb7db", "#da83be", "#c253a3", "#9e3081", "#721b5c"];
-const NO_PRICE = "#a8a29e";
+// One hue (the palette's price ramp, map/palette.ts), cheaper to dearer; houses with no price yet are grey.
 /** What a house is going for: its sale price once sold, else the middle of its latest guide. */
 function priceOf(r: OverviewRow): number | null {
   if (isSold(r.outcome) && r.sold_price_aud != null) return Number(r.sold_price_aud);
@@ -58,7 +72,7 @@ function priceBreaks(prices: number[]): number[] {
   return breaks;
 }
 /** The ramp colour for band `i` of `bands`, spread across the ramp so a few bands still differ clearly. */
-const bandColour = (i: number, bands: number) => PRICE_RAMP[bands === 1 ? 2 : Math.round((i * (PRICE_RAMP.length - 1)) / (bands - 1))];
+const bandColour = (ramp: string[], i: number, bands: number) => ramp[bands === 1 ? 2 : Math.round((i * (ramp.length - 1)) / (bands - 1))];
 
 export default function MapPage() {
   const queryClient = useQueryClient();
@@ -69,6 +83,7 @@ export default function MapPage() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   // Layer and source ids that belong to the basemap, so a light/dark switch can swap them and keep ours.
   const baseIds = useRef<{ layers: Set<string>; sources: Set<string>; hidden: Set<string> }>({ layers: new Set(), sources: new Set(), hidden: new Set() });
+  const labelPaint = useRef(new Map<string, Record<string, unknown>>());   // the basemap's own label colours, to put back
   const isDark = useDarkMode();
   const firstScheme = useRef(isDark);
   const drawRef = useRef<TerraDraw | null>(null);
@@ -77,18 +92,22 @@ export default function MapPage() {
 
   const [filter, setFilter] = useState<Filter>("all");
   const [selected, setSelected] = useState<Selected>(null);
+  const selectedId = selected?.kind === "property" ? selected.p.id : null;
   const [drawKind, setDrawKind] = useState<AreaKind | null>(null);
   const [newShape, setNewShape] = useState<GeoJSON.Polygon | null>(null);
   const [editing, setEditing] = useState<MapArea | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showLayers, setShowLayers] = useState(false);
+  // One panel at a time over the map: the key, layers, travel time or marking an area.
+  const [panel, setPanel] = useState<Panel>(null);
   // The base under the houses (map or satellite) and whether height shows: per device.
   const [base, setBase] = useState<"map" | "satellite">(() => (stored("housetrack.map.base") === "satellite" ? "satellite" : "map"));
   const [height, setHeight] = useState(() => stored("housetrack.map.height") === "1");
+  // Every colour on the map comes from the palette for the look: streets light or dark, or the satellite photo.
+  const look: Look = base === "satellite" ? "photo" : isDark ? "dark" : "light";
+  const pal = PALETTES[look];
   const baseRef = useRef(base);   // for the light/dark swap, which rebuilds the basemap
   baseRef.current = base;
   const [contourDetail, setContourDetail] = useState<ContourDetail>(() => (stored("housetrack.map.contours") === "fine" ? "fine" : "coarse"));
-  const [showCommute, setShowCommute] = useState(false);
   // From: "house:<id>" (a house on the map) or "place:<id>" (a saved place or station).
   const [commute, setCommute] = useState<{ from: string; minutes: number; mode: "drive" | "walk" } | null>(null);
   const [commuteMsg, setCommuteMsg] = useState<string | null>(null);
@@ -100,8 +119,15 @@ export default function MapPage() {
     try { localStorage.setItem("housetrack.map.overlays", JSON.stringify(enabled)); } catch { /* per-device nicety */ }
     const map = mapRef.current;
     if (!ready || !map || !overlayList.data) return;
-    return syncOverlays(map, enabled, overlayList.data);
-  }, [ready, enabled, overlayList.data]);
+    return syncOverlays(map, enabled, overlayList.data, pal);
+  }, [ready, enabled, overlayList.data, look]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // How much of the map a phone's house sheet covers (0 on a computer), so a house and its route are framed above it.
+  const sheetH = useRef(0);
+  const page = useRef<HTMLDivElement>(null);
+  const framing = (): maplibregl.PaddingOptions => (window.innerWidth >= 800
+    ? { top: 80, left: 60, right: 440, bottom: 90 }
+    : { top: 76, left: 30, right: 30, bottom: (sheetH.current || 200) + 70 });   // (the tools sit just above the sheet)
 
   const pinFor = params.get("pin");
   // Opened from a house's page: start zoomed in on it, selected, with its route to the station.
@@ -139,6 +165,7 @@ export default function MapPage() {
       map.on("load", () => {
         const base = map!.getStyle();
         baseIds.current = { layers: new Set(base.layers.map((l) => l.id)), sources: new Set(Object.keys(base.sources)), hidden: hiddenIn(base.layers) };
+        labelPaint.current = labelPaints(base.layers);
         addBaseLayers(map!, baseIds.current.layers);
         addLayers(map!);
         const draw = new TerraDraw({
@@ -184,7 +211,7 @@ export default function MapPage() {
     [visibleProperties, priceById]);
   const priceColour = (id: string) => {
     const price = priceById.get(id);
-    return price == null ? NO_PRICE : bandColour(breaks.filter((b) => price >= b).length, breaks.length + 1);
+    return price == null ? pal.noPrice : bandColour(pal.priceRamp, breaks.filter((b) => price >= b).length, breaks.length + 1);
   };
 
   useEffect(() => {
@@ -197,9 +224,10 @@ export default function MapPage() {
         properties: {
           id: f.properties.id,
           label: addressOf(f.properties),
-          colour: colourBy === "price" ? priceColour(f.properties.id) : STATUS_COLOUR[f.properties.status],
-          // On the light map the palest price shades need an outline to stand out; white is enough on the dark one.
-          stroke: colourBy === "price" && !isDark ? "#4a1140" : "#ffffff",
+          colour: colourBy === "price" ? priceColour(f.properties.id) : pal.status[f.properties.status],
+          // The palette's edge: dark plum round the pale price shades on the light map; status colours there get white.
+          stroke: colourBy === "status" && look === "light" ? "#ffffff" : pal.pinStroke,
+          sel: f.properties.id === selectedId,
           dim: f.properties.excluded || CLOSED.includes(f.properties.status) || !!endedById.get(f.properties.id),
           ring: f.properties.others_flags.length ? byId.get(f.properties.others_flags[0].owner_id)?.colour ?? "#888" : "",
           warned: f.properties.warned,
@@ -219,9 +247,8 @@ export default function MapPage() {
       // A house to show (opened from its page, or to move its pin): start on it, street level. Otherwise all of them.
       const focus = data.properties.features.find((f) => f.properties.id === (houseFor ?? pinFor));
       if (focus) {
-        const at = focus.geometry.coordinates as [number, number], wide = window.innerWidth >= 800;
-        map.fitBounds(new maplibregl.LngLatBounds(at, at), { maxZoom: 16, duration: 0,
-          padding: houseFor ? (wide ? { top: 60, left: 60, right: 440, bottom: 90 } : { top: 60, left: 40, right: 40, bottom: window.innerHeight * 0.55 }) : 60 });
+        const at = focus.geometry.coordinates as [number, number];
+        map.fitBounds(new maplibregl.LngLatBounds(at, at), { maxZoom: 16, duration: 0, padding: houseFor ? framing() : 60 });
         if (houseFor) setSelected({ kind: "property", p: focus.properties });
       } else {
         const bounds = new maplibregl.LngLatBounds();
@@ -230,7 +257,7 @@ export default function MapPage() {
       }
       fitted.current = true;
     }
-  }, [ready, data, visibleProperties, editing, byId, me, colourBy, breaks, priceById, endedById, isDark]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ready, data, visibleProperties, editing, byId, me, colourBy, breaks, priceById, endedById, look, selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── all train stations ──────────────────────────────────────────────
   const stations = useQuery({ queryKey: ["stations"], queryFn: () => api<GeoJSON.FeatureCollection>("/api/stations"), staleTime: 3600_000 });
@@ -240,7 +267,6 @@ export default function MapPage() {
   }, [ready, stations.data]);
 
   // ─── the selected house's route to its nearest station ───────────────
-  const selectedId = selected?.kind === "property" ? selected.p.id : null;
   // The selected house as the map has it now (its travel times refresh after a pin moves), and its route for
   // where the pin and nearest station are now.
   const selectedNow = data?.properties.features.find((f) => f.properties.id === selectedId);
@@ -260,8 +286,7 @@ export default function MapPage() {
     if (lines.length && map) {
       const bounds = new maplibregl.LngLatBounds();
       lines.forEach((f) => f.geometry.coordinates.forEach((c) => bounds.extend(c as [number, number])));
-      const wide = window.innerWidth >= 800;
-      map.fitBounds(bounds, { padding: wide ? { top: 60, left: 60, right: 440, bottom: 90 } : { top: 60, left: 40, right: 40, bottom: window.innerHeight * 0.55 },
+      map.fitBounds(bounds, { padding: framing(),
                               maxZoom: 16, duration: 500 });
     }
   }, [ready, selectedId, stationRoute.data]);
@@ -285,8 +310,7 @@ export default function MapPage() {
       if (placed.some((x) => !view.contains([x.lon!, x.lat!]))) {
         const bounds = new maplibregl.LngLatBounds(home, home);
         placed.forEach((x) => bounds.extend([x.lon!, x.lat!]));
-        const wide = window.innerWidth >= 800;
-        map.fitBounds(bounds, { padding: wide ? { top: 80, left: 80, right: 460, bottom: 100 } : { top: 60, left: 40, right: 40, bottom: window.innerHeight * 0.55 },
+        map.fitBounds(bounds, { padding: framing(),
                                 maxZoom: 16, duration: 500 });
       }
     }
@@ -363,7 +387,7 @@ export default function MapPage() {
       if (prop) {
         const p = current?.properties.features.find((f) => f.properties.id === prop.properties.id)?.properties;
         setSelected(p ? { kind: "property", p } : null);
-        setShowLayers(false);
+        setPanel(null);
       } else if (area) {
         const a = current?.areas.features.find((f) => f.properties.id === area.properties.id)?.properties;
         setSelected(a ? { kind: "area", a } : null);
@@ -446,6 +470,12 @@ export default function MapPage() {
 
   const statusesShown = [...new Set((data?.properties.features ?? []).map((f) => f.properties.status))]
     .sort((a, b) => STATUSES.indexOf(a) - STATUSES.indexOf(b));
+  // The palette on every layer of ours. (Declared before the light/dark swap below, so the swap carries these colours over.)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (ready && map) applyPalette(map, pal);
+  }, [ready, look]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Satellite and height on or off, with contours coloured to read on whichever is underneath.
   useEffect(() => {
     store("housetrack.map.base", base);
@@ -458,14 +488,26 @@ export default function MapPage() {
     const show = (id: string, on: boolean) => { if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", on ? "visible" : "none"); };
     show("satellite", base === "satellite");
     for (const l of map.getStyle().layers) {
-      if (baseIds.current.layers.has(l.id) && underPhoto(l)) show(l.id, base !== "satellite" && !baseIds.current.hidden.has(l.id));
+      if (!baseIds.current.layers.has(l.id)) continue;
+      if (underPhoto(l)) show(l.id, base !== "satellite" && !baseIds.current.hidden.has(l.id));
+      if (l.type === "symbol") {
+        const own = labelPaint.current.get(l.id) ?? {}, over = labelsFor(base === "satellite", isDark);
+        for (const k of LABEL_KEYS) map.setPaintProperty(l.id, k as "text-color", (over && k in over ? over[k] : own[k]) as string | undefined);
+      }
     }
     for (const id of ["hillshade", "contour-lines", "contour-labels"]) show(id, height);
     if (!map.getLayer("contour-lines")) return;
     const photo = base === "satellite";
     map.setPaintProperty("contour-lines", "line-color", photo ? "#ffffff" : isDark ? "#c9a878" : "#8a5a2b");
     map.setPaintProperty("contour-labels", "text-color", photo ? "#ffffff" : isDark ? "#e2c9a4" : "#6b4420");
-    map.setPaintProperty("contour-labels", "text-halo-color", photo ? "rgba(0,0,0,0.65)" : isDark ? "#1c2326" : "#ffffff");
+    map.setPaintProperty("contour-labels", "text-halo-color", photo ? "rgba(0,0,0,0.85)" : isDark ? "#1c2326" : "#ffffff");
+    map.setPaintProperty("contour-labels", "text-halo-width", photo ? 2 : 1.2);
+    // Hill shading: on the dark map, faint highlights and black shadows (full white reads as streaks, not relief).
+    map.setPaintProperty("hillshade", "hillshade-highlight-color", isDark && !photo ? "rgba(255, 255, 255, 0.14)" : "#ffffff");
+    map.setPaintProperty("hillshade", "hillshade-shadow-color", isDark && !photo ? "#000000" : "#3d3222");
+    // Over a photo, stronger and a touch wider, so they hold up against busy ground even zoomed well out.
+    map.setPaintProperty("contour-lines", "line-opacity", ["match", ["get", "level"], 1, photo ? 0.95 : 0.75, photo ? 0.7 : 0.4]);
+    map.setPaintProperty("contour-lines", "line-width", ["match", ["get", "level"], 1, photo ? 1.7 : 1.3, photo ? 0.9 : 0.6]);
   }, [ready, base, height, contourDetail, isDark]);
 
   // Follow the system's light/dark setting live: swap the basemap, carry over our pins, areas and overlays.
@@ -484,7 +526,10 @@ export default function MapPage() {
           baseIds.current = { layers: new Set(next.layers.map((l) => l.id)), sources: new Set(Object.keys(next.sources)), hidden: hiddenIn(next.layers) };
           const photo = ours.filter((l) => l.id === "satellite");
           const under = ours.filter((l) => UNDER_LABELS.has(l.id)), over = ours.filter((l) => !UNDER_LABELS.has(l.id) && l.id !== "satellite");
-          const basemap = next.layers.map((l) => (baseRef.current === "satellite" && underPhoto(l) ? { ...l, layout: { ...l.layout, visibility: "none" as const } } : l));
+          labelPaint.current = labelPaints(next.layers);
+          const onPhoto = baseRef.current === "satellite";
+          const basemap = next.layers.map((l) => (onPhoto && underPhoto(l) ? { ...l, layout: { ...l.layout, visibility: "none" as const } }
+            : l.type === "symbol" && labelsFor(onPhoto, isDark) ? { ...l, paint: { ...l.paint, ...labelsFor(onPhoto, isDark) } } as typeof l : l));
           const ground = basemap.filter((l) => l.type === "background").length;
           const labels = basemap.findIndex((l) => l.type === "symbol");
           const layers = labels < 0
@@ -497,11 +542,30 @@ export default function MapPage() {
     return () => { cancelled = true; };
   }, [isDark]);
 
+  const houses = data?.properties.features ?? [];
+  // A task that takes the map over (placing a pin or a place, drawing or reshaping an area): its banner, nothing else.
+  const busy = Boolean(pinFor || pickPlace || drawKind || editing || newShape);
+  const houseOpen = selected?.kind === "property";
+  const layersOn = (base === "satellite" ? 1 : 0) + (height ? 1 : 0) + (filter !== "all" ? 1 : 0);
+  const toggle = (next: Panel) => setPanel(panel === next ? null : next);
+  const swatches = colourBy === "price" ? pal.priceRamp : statusesShown.slice(0, 5).map((st) => pal.status[st]);
+  function selectHouse(f: (typeof houses)[number]) {
+    setSelected({ kind: "property", p: f.properties });
+    setPanel(null);
+    const at = f.geometry.coordinates as [number, number];
+    mapRef.current?.fitBounds(new maplibregl.LngLatBounds(at, at), { padding: framing(), maxZoom: 16, duration: REDUCED_MOTION ? 0 : 600 });
+  }
+  function travelFromHouse() {
+    if (selected?.kind === "property") setCommute({ minutes: commute?.minutes ?? 30, mode: commute?.mode ?? "drive", from: `house:${selected.p.id}` });
+    setPanel("travel");
+  }
+
   return (
-    <div className={`map-page ${selected?.kind === "property" ? "side-open" : ""} ${showCommute || showLayers ? "panel-open" : ""}`}>
+    <div ref={page} className={`map-page ${houseOpen ? "house-open" : ""} ${panel || newShape || selected?.kind === "area" ? "panel-open" : ""}`}>
       <div ref={container} className="map" />
 
       <div className="map-top">
+        {!busy && <HouseSearch houses={houses} onPick={selectHouse} />}
         {pinFor && <div className="banner">Tap the map where {pinTarget ?? "the house"} is. <Link to={`/p/${pinFor}`}>Cancel</Link></div>}
         {pickPlace && <div className="banner">Tap the map {pickPlace.move ? "where" : "to place"} “{pickPlace.name}”{pickPlace.move ? " really is" : ""}. <Link to="/places">Cancel</Link></div>}
         {drawKind && <div className="banner">Tap each corner. Tap the first one to finish. <button className="link" onClick={cancelDrawing}>Cancel</button></div>}
@@ -512,143 +576,234 @@ export default function MapPage() {
           </div>
         )}
         {error && <div className="banner error" onClick={() => setError(null)}>{error}</div>}
-        {statusesShown.length > 0 && (
-          <details className="banner map-legend">
-            <summary>Key</summary>
-            <div className="map-colour-by small" role="group" aria-label="Colour houses by">
-              <button className={colourBy === "price" ? "on" : ""} aria-pressed={colourBy === "price"} onClick={() => setColourBy("price")}>Price</button>
-              <button className={colourBy === "status" ? "on" : ""} aria-pressed={colourBy === "status"} onClick={() => setColourBy("status")}>Status</button>
-            </div>
-            {colourBy === "price" ? <>
-              {priceKey(breaks, visibleProperties.map((f) => priceById.get(f.properties.id)).filter((x): x is number => x != null)).map(([colour, text]) => (
-                <div key={colour} className="small"><span className="status-dot price-dot" style={{ background: colour, marginRight: 6 }} />{text}</div>
-              ))}
-              {visibleProperties.some((f) => priceById.get(f.properties.id) == null) &&
-                <div className="small"><span className="status-dot price-dot" style={{ background: NO_PRICE, marginRight: 6 }} />No price yet</div>}
-              <div className="small muted">Sale price once sold, otherwise the middle of the latest guide</div>
-            </> : statusesShown.map((st) => (
-              <div key={st} className="small"><span className="status-dot" style={{ background: STATUS_COLOUR[st], marginRight: 6 }} />{LABEL.status[st]}</div>
-            ))}
-            <div className="small muted">Faded: ruled out, missed out, sale over, or excluded</div>
-            <div className="small" style={{ marginTop: 4 }}><span className="key-station" />Train station (named when zoomed in)</div>
-          </details>
-        )}
       </div>
 
       {/* The open panel sits above the tools, so neither covers the other. */}
-      <div className="map-bottom">
-      {showCommute && (
-        <div className="sheet stack">
-          <div className="row"><strong className="grow">Commute area</strong><button className="link" onClick={() => setShowCommute(false)}>Done</button></div>
-          <p className="small muted" style={{ margin: 0 }}>Shades everywhere you can reach in that time from a house or place. Drives assume no traffic.</p>
-          {commuteFrom.length === 0 ? <p className="small" style={{ margin: 0 }}>Select a house on the map, or add places on the <Link to="/places">Places</Link> tab.</p> : (
-            <>
-              <select value={commute?.from ?? ""} aria-label="From"
-                onChange={(e) => setCommute(e.target.value ? { minutes: 30, mode: "drive", ...commute, from: e.target.value } : null)}>
-                <option value="">Where from?</option>
-                {commuteFrom.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-              {commute && (
+      <div className="map-dock">
+        {panel && !busy && (
+          <MapPanel title={PANEL_TITLE[panel]} onClose={() => setPanel(null)}>
+            {panel === "key" && <>
+              <Seg label="Colour houses by" value={colourBy} onChange={setColourBy} options={[["price", "Price"], ["status", "Status"]]} />
+              <div className="map-key">
+                {colourBy === "price" ? <>
+                  {priceKey(pal.priceRamp, breaks, visibleProperties.map((f) => priceById.get(f.properties.id)).filter((x): x is number => x != null)).map(([colour, text]) => (
+                    <div key={colour}><span className="key-pin" style={{ background: colour, borderColor: pal.pinStroke }} />{text}</div>
+                  ))}
+                  {visibleProperties.some((f) => priceById.get(f.properties.id) == null) &&
+                    <div><span className="key-pin" style={{ background: pal.noPrice, borderColor: pal.pinStroke }} />No price yet</div>}
+                </> : statusesShown.map((st) => (
+                  <div key={st}><span className="key-pin" style={{ background: pal.status[st], borderColor: look === "light" ? "#ffffff" : pal.pinStroke }} />
+                    {LABEL.status[st]}</div>
+                ))}
+                <div><span className="key-pin key-ring" style={{ borderColor: pal.select }} />The house you've picked</div>
+                <div><span className="key-station" style={{ borderColor: pal.station, background: pal.stationFill }} />Train station, named when zoomed in</div>
+                <div><span className="key-line" style={{ borderTopColor: pal.route }} />Its walk to the nearest station
+                  <span className="key-line dashed" style={{ borderTopColor: pal.drive, marginLeft: 6 }} />drive</div>
+                <div><span className="comp-key" style={{ borderColor: pal.comp, background: pal.compFill }} />A comparable sale, while its house is picked</div>
+                <div><span className="key-area" style={{ borderColor: pal.reach, background: pal.reach }} />Travel time, when shown</div>
+              </div>
+              <p className="small muted">{colourBy === "price" ? "Price is the sale price once sold, otherwise the middle of the latest guide. " : ""}
+                Faded: ruled out, missed out, sale over or excluded.</p>
+            </>}
+            {panel === "layers" && <>
+              <section>
+                <div className="section-title">Map</div>
+                <Seg label="Map" value={base} onChange={setBase} options={[["map", "Streets"], ["satellite", "Satellite"]]} />
+              </section>
+              <section>
+                <div className="section-title">Contour lines</div>
+                <Seg label="Contour lines" value={height ? contourDetail : "off"} options={[["off", "Off"], ["coarse", "Coarse"], ["fine", "Fine"]]}
+                  onChange={(v) => { setHeight(v !== "off"); if (v !== "off") setContourDetail(v); }} />
+                {height && <p className="small muted">{contourDetail === "coarse" ? "Every 5 m, labelled every 25 m" : "Every 2 m, labelled every 10 m"},
+                  with hill shading. From 30 m survey data: the lie of the land, not a single block.</p>}
+              </section>
+              <section>
+                <div className="section-title">Hide excluded houses</div>
+                <Seg label="Hide excluded houses" value={filter} onChange={setFilter}
+                  options={[["all", "No"], ["mine", "Mine"], ["either", "Everyone's"]]} />
+                {unpinned > 0 && <p className="small muted">{unpinned} {unpinned === 1 ? "house has" : "houses have"} no pin yet.</p>}
+              </section>
+            </>}
+            {panel === "planning" && <>
+              <p className="small muted">Shown when zoomed in to street level. What a house inside each one means is set in
+                <Link to="/settings"> Settings</Link>.</p>
+              <div className="map-overlay-list">
+                {(overlayList.data ?? []).map((l) => (
+                  <label key={l.code} className="map-toggle">
+                    <OverlaySwatch pal={pal} code={l.code} />
+                    <span className="grow">{l.title}{l.effect !== "info" && <span className="pill">{l.effect === "hard_exclude" ? "excludes" : "warns"}</span>}</span>
+                    <input type="checkbox" role="switch" checked={enabled.includes(l.code)}
+                      onChange={(e) => setEnabled(e.target.checked ? [...enabled, l.code] : enabled.filter((c) => c !== l.code))} />
+                  </label>
+                ))}
+              </div>
+              {enabled.length > 0 && <button className="link" style={{ justifySelf: "start" }} onClick={() => setEnabled([])}>Turn them all off</button>}
+            </>}
+            {panel === "travel" && <>
+              <p className="small muted">Shades everywhere you can reach in that time from a house or place. Drives assume no traffic.</p>
+              {commuteFrom.length === 0 ? <p className="small">Select a house on the map, or add places on the <Link to="/places">Places</Link> tab.</p> : (
                 <>
-                  <div className="chips">
-                    {(commute.mode === "walk" ? [5, 10, 15, 20, 30] : [10, 15, 20, 30, 45, 60]).map((m) => (
-                      <button key={m} className={`chip ${commute.minutes === m ? "on" : ""}`} onClick={() => setCommute({ ...commute, minutes: m })}>{m} min</button>
-                    ))}
-                  </div>
-                  <div className="row">
-                    {(["drive", "walk"] as const).map((m) => (
-                      <button key={m} className={`chip ${commute.mode === m ? "on" : ""}`}
-                        onClick={() => setCommute({ ...commute, mode: m, minutes: m === "walk" ? Math.min(commute.minutes, 30) : commute.minutes })}>
-                        {m === "drive" ? "Driving" : "Walking"}</button>
-                    ))}
-                    <span className="grow" />
-                    <button className="link" onClick={() => setCommute(null)}>Clear</button>
-                  </div>
+                  <select value={commute?.from ?? ""} aria-label="From"
+                    onChange={(e) => setCommute(e.target.value ? { minutes: 30, mode: "drive", ...commute, from: e.target.value } : null)}>
+                    <option value="">Where from?</option>
+                    {commuteFrom.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                  {commute && (
+                    <>
+                      <Seg label="How" value={commute.mode} options={[["drive", "Driving"], ["walk", "Walking"]]}
+                        onChange={(m) => setCommute({ ...commute, mode: m, minutes: m === "walk" ? Math.min(commute.minutes, 30) : commute.minutes })} />
+                      <div className="chips">
+                        {(commute.mode === "walk" ? [5, 10, 15, 20, 30] : [10, 15, 20, 30, 45, 60]).map((m) => (
+                          <button key={m} className={`chip ${commute.minutes === m ? "on" : ""}`} onClick={() => setCommute({ ...commute, minutes: m })}>{m} min</button>
+                        ))}
+                      </div>
+                      <button className="link" style={{ justifySelf: "start" }} onClick={() => setCommute(null)}>Clear it from the map</button>
+                    </>
+                  )}
+                  {commuteMsg && <p className="small muted">{commuteMsg}</p>}
                 </>
               )}
-              {commuteMsg && <p className="small muted" style={{ margin: 0 }}>{commuteMsg}</p>}
-            </>
-          )}
-        </div>
-      )}
-      {showLayers && (
-        <div className="sheet stack">
-          <div className="row"><strong className="grow">Layers</strong><button className="link" onClick={() => setShowLayers(false)}>Done</button></div>
-          <div className="map-colour-by" role="group" aria-label="Base">
-            <button className={base === "map" ? "on" : ""} aria-pressed={base === "map"} onClick={() => setBase("map")}>Map</button>
-            <button className={base === "satellite" ? "on" : ""} aria-pressed={base === "satellite"} onClick={() => setBase("satellite")}>Satellite</button>
+            </>}
+            {panel === "draw" && <>
+              <p className="small muted">Draw a shape on the map, one corner at a time. It only changes your own map and lists.</p>
+              <button className="map-choice" onClick={() => { setPanel(null); startDrawing("hard_exclude"); }}>
+                <Ban /><span><strong>Exclude the houses inside</strong><span className="small muted">They're marked excluded for you, and can be hidden.</span></span></button>
+              <button className="map-choice" onClick={() => { setPanel(null); startDrawing("soft_warn"); }}>
+                <TriangleAlert /><span><strong>Warn about the houses inside</strong><span className="small muted">They get a warning, say for a flight path.</span></span></button>
+            </>}
+          </MapPanel>
+        )}
+        {newShape && <NewAreaSheet shape={newShape} kind={drawKind ?? "hard_exclude"} onDone={() => { setNewShape(null); refresh(); }} />}
+        {selected?.kind === "area" && (
+          <AreaSheet a={selected.a} mine={selected.a.owner_id === me?.id} owner={byId.get(selected.a.owner_id)?.display_name ?? "Someone"}
+                     onEdit={() => startEditing(selected.a)} onChanged={() => { setSelected(null); refresh(); }} onClose={() => setSelected(null)} />
+        )}
+        {!busy && (
+          <div className="map-tools" role="toolbar" aria-label="Map tools">
+            <button className={panel === "key" ? "on" : ""} aria-pressed={panel === "key"} onClick={() => toggle("key")}>
+              <span className="key-swatches" aria-hidden>{swatches.map((c, i) => <i key={i} style={{ background: c }} />)}</span>Key</button>
+            <button className={panel === "layers" ? "on" : ""} aria-pressed={panel === "layers"} onClick={() => toggle("layers")}>
+              <Layers />Layers{layersOn > 0 && <span className="count-badge">{layersOn}</span>}</button>
+            {(overlayList.data?.length ?? 0) > 0 && (
+              <button className={panel === "planning" ? "on" : ""} aria-pressed={panel === "planning"} onClick={() => toggle("planning")}>
+                <Landmark />Planning{enabled.length > 0 && <span className="count-badge">{enabled.length}</span>}</button>
+            )}
+            <button className={panel === "travel" || commute ? "on" : ""} aria-pressed={panel === "travel"} onClick={() => toggle("travel")}>
+              <Timer />{commute && commuteOrigin ? `${commute.minutes} min ${commute.mode === "drive" ? "drive" : "walk"}` : "Travel time"}</button>
+            <button className={panel === "draw" ? "on" : ""} aria-pressed={panel === "draw"} onClick={() => toggle("draw")}>
+              <PenLine />Mark an area</button>
           </div>
-          <label className="check"><input type="checkbox" checked={height} onChange={(e) => setHeight(e.target.checked)} />
-            Height: hill shading and contour lines</label>
-          {height && <>
-            <div className="row small" style={{ gap: 8 }}>Contours
-              <div className="map-colour-by" role="group" aria-label="Contour detail" style={{ margin: 0 }}>
-                <button className={contourDetail === "coarse" ? "on" : ""} aria-pressed={contourDetail === "coarse"} onClick={() => setContourDetail("coarse")}>Coarse</button>
-                <button className={contourDetail === "fine" ? "on" : ""} aria-pressed={contourDetail === "fine"} onClick={() => setContourDetail("fine")}>Fine</button>
-              </div>
-            </div>
-            <p className="small muted" style={{ margin: 0 }}>{contourDetail === "coarse"
-              ? "Every 5 m when zoomed in, labelled every 25 m."
-              : "Every 2 m when zoomed in, labelled every 10 m. Closer to the data, so expect small wiggles."}{" "}
-              Heights are in metres above sea level, from a 30 m satellite survey: the lie of the land, not the slope of a single block.</p>
-          </>}
-          {(overlayList.data?.length ?? 0) > 0 && <div className="section-title" style={{ margin: "6px 0 0" }}>Schools and planning</div>}
-          {(overlayList.data?.length ?? 0) > 0 && <p className="small muted" style={{ margin: 0 }}>Shown when zoomed in to street level.</p>}
-          {(overlayList.data ?? []).map((l) => (
-            <label key={l.code} className="check">
-              <input type="checkbox" checked={enabled.includes(l.code)}
-                onChange={(e) => setEnabled(e.target.checked ? [...enabled, l.code] : enabled.filter((c) => c !== l.code))} />
-              <span className="dot" style={{ background: colourFor(l.code, overlayList.data ?? []) }} />{l.title}
-              {l.effect !== "info" && <span className="pill">{l.effect === "hard_exclude" ? "excludes" : "warns"}</span>}
-            </label>
-          ))}
-        </div>
-      )}
-      {newShape && <NewAreaSheet shape={newShape} kind={drawKind ?? "hard_exclude"} onDone={() => { setNewShape(null); refresh(); }} />}
-      {selected?.kind === "area" && (
-        <AreaSheet a={selected.a} mine={selected.a.owner_id === me?.id} owner={byId.get(selected.a.owner_id)?.display_name ?? "Someone"}
-                   onEdit={() => startEditing(selected.a)} onChanged={() => { setSelected(null); refresh(); }} onClose={() => setSelected(null)} />
-      )}
-      {!pinFor && !pickPlace && !drawKind && !editing && !newShape && (
-        <div className="map-tools">
-          <select value={filter} onChange={(e) => setFilter(e.target.value as Filter)} aria-label="Filter">
-            <option value="all">Show all</option>
-            <option value="mine">Hide my exclusions</option>
-            <option value="either">Hide anyone's exclusions</option>
-          </select>
-          {(() => {
-            const on = enabled.length + (base === "satellite" ? 1 : 0) + (height ? 1 : 0);
-            return <button onClick={() => { setShowLayers(!showLayers); setShowCommute(false); }}>Layers{on ? ` (${on})` : ""}</button>;
-          })()}
-          <button className={commute ? "on-accent" : ""} onClick={() => {
-            // Opening it with a house selected starts from that house.
-            if (!showCommute && !commute && selected?.kind === "property") setCommute({ from: `house:${selected.p.id}`, minutes: 30, mode: "drive" });
-            setShowCommute(!showCommute); setShowLayers(false);
-          }}>
-            {commute && commuteOrigin ? `${commute.minutes} min ${commute.mode} from ${commuteOrigin.name.split(",")[0]}` : "Commute"}</button>
-          <button onClick={() => startDrawing("hard_exclude")}>Exclude area</button>
-          <button onClick={() => startDrawing("soft_warn")}>Warn area</button>
-          {unpinned > 0 && <span className="small muted">{unpinned} without a pin</span>}
-        </div>
-      )}
+        )}
       </div>
-      {selected?.kind === "property" && (
+
+      {houseOpen && (
         <HouseSidePanel p={selectedNow?.properties ?? selected.p} route={stationRoute.data} routeError={stationRoute.error as Error | null}
-          onClose={() => setSelected(null)} />
+          onClose={() => setSelected(null)} onTravel={travelFromHouse}
+          onSheetHeight={(h, stop) => {
+            sheetH.current = h;
+            page.current?.style.setProperty("--sheet-h", `${h}px`);
+            if (page.current) page.current.dataset.sheet = stop;
+          }} />
       )}
     </div>
   );
 }
 
+/** One choice of a few, as a row of buttons: the map's panels use it for every either/or. */
+function Seg<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: [T, string][]; onChange: (v: T) => void }) {
+  return (
+    <div className="map-seg" role="radiogroup" aria-label={label}>
+      {options.map(([v, text]) => (
+        <button key={v} role="radio" aria-checked={value === v} className={value === v ? "on" : ""} onClick={() => onChange(v)}>{text}</button>
+      ))}
+    </div>
+  );
+}
+
+/** A panel over the map: floating by the tools on a computer, a sheet from the bottom on a phone. */
+function MapPanel({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <section className="map-panel" role="dialog" aria-label={title}>
+      <header><strong className="grow">{title}</strong><button className="map-panel-close" onClick={onClose} aria-label="Close"><X /></button></header>
+      <div className="map-panel-body">{children}</div>
+    </section>
+  );
+}
+
+/** Find a house by its address and go to it. */
+function HouseSearch<F extends { geometry: GeoJSON.Point; properties: MapProperty }>({ houses, onPick }: { houses: F[]; onPick: (f: F) => void }) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const words = q.trim().toLowerCase();
+  const hits = words.length < 2 ? [] : houses.filter((f) => addressOf(f.properties).toLowerCase().includes(words)).slice(0, 6);
+  const pick = (f: F) => { onPick(f); setQ(""); setOpen(false); (document.activeElement as HTMLElement | null)?.blur(); };
+  return (
+    <div className="map-search">
+      <Search aria-hidden />
+      <input type="search" placeholder="Find a house" aria-label="Find a house" value={q} onFocus={() => setOpen(true)}
+        onBlur={() => window.setTimeout(() => setOpen(false), 150)}
+        onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+        onKeyDown={(e) => { if (e.key === "Enter" && hits[0]) pick(hits[0]); if (e.key === "Escape") { setQ(""); (e.target as HTMLInputElement).blur(); } }} />
+      {open && words.length >= 2 && (
+        <ul className="map-search-hits">
+          {hits.map((f) => (
+            <li key={f.properties.id}>
+              <button onMouseDown={(e) => e.preventDefault()} onClick={() => pick(f)}>
+                <span className="status-dot" style={{ background: STATUS_COLOUR[f.properties.status] }} />{addressOf(f.properties)}</button>
+            </li>
+          ))}
+          {hits.length === 0 && <li className="small muted" style={{ padding: "8px 12px" }}>No house on the map matches.</li>}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** A planning layer's swatch: its colour as a fill and its outline in its line style, as on the map. */
+function OverlaySwatch({ pal, code }: { pal: MapPalette; code: string }) {
+  const st = overlayStyle(pal, code);
+  const border = st.line === "dotted" ? "dotted" : st.line === "solid" ? "solid" : "dashed";
+  return <span className="ov-swatch" style={{ borderColor: st.colour, borderStyle: border,
+    background: `color-mix(in srgb, ${st.colour} ${Math.round(Math.max(st.fill, 0.12) * 100 * 1.6)}%, transparent)` }} />;
+}
+
+/** The palette on our own layers (the houses' colours travel with their data; see the properties source). */
+function applyPalette(map: maplibregl.Map, pal: MapPalette) {
+  const set = (layer: string, prop: string, value: unknown) => { if (map.getLayer(layer)) map.setPaintProperty(layer, prop as "line-color", value as string); };
+  set("commute-fill", "fill-color", pal.reach); set("commute-fill", "fill-opacity", pal.reachFill);
+  set("commute-line", "line-color", pal.reach);
+  set("station-route-casing", "line-color", pal.routeCasing);
+  set("station-route-walk", "line-color", pal.route);
+  set("station-route-drive", "line-color", pal.drive);
+  set("areas-label", "text-color", pal.ink); set("areas-label", "text-halo-color", pal.halo);
+  set("stations-circle", "circle-color", pal.stationFill); set("stations-circle", "circle-stroke-color", pal.station);
+  set("stations-label", "text-color", pal.stationText); set("stations-label", "text-halo-color", pal.halo);
+  set("places-circle", "circle-color", pal.place); set("places-circle", "circle-stroke-color", pal.placeStroke);
+  set("places-label", "text-color", pal.ink); set("places-label", "text-halo-color", pal.halo);
+  set("comparables-tie", "line-color", pal.comp);
+  set("comparables-circle", "circle-color", pal.compFill); set("comparables-circle", "circle-stroke-color", pal.comp);
+  set("comparables-label", "text-color", pal.compText); set("comparables-label", "text-halo-color", pal.halo);
+  set("props-selected", "circle-stroke-color", pal.select);
+  set("props-circle", "circle-opacity", ["case", ["get", "dim"], pal.dim, 1]);
+  set("props-circle", "circle-stroke-opacity", ["case", ["get", "dim"], pal.dim, 1]);
+  set("props-circle", "circle-stroke-width", ["case", ["get", "warned"], 3, pal.pinStrokeWidth]);
+  set("props-circle", "circle-stroke-color", ["case", ["get", "warned"], pal.warn, ["get", "stroke"]]);
+}
+
 /** The key's rows for price: each band's colour and range. */
-function priceKey(breaks: number[], prices: number[]): [string, string][] {
+function priceKey(ramp: string[], breaks: number[], prices: number[]): [string, string][] {
   if (!prices.length) return [];
   const bands = breaks.length + 1;
   if (bands === 1) {
     const lo = Math.min(...prices), hi = Math.max(...prices);
-    return [[bandColour(0, 1), lo === hi ? money(lo) : `${money(lo)}–${money(hi)}`]];
+    return [[bandColour(ramp, 0, 1), lo === hi ? money(lo) : `${money(lo)}–${money(hi)}`]];
   }
-  return Array.from({ length: bands }, (_, i) => [bandColour(i, bands),
+  return Array.from({ length: bands }, (_, i) => [bandColour(ramp, i, bands),
     i === 0 ? `Under ${money(breaks[0])}` : i === bands - 1 ? `${money(breaks[i - 1])} and over` : `${money(breaks[i - 1])}–${money(breaks[i])}`]);
 }
 
@@ -664,12 +819,14 @@ function addBaseLayers(map: maplibregl.Map, basemapLayers: Set<string>) {
   const labels = style.find((l) => basemapLayers.has(l.id) && l.type === "symbol")?.id;
   const ground = style.find((l) => basemapLayers.has(l.id) && l.type !== "background")?.id;
   const hidden = { visibility: "none" as const };
-  map.addLayer({ id: "satellite", type: "raster", source: "satellite", layout: hidden }, ground);
+  // Toned down a little (brightest at 80%, slightly less saturated) so white labels and lines read over it.
+  map.addLayer({ id: "satellite", type: "raster", source: "satellite", layout: hidden,
+    paint: { "raster-brightness-max": 0.8, "raster-saturation": -0.15 } }, ground);
   map.addLayer({ id: "hillshade", type: "hillshade", source: "dem", layout: hidden,
     paint: { "hillshade-exaggeration": 0.45, "hillshade-shadow-color": "#3d3222", "hillshade-highlight-color": "#ffffff" } }, labels);
-  map.addLayer({ id: "contour-lines", type: "line", source: "contours", "source-layer": "contours", minzoom: 11, layout: hidden,
+  map.addLayer({ id: "contour-lines", type: "line", source: "contours", "source-layer": "contours", minzoom: 9, layout: hidden,
     paint: { "line-color": "#8a5a2b", "line-opacity": ["match", ["get", "level"], 1, 0.75, 0.4], "line-width": ["match", ["get", "level"], 1, 1.3, 0.6] } }, labels);
-  map.addLayer({ id: "contour-labels", type: "symbol", source: "contours", "source-layer": "contours", minzoom: 13,
+  map.addLayer({ id: "contour-labels", type: "symbol", source: "contours", "source-layer": "contours", minzoom: 10,
     filter: [">", ["get", "level"], 0],
     layout: { ...hidden, "symbol-placement": "line", "text-field": ["concat", ["number-format", ["get", "ele"], {}], " m"],
               "text-size": 10, "text-font": ["Noto Sans Regular"] },
@@ -684,12 +841,15 @@ function addLayers(map: maplibregl.Map) {
   map.addLayer({ id: "commute-line", type: "line", source: "commute", paint: { "line-color": "#b4532f", "line-width": 2, "line-opacity": 0.7 } });
   // The selected house's walk and drive to its nearest station.
   map.addSource("station-route", { type: "geojson", data: empty });
+  // (An edge of the map's own colour under the walk keeps it readable over busy streets and photos.)
+  map.addLayer({ id: "station-route-casing", type: "line", source: "station-route", filter: ["==", ["get", "mode"], "walk"],
+    layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#ffffff", "line-width": 8, "line-opacity": 0.85 } });
   map.addLayer({ id: "station-route-drive", type: "line", source: "station-route", filter: ["==", ["get", "mode"], "drive"],
     layout: { "line-cap": "round", "line-join": "round" },
-    paint: { "line-color": "#b4532f", "line-width": 3, "line-opacity": 0.75, "line-dasharray": [1.5, 1.5] } });
+    paint: { "line-color": "#495057", "line-width": 2.5, "line-opacity": 0.85, "line-dasharray": [2, 2] } });
   map.addLayer({ id: "station-route-walk", type: "line", source: "station-route", filter: ["==", ["get", "mode"], "walk"],
     layout: { "line-cap": "round", "line-join": "round" },
-    paint: { "line-color": "#1f5a70", "line-width": 4.5, "line-opacity": 0.9 } });
+    paint: { "line-color": "#1f5a70", "line-width": 4.5 } });
   map.addSource("areas", { type: "geojson", data: empty });
   map.addSource("places", { type: "geojson", data: empty });
   map.addSource("properties", { type: "geojson", data: empty });
@@ -702,10 +862,10 @@ function addLayers(map: maplibregl.Map) {
     paint: { "line-color": ["get", "colour"], "line-width": ["case", hard, 2.5, 1.5], "line-dasharray": [2, 2] } });
   map.addLayer({ id: "areas-label", type: "symbol", source: "areas",
     layout: { "text-field": ["get", "name"], "text-size": 12, "text-font": ["Noto Sans Regular"] },
-    paint: { "text-color": ["get", "colour"], "text-halo-color": "#fff", "text-halo-width": 1.2 } });
+    paint: { "text-color": "#1c2326", "text-halo-color": "#fff", "text-halo-width": 1.3 } });
   // Every train station in the region (the ones picked on the Places screen are drawn again, larger, below).
   map.addSource("stations", { type: "geojson", data: empty });
-  map.addLayer({ id: "stations-circle", type: "circle", source: "stations",
+  map.addLayer({ id: "stations-circle", type: "circle", source: "stations", minzoom: 11,   // from suburb level: city-wide, they're clutter
     paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 2.5, 12, 5, 15, 7], "circle-color": "#ffffff",
              "circle-stroke-color": "#1f5a70", "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 8, 1.5, 13, 2.5] } });
   map.addLayer({ id: "stations-label", type: "symbol", source: "stations", minzoom: 12,
@@ -730,8 +890,12 @@ function addLayers(map: maplibregl.Map) {
     paint: { "text-color": "#8a3a1f", "text-halo-color": "#fff", "text-halo-width": 1.4 } });
   map.addLayer({ id: "props-ring", type: "circle", source: "properties", filter: ["!=", ["get", "ring"], ""],
     paint: { "circle-radius": 12, "circle-color": "transparent", "circle-stroke-color": ["get", "ring"], "circle-stroke-width": 2.5 } });
+  // The picked house: a ring round its pin, so it's easy to find again after panning away.
+  map.addLayer({ id: "props-selected", type: "circle", source: "properties", filter: ["==", ["get", "sel"], true],
+    paint: { "circle-radius": 14, "circle-color": "transparent", "circle-stroke-color": "#1f5a70", "circle-stroke-width": 3 } });
   map.addLayer({ id: "props-circle", type: "circle", source: "properties",
-    paint: { "circle-radius": 8, "circle-color": ["get", "colour"], "circle-opacity": ["case", ["get", "dim"], 0.35, 1],
+    paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 6, 13, 8, 16, 10], "circle-color": ["get", "colour"],
+             "circle-opacity": ["case", ["get", "dim"], 0.35, 1],
              "circle-stroke-color": ["case", ["get", "warned"], "#f59e0b", ["get", "stroke"]], "circle-stroke-width": ["case", ["get", "warned"], 3, 1.5] } });
 }
 

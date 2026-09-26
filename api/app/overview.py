@@ -122,6 +122,11 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
                               JOIN inspection i ON i.id = a.inspection_id WHERE i.property_id = ANY(%s)""")
     covers = {r["property_id"]: str(r["attachment_id"]) for r in conn.execute(
         "SELECT property_id, attachment_id FROM property_cover WHERE property_id = ANY(%s)", (ids,)).fetchall()}
+    # For the house card: how many photos, and the floor plan kept in House Track (to open its viewer).
+    media = {r["property_id"]: r for r in conn.execute(
+        """SELECT property_id, count(*) FILTER (WHERE kind = 'photo' AND sha256 IS NOT NULL) AS photos,
+                  (array_agg(id ORDER BY created_at) FILTER (WHERE kind = 'floorplan' AND sha256 IS NOT NULL))[1] AS plan
+           FROM attachment WHERE property_id = ANY(%s) GROUP BY property_id""", (ids,)).fetchall()}
     tag_rows = by_property("SELECT pt.property_id, t.name FROM property_tag pt JOIN tag t ON t.id = pt.tag_id"
                            " WHERE pt.property_id = ANY(%s) ORDER BY lower(t.name)")
     travel = by_property(
@@ -192,6 +197,8 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
             "last_guide_change": (_day(guides[pid][-1]["observed_at"]) if len(guides.get(pid, [])) > 1 else None),
             "tags": [t["name"] for t in tag_rows.get(pid, [])],
             "cover_id": covers.get(pid),
+            "photo_count": media[pid]["photos"] if pid in media else 0,
+            "floorplan_id": str(media[pid]["plan"]) if pid in media and media[pid]["plan"] else None,
             "attended_by": [str(r["person_id"]) for r in attended.get(pid, [])],
             **{k: (cj[k]["amount_aud"] if k in cj else None) for k in JUDGEMENTS},
             "sold_vs_guide_pct": (round((c["sold_price_aud"] / guide_high - 1) * 100, 1)

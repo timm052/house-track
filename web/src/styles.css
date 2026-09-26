@@ -160,18 +160,6 @@ details > summary:hover { color: var(--text); }
 .who button { min-height: 64px; font-size: 1.15rem; font-weight: 600; }
 
 /* ─── map (milestone 2) ─────────────────────────────────────────────── */
-.map-page { position: fixed; top: var(--topbar-h, 57px); left: 0; right: 0; bottom: 0; }
-.map { position: absolute; inset: 0; width: 100%; height: 100%; } /* MapLibre sets position: relative on it */
-.map-top { position: absolute; top: 8px; left: 8px; right: 56px; display: grid; gap: 6px; z-index: 2; pointer-events: none; }
-.banner { pointer-events: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
-.map-tools { position: absolute; left: 8px; right: 8px; bottom: 28px; z-index: 2; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.map-tools select { width: auto; }
-.map-tools > * { box-shadow: 0 2px 8px rgba(0,0,0,.15); }
-.sheet {
-  position: absolute; left: 8px; right: 8px; bottom: 28px; z-index: 3; max-width: 480px; margin: 0 auto;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px;
-  box-shadow: 0 6px 24px rgba(0,0,0,.25);
-}
 .maplibregl-ctrl-attrib { font-size: 10px; }
 .suggestions { list-style: none; margin: 4px 0 0; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
 .suggestions li button { width: 100%; text-align: left; border: 0; border-radius: 0; background: none; min-height: 40px; }
@@ -179,8 +167,6 @@ details > summary:hover { color: var(--text); }
 @media (max-width: 480px) {
   .topbar .brand { display: none; }
   .topbar nav { margin-right: auto; }
-  .map-tools { bottom: 24px; gap: 4px; }
-  .map-tools button, .map-tools select { min-height: 40px; padding: 8px 10px; font-size: 0.9rem; }
 }
 
 /* ─── overview (milestone 2.5) ──────────────────────────────────────── */
@@ -358,9 +344,6 @@ svg.viz { width: 100%; height: auto; display: block; touch-action: pan-y; }
   .filter-bar select { flex: 1 1 130px; min-width: 0; }
   .filter-bar > .grow { flex-basis: 100%; text-align: left !important; }
 }
-.map-legend { justify-self: start; padding: 6px 10px; }
-.map-legend > summary { padding: 0; font-size: 0.85rem; }
-.map-legend[open] > summary { margin-bottom: 4px; }
 table.compare tbody tr:hover td, table.compare tbody tr:hover th { background: var(--surface-2); }
 table.compare thead th { font-weight: 700; }
 
@@ -537,7 +520,7 @@ input, select, textarea { border-radius: var(--radius-sm); border-color: var(--b
 .card { box-shadow: var(--shadow); }
 .stat, .fact, .auction-stats > div { border-radius: var(--radius-sm); box-shadow: var(--shadow); }
 .stat-value { font-size: 1.55rem; font-weight: 600; }
-.sheet, .popover { border-radius: var(--radius); box-shadow: var(--shadow-lift); }
+.popover { border-radius: var(--radius); box-shadow: var(--shadow-lift); }
 .toast { border-radius: 999px; font-weight: 600; box-shadow: var(--shadow-lift); }
 
 /* House cards: the photo leads, the address reads like a listing, hover lifts. */
@@ -734,24 +717,6 @@ table.history-table td:first-child { white-space: nowrap; }
 @media (max-width: 1100px) { .nav-label { display: none; } .topbar nav a { padding: 7px 9px; } }
 @media (max-width: 480px) { .topbar nav { gap: 0; } .topbar nav a { padding: 7px 8px; } .topbar nav a.active::after { left: 5px; right: 5px; } }
 @media (max-width: 900px) { .topbar nav a.desktop-only { display: none; } }
-/* Map: the open panel and the tools share one column at the bottom, so they never overlap. */
-.map-bottom { position: absolute; left: 8px; right: 8px; bottom: 28px; z-index: 3; display: flex; flex-direction: column;
-  align-items: center; gap: 8px; pointer-events: none; }
-.map-bottom > * { pointer-events: auto; }
-.map-bottom .sheet { position: static; width: 100%; max-width: 480px; margin: 0; max-height: 55vh; overflow-y: auto; }
-.map-bottom .map-tools { position: static; width: 100%; }
-@media (max-width: 480px) { .map-bottom { bottom: 24px; } }
-/* Map: the house panel. A side bar on wide screens (the map's controls and tools move over for it), a sheet on phones. */
-.map-side { position: absolute; z-index: 5; background: var(--surface); overflow-y: auto; overscroll-behavior: contain;
-  top: 0; right: 0; bottom: 0; width: 400px; border-left: 1px solid var(--border); box-shadow: -6px 0 24px rgb(0 0 0 / 0.12); }
-.map-page.side-open .maplibregl-ctrl-top-right { right: 400px; }
-.map-page.side-open .map-bottom { right: 408px; }
-.map-side-close { position: absolute; top: 8px; right: 8px; z-index: 1; min-height: 34px; min-width: 34px; padding: 4px; border-radius: 50%;
-  display: grid; place-items: center; background: rgb(0 0 0 / 0.5); color: #fff; border: 0; }
-.map-side-photo img { display: block; width: 100%; height: 200px; object-fit: cover; }
-.map-side-body { padding: 14px 16px 20px; display: grid; gap: 12px; }
-.map-side-head h2 { margin: 0 34px 2px 0; font-size: 1.35rem; }
-.map-side-price .price { font-size: 1.45rem; font-weight: 650; }
 .map-side-facts { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .map-side-facts span, .map-side-travel span { display: inline-flex; align-items: center; gap: 4px; }
 .map-side-travel { display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: 0.9rem; border-bottom: 1px solid var(--border); }
@@ -761,14 +726,6 @@ table.history-table td:first-child { white-space: nowrap; }
 .map-side-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .map-side-actions a button { width: 100%; }
 .map-side .section-title { margin: 0 0 6px; }
-@media (max-width: 799px) {
-  .map-side { top: auto; left: 0; width: auto; max-height: 58vh; border-left: 0; border-top: 1px solid var(--border);
-    border-radius: 16px 16px 0 0; box-shadow: 0 -6px 24px rgb(0 0 0 / 0.18); }
-  .map-page.side-open .maplibregl-ctrl-top-right { right: 0; }
-  .map-page.side-open:not(.panel-open) .map-bottom { display: none; }
-  .map-page.side-open.panel-open .map-side { display: none; }
-  .map-side-photo img { height: 140px; border-radius: 16px 16px 0 0; }
-}
 .map-side-note { color: var(--muted); font-style: italic; margin-top: 2px; }
 .map-side-verdicts { display: grid; gap: 6px; }
 .map-side .lucide { color: var(--accent); }
@@ -946,9 +903,6 @@ a.plan-open:active { transform: scale(0.98); transition-duration: 0ms; }
 @keyframes live-wait { to { opacity: 0.55; } }
 
 /* The map key's switch between colouring houses by price and by status. */
-.map-colour-by { display: inline-flex; align-self: flex-start; gap: 2px; margin: 4px 0 6px; padding: 2px; border-radius: 999px; background: var(--surface-2); }
-.map-colour-by button { min-height: 28px; padding: 2px 12px; border: 0; border-radius: 999px; background: none; color: var(--text); font-size: 0.8rem; }
-.map-colour-by button.on { background: var(--accent); color: var(--accent-text); font-weight: 600; }
 .price-dot { box-shadow: inset 0 0 0 1.5px #4a1140; }
 [data-theme="dark"] .price-dot { box-shadow: none; }
 
@@ -987,3 +941,306 @@ a.plan-open:active { transform: scale(0.98); transition-duration: 0ms; }
   margin: 0 -4px 4px; padding: 8px 4px; background: var(--bg); }
 .add-head h1 { margin: 0; }
 .add-head button { min-width: 130px; }
+
+/* ─── map ────────────────────────────────────────────────────────────
+   Everything floats over a full-bleed map in one style: the surface, a soft lift, rounded. Search at the top; the
+   tools along the bottom with the open panel just above them; the house panel down the right on a computer, a sheet
+   over the bottom on a phone. */
+.map-page { position: fixed; top: var(--topbar-h, 57px); left: 0; right: 0; bottom: 0; }
+.map { position: absolute; inset: 0; width: 100%; height: 100%; } /* MapLibre sets position: relative on it */
+.map-top { position: absolute; top: 12px; left: 12px; width: min(380px, calc(100% - 76px)); display: grid; gap: 8px; z-index: 4; }
+.map-search { position: relative; display: flex; align-items: center; gap: 8px; height: 46px; padding: 0 8px 0 14px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 999px; box-shadow: var(--shadow-lift); }
+.map-search:focus-within { border-color: var(--accent); }
+.map-search > .lucide { width: 18px; height: 18px; color: var(--muted); flex: none; }
+.map-search input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: none; font-size: 1rem; box-shadow: none; outline: none; }
+.map-search-hits { position: absolute; top: calc(100% + 6px); left: 0; right: 0; margin: 0; padding: 4px; list-style: none;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lift); }
+.map-search-hits button { width: 100%; min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 0;
+  border-radius: var(--radius-sm); background: none; color: var(--text); text-align: left; }
+.map-search-hits button:hover, .map-search-hits button:focus-visible { background: var(--surface-2); }
+.map-search-hits .status-dot { margin: 0; flex: none; }
+.banner { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; box-shadow: var(--shadow-lift); }
+
+.map-dock { position: absolute; left: 12px; bottom: 28px; z-index: 4; display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+  max-width: calc(100% - 24px); pointer-events: none; }
+.map-dock > * { pointer-events: auto; }
+.map-page.house-open .map-dock { max-width: calc(100% - 424px); }
+.map-tools { display: flex; gap: 6px; max-width: 100%; padding: 2px; overflow-x: auto; scrollbar-width: none; }
+.map-tools::-webkit-scrollbar { display: none; }
+.map-page .map-tools button { flex: none; display: inline-flex; align-items: center; gap: 7px; min-height: 42px; padding: 0 14px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text); font-weight: 600; white-space: nowrap;
+  box-shadow: var(--shadow-lift); transition: transform 120ms cubic-bezier(0.2, 0, 0, 1), background-color 120ms; }
+.map-page .map-tools button .lucide { width: 18px; height: 18px; color: var(--accent); }
+.map-page .map-tools button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.map-page .map-tools button.on .lucide { color: inherit; }
+.map-page .map-tools button:active { transform: scale(0.96); transition-duration: 0ms; }
+.map-tools .count-badge { min-width: 18px; padding: 0 5px; font-size: 0.75rem; }
+.key-swatches { display: inline-flex; }
+.key-swatches i { width: 11px; height: 11px; margin-left: -3px; border-radius: 50%; border: 1.5px solid var(--surface); }
+.key-swatches i:first-child { margin-left: 0; }
+
+.map-panel, .map-dock .sheet { width: 360px; max-width: 100%; max-height: min(62vh, 560px); overflow-y: auto; overscroll-behavior: contain;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 10px 30px rgb(0 0 0 / 0.22); }
+.map-dock .sheet { padding: 14px 16px; }
+.map-panel header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 12px 10px 8px 16px; background: var(--surface); }
+.map-panel header strong { font-size: 1.05rem; }
+.map-page .map-panel-close { min-height: 36px; min-width: 36px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 50%;
+  background: var(--surface-2); color: var(--text); }
+.map-panel-close .lucide { width: 18px; height: 18px; }
+.map-panel-body { display: grid; gap: 12px; padding: 0 16px 16px; }
+.map-panel-body section { display: grid; gap: 8px; }
+.map-panel-body section + section { padding-top: 12px; border-top: 1px solid var(--border); }
+.map-panel-body .section-title, .map-panel-body p { margin: 0; }
+.map-seg { display: inline-flex; justify-self: start; gap: 2px; padding: 3px; border-radius: 999px; background: var(--surface-2); }
+.map-page .map-seg button { min-height: 34px; padding: 0 14px; border: 0; border-radius: 999px; background: none; color: var(--text); font-size: 0.9rem; }
+.map-page .map-seg button.on { background: var(--accent); color: var(--accent-text); font-weight: 650; }
+.map-key { display: grid; gap: 7px; font-size: 0.9rem; }
+.map-key > div { display: flex; align-items: center; gap: 9px; }
+.map-key .status-dot, .map-key .key-station, .map-key .comp-key { margin: 0; flex: none; }
+.map-page .map-choice { width: 100%; min-height: 64px; display: flex; align-items: flex-start; gap: 12px; padding: 12px; text-align: left;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
+.map-page .map-choice:hover { border-color: var(--accent); }
+.map-choice .lucide { width: 22px; height: 22px; margin-top: 1px; flex: none; color: var(--accent); }
+.map-choice > span { display: grid; gap: 2px; }
+
+/* The house panel on a computer: down the right, the map's controls moving over for it. */
+.map-side { position: absolute; z-index: 5; top: 0; right: 0; bottom: 0; width: 400px; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--surface); border-left: 1px solid var(--border); box-shadow: -6px 0 24px rgb(0 0 0 / 0.12); }
+.map-page.house-open .maplibregl-ctrl-top-right { right: 400px; }
+.map-page .map-side-close { position: absolute; top: 10px; right: 10px; z-index: 2; min-height: 36px; min-width: 36px; padding: 0; display: grid;
+  place-items: center; border: 0; border-radius: 50%; background: rgb(0 0 0 / 0.5); color: #fff; }
+.map-side-close .lucide { width: 18px; height: 18px; color: inherit; }
+.map-side-handle, .map-side-thumb { display: none; }
+.map-side-photo img { display: block; width: 100%; height: 210px; object-fit: cover; }
+.map-side-summary { display: flex; gap: 12px; padding: 14px 16px 0; }
+.map-side-head { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.map-side-head h2 { margin: 0 40px 0 0; font-size: 1.3rem; line-height: 1.2; }
+.map-side-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.map-side-quick { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; }
+.map-side-quick strong { font-size: 1.2rem; }
+.map-side-primary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px 16px 4px; }
+.map-side-primary a, .map-side-primary button { width: 100%; white-space: nowrap; }
+.map-side-primary .lucide { width: 16px; height: 16px; }
+.map-side-body { display: grid; gap: 14px; padding: 12px 16px 20px; }
+.map-side-note { margin-top: 2px; color: var(--muted); font-style: italic; }
+.map-side .lucide { color: var(--accent); }
+.map-side button.primary .lucide { color: inherit; }
+
+/* Phones: search across the top (pinch zooms, so the zoom buttons go); tools along the bottom; a panel is a sheet
+   from the bottom; the house panel is a sheet showing its summary, dragged up for the rest (see useSheet), with the
+   tools just above it while it's at its summary. */
+@media (max-width: 799px) {
+  .map-top { top: 10px; left: 10px; right: 58px; width: auto; }
+  .maplibregl-ctrl-group:has(.maplibregl-ctrl-zoom-in) { display: none; }
+  .map-dock { left: 0; right: 0; bottom: 0; max-width: none; align-items: stretch; gap: 0; padding: 0 10px 22px; }
+  .map-page.house-open .map-dock { max-width: none; bottom: var(--sheet-h, 0px); padding-bottom: 8px; }
+  .map-page.house-open:not([data-sheet="peek"]) .map-dock { display: none; }
+  .map-page.panel-open .map-dock, .map-page.panel-open.house-open .map-dock { display: flex; bottom: 0; padding: 0; }
+  .map-page.panel-open .map-tools { display: none; }
+  .map-page.panel-open .map-side { visibility: hidden; }
+  .map-page .map-tools button { min-height: 44px; }
+  .map-panel, .map-dock .sheet { width: auto; max-width: none; max-height: 72vh; border-width: 1px 0 0; border-radius: 18px 18px 0 0;
+    box-shadow: 0 -8px 28px rgb(0 0 0 / 0.22); padding-bottom: env(safe-area-inset-bottom); }
+  .map-dock .sheet { padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
+
+  .map-side { top: auto; width: auto; left: 0; overflow: hidden; border-left: 0; border-radius: 18px 18px 0 0;
+    box-shadow: 0 -8px 28px rgb(0 0 0 / 0.22); will-change: transform; }
+  .map-page.house-open .maplibregl-ctrl-top-right { right: 0; }
+  .map-side-grab { touch-action: none; user-select: none; -webkit-user-select: none; }
+  .map-page .map-side-handle { display: block; position: relative; width: 100%; height: 22px; min-height: 0; padding: 0; border: 0; border-radius: 0;
+    background: none; cursor: grab; }
+  .map-side-handle::after { content: ""; position: absolute; top: 8px; left: 50%; width: 40px; height: 5px; margin-left: -20px; border-radius: 3px;
+    background: var(--border-strong); }
+  .map-side-photo { display: none; }
+  .map-side-thumb { display: block; width: 64px; height: 64px; flex: none; border-radius: var(--radius-sm); object-fit: cover; }
+  .map-side-summary { padding: 0 14px; }
+  .map-side-head h2 { font-size: 1.1rem; }
+  .map-page .map-side-close { top: 6px; right: 8px; background: var(--surface-2); color: var(--text); }
+  .map-side-primary { padding: 10px 14px 12px; }
+  .map-side-body { height: var(--sheet-body, 0px); overflow-y: auto; overscroll-behavior: contain; padding: 4px 14px calc(20px + env(safe-area-inset-bottom)); }
+  .map-side.stop-peek .map-side-body { visibility: hidden; }
+}
+
+/* The map's panels: choices as full-width button rows; planning layers as a folded list of switches. */
+.map-panel .map-seg { display: flex; justify-self: stretch; }
+.map-panel .map-seg button { flex: 1; }
+.map-overlay-list { display: grid; gap: 2px; }
+.map-toggle { display: flex; align-items: center; gap: 10px; min-height: 40px; font-size: 0.9rem; cursor: pointer; }
+.map-toggle .dot { flex: none; margin: 0; }
+.map-toggle .pill { margin-left: 6px; font-size: 0.72rem; }
+/* A switch: the checkbox drawn as a track and knob. */
+.map-toggle input[type="checkbox"] { appearance: none; -webkit-appearance: none; flex: none; position: relative; width: 38px; height: 22px; margin: 0;
+  border-radius: 999px; background: var(--border-strong); cursor: pointer; transition: background-color 120ms; }
+.map-toggle input[type="checkbox"]::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 0.3); transition: transform 180ms cubic-bezier(0.2, 0, 0, 1); }
+.map-toggle input[type="checkbox"]:checked { background: var(--accent); }
+.map-toggle input[type="checkbox"]:checked::after { transform: translateX(16px); }
+.map-toggle input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .map-toggle input[type="checkbox"]::after { transition: none; } }
+
+/* Map colours that follow the theme (map/palette.ts has the full set): the travel list's walk and drive keys. */
+:root { --map-route: #1f5a70; --map-station: #343a40; --map-drive: #495057; --map-comp: #c2410c; }
+[data-theme="dark"] { --map-route: #86c1d3; --map-station: #ced4da; --map-drive: #ced4da; --map-comp: #ff8c5a; }
+.route-key { border-top-color: var(--map-route); }
+.route-key.drive { border-top-color: var(--map-drive); }
+.comp-key { border-color: var(--map-comp); }
+/* The key's marks, drawn as they are on the map. */
+.key-pin { display: inline-block; flex: none; width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid transparent; box-sizing: border-box; }
+.key-pin.key-ring { width: 16px; height: 16px; border-width: 3px; background: transparent; }
+.key-line { display: inline-block; flex: none; width: 18px; height: 0; border-top: 4px solid; border-radius: 2px; }
+.key-line.dashed { border-top-width: 2.5px; border-top-style: dashed; }
+.key-area { display: inline-block; flex: none; width: 16px; height: 12px; border: 2px solid; border-radius: 3px; background-clip: padding-box; opacity: 0.7; }
+.key-station { border-color: var(--map-station); }
+.ov-swatch { display: inline-block; flex: none; width: 18px; height: 14px; border: 2px solid; border-radius: 3px; }
+/* MapLibre's own buttons, in the same style as ours and in both themes. */
+.map-page .maplibregl-ctrl-group { border-radius: 12px; overflow: hidden; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-lift); }
+.map-page .maplibregl-ctrl-group:not(:empty) { box-shadow: var(--shadow-lift); }
+.map-page .maplibregl-ctrl-group button + button { border-top: 1px solid var(--border); }
+.map-page .maplibregl-ctrl-group button { width: 38px; height: 38px; background: var(--surface); }
+[data-theme="dark"] .map-page .maplibregl-ctrl-group button .maplibregl-ctrl-icon { filter: invert(1) hue-rotate(180deg); }
+[data-theme="dark"] .map-page .maplibregl-ctrl-attrib { background: rgb(25 30 32 / 0.8); color: var(--muted); }
+[data-theme="dark"] .map-page .maplibregl-ctrl-attrib a { color: var(--muted); }
+[data-theme="dark"] .map-page .maplibregl-ctrl-attrib-button { filter: invert(1); }
+
+/* ─── Houses: one search box (offering filters as you type), one row of controls, the filters that are on as chips ─── */
+.houses-head { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.houses-search { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 12px;
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: 999px; }
+.houses-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.houses-search > .lucide { width: 18px; height: 18px; flex: none; color: var(--muted); }
+.houses-search input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: none; box-shadow: none; outline: none; font-size: 1rem; }
+.houses-offers { position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 20; margin: 0; padding: 4px; list-style: none;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lift); }
+.houses-offers button { width: 100%; min-height: 42px; display: flex; align-items: center; gap: 10px; padding: 6px 10px; border: 0;
+  border-radius: var(--radius-sm); background: none; color: var(--text); text-align: left; }
+.houses-offers button:hover, .houses-offers button:focus-visible { background: var(--surface-2); }
+.houses-offer-kind { min-width: 62px; font-size: 0.75rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.houses-offer-note { padding: 6px 10px 4px; }
+.houses-head .primary { white-space: nowrap; }
+.houses-head .primary .lucide { width: 18px; height: 18px; }
+@media (max-width: 480px) { .houses-head .label { display: none; } }
+
+.houses-controls { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.houses-stage { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--surface-2); max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.houses-stage button { min-height: 36px; padding: 0 14px; border: 0; border-radius: 999px; background: none; color: var(--text); font-weight: 560; white-space: nowrap; }
+.houses-stage button.on { background: var(--surface); box-shadow: 0 1px 3px rgb(0 0 0 / 0.16); font-weight: 700; }
+.houses-stage-n { margin-left: 4px; font-size: 0.8rem; color: var(--muted); font-weight: 600; }
+.houses-sort { position: relative; display: inline-flex; align-items: center; margin-left: auto; }
+.houses-sort .lucide { position: absolute; left: 10px; width: 16px; height: 16px; color: var(--muted); pointer-events: none; }
+.houses-sort select { width: auto; min-height: 42px; padding-left: 32px; border-radius: 999px; }
+.houses-filters-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 42px; border-radius: 999px; }
+.houses-filters-btn.on { border-color: var(--accent); color: var(--accent); }
+.houses-filters-btn .lucide { width: 17px; height: 17px; }
+@media (max-width: 600px) { .houses-sort { margin-left: 0; } .houses-stage { flex: 1 1 100%; justify-content: space-between; } .houses-stage button { flex: 1; padding: 0 8px; } }
+
+.houses-on { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.houses-on-chip { display: inline-flex; align-items: center; gap: 4px; min-height: 30px; padding: 0 4px 0 12px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--text); font-size: 0.85rem; font-weight: 560; }
+.houses-on-chip button { min-height: 26px; min-width: 26px; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--muted); }
+.houses-on-chip button:hover { background: var(--surface); color: var(--text); }
+.houses-panel { display: grid; gap: 14px; margin-top: 10px; }
+.houses-panel section .section-title { margin: 0 0 4px; }
+.houses-panel .chips { flex-wrap: wrap; overflow: visible; }
+
+/* Grouped by suburb, then street. */
+.suburb-group { margin-top: 18px; }
+.suburb-heading { display: flex; align-items: center; gap: 8px; margin: 0 0 2px; padding-bottom: 6px; font-size: 1.15rem; border-bottom: 2px solid var(--border); }
+.suburb-heading .muted { font-size: 0.85rem; font-weight: 500; }
+.suburb-heading .suburb-swatch { width: 12px; height: 12px; }
+.houses-panel { min-width: 0; }
+.houses-panel > .row { flex-wrap: wrap; }
+.houses-panel > .row select { flex: 1 1 200px; min-width: 0; }
+@media (max-width: 480px) { .houses-panel > .row .grow { display: none; } .houses-panel > .row .primary { flex: 1 1 100%; } }
+
+.houses-panel { grid-template-columns: minmax(0, 1fr); }
+.houses-panel section { min-width: 0; }
+.houses-verdicts { display: grid; gap: 4px; margin-bottom: 4px; }
+.houses-verdict-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.houses-verdict-who { display: inline-flex; align-items: center; min-width: 70px; font-weight: 600; font-size: 0.9rem; }
+.houses-verdict-row .chips { padding: 2px 0; }
+@media (max-width: 600px) {
+  .houses-stage button { padding: 0 5px; font-size: 0.82rem; min-width: 0; }
+  .houses-stage-n { margin-left: 3px; font-size: 0.72rem; }
+}
+
+/* Filtering on any field: find the field by typing, then an editor that suits it. */
+.field-filter { display: grid; gap: 8px; }
+.field-list { display: grid; gap: 6px; max-height: 260px; overflow-y: auto; }
+.field-group { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 2px 0; }
+.field-editor { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.field-editor .chips { flex-wrap: wrap; overflow: visible; }
+.field-editor .row { flex-wrap: wrap; }
+.field-range { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.field-range label { display: grid; gap: 4px; font-size: 0.8rem; font-weight: 650; color: var(--muted); }
+.field-box { display: flex; align-items: center; gap: 4px; height: 42px; padding: 0 10px; border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); background: var(--surface); }
+.field-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.field-box input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: none; box-shadow: none; outline: none;
+  font-size: 1rem; font-weight: 500; color: var(--text); }
+.field-unit { color: var(--muted); font-weight: 600; font-size: 0.9rem; }
+.field-summary { margin: 0; }
+/* The houses' values along a line, the chosen range shaded. */
+.range-strip { position: relative; height: 18px; margin: 2px 6px; }
+.range-strip::before { content: ""; position: absolute; left: 0; right: 0; top: 8px; height: 2px; border-radius: 1px; background: var(--border-strong); }
+.range-band { position: absolute; top: 5px; height: 8px; border-radius: 4px; background: var(--accent-soft); outline: 1px solid var(--accent); }
+.range-dot { position: absolute; top: 5px; width: 8px; height: 8px; margin-left: -4px; border-radius: 50%; background: var(--muted); opacity: 0.55; }
+.range-dot.in { background: var(--accent); opacity: 1; }
+.field-n { margin-left: 5px; font-size: 0.75rem; color: var(--muted); font-weight: 600; }
+.chip.on .field-n { color: inherit; opacity: 0.8; }
+.field-editor .small-btn .lucide { width: 14px; height: 14px; }
+.houses-on-chip .houses-on-edit { min-height: 0; min-width: 0; border-radius: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline dotted; cursor: pointer; }
+
+/* ─── the house card: photo; where, price and sale; badges; rooms; travel; schools; price notes; people ─── */
+.property-card { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 14px; align-items: start; }
+.pc-photo { position: relative; width: 120px; height: 120px; }
+.pc-count { position: absolute; right: 5px; bottom: 5px; display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px;
+  border-radius: 999px; background: rgb(0 0 0 / 0.6); color: #fff; font-size: 0.72rem; font-weight: 600; }
+.pc-count .lucide { width: 11px; height: 11px; }
+.pc-body { display: grid; gap: 7px; min-width: 0; }
+.pc-top { display: flex; align-items: flex-start; gap: 10px; }
+.pc-where { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.pc-where .address { font-size: 1.05rem; line-height: 1.25; }
+.pc-price { display: grid; justify-items: end; text-align: right; gap: 1px; flex: none; max-width: 55%; }
+.pc-price strong { font-size: 1.08rem; font-weight: 750; white-space: nowrap; }
+.pc-badges, .pc-facts, .pc-travel, .pc-notes, .pc-people { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; }
+.pc-badges .pill .lucide { width: 12px; height: 12px; vertical-align: -1px; }
+.pc-facts { gap: 4px 14px; font-size: 0.9rem; }
+.pc-facts span { display: inline-flex; align-items: center; gap: 5px; }
+.pc-facts .lucide, .pc-schools .lucide, .pc-alert .lucide { width: 15px; height: 15px; color: var(--muted); flex: none; }
+.pc-chip { display: inline-flex; align-items: center; gap: 3px; padding: 2px 9px; border-radius: 999px; background: var(--surface-2);
+  font-size: 0.8rem; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.pc-chip .lucide { width: 13px; height: 13px; color: var(--muted); flex: none; }
+.pc-chip b { font-weight: 700; margin-right: 2px; }
+.pc-schools { display: flex; align-items: center; gap: 6px; color: var(--muted); min-width: 0; }
+.pc-alert { display: flex; align-items: center; gap: 6px; color: var(--maybe); font-weight: 600; }
+.pc-alert .lucide { color: inherit; }
+.pc-verdict { display: inline-flex; align-items: center; gap: 4px; font-size: 0.85rem; }
+.pc-people .tag { margin: 0; }
+.pill.quiet { background: none; border: 1px solid var(--border); color: var(--muted); }
+.property-card .pc-link { display: inline-flex; align-items: center; gap: 4px; min-height: 26px; padding: 0 10px; border-radius: 999px;
+  border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font-size: 0.78rem; font-weight: 600; }
+.property-card .pc-link:hover { border-color: var(--accent); color: var(--accent); }
+.pc-link .lucide { width: 13px; height: 13px; }
+@media (max-width: 480px) {
+  .property-card { grid-template-columns: 84px minmax(0, 1fr); gap: 11px; }
+  .pc-photo { width: 84px; height: 84px; }
+  .pc-top { flex-wrap: wrap; gap: 2px 10px; }
+  .pc-price { justify-items: start; text-align: left; max-width: none; }
+}
+.card-thumb.pc-photo .pc-count { font-size: 0.72rem; opacity: 1; }
+@media (max-width: 480px) {
+  .pc-top { display: grid; gap: 3px; }
+  .pc-price { display: flex; flex-wrap: wrap; align-items: baseline; justify-items: start; gap: 2px 8px; max-width: none; text-align: left; }
+}
+
+.pc-chip-name { margin: 0 2px 0 3px; overflow: hidden; text-overflow: ellipsis; }
+/* Phones: travel in one row that swipes sideways, chips tighter and long names cut short. */
+@media (max-width: 480px) {
+  .pc-travel { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 4px; margin-right: -14px; padding-right: 14px;
+    mask-image: linear-gradient(to right, #000 88%, transparent); }
+  .pc-travel::-webkit-scrollbar { display: none; }
+  .pc-chip { flex: none; padding: 1px 7px; font-size: 0.76rem; gap: 2px; }
+  .pc-chip .lucide { width: 12px; height: 12px; }
+  .pc-chip-name { max-width: 64px; }
+}

@@ -97,6 +97,25 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.4
+
+- The map, redesigned:
+  - Search for a house at the top.
+  - Key, Layers, Planning, Travel time and Mark an area along the bottom, each opening one tidy panel.
+  - On phones the house card starts as a small summary you can drag up, so the map stays in view.
+  - Contour lines are one Off / Coarse / Fine choice.
+- Map colours reworked for light, dark and satellite:
+  - The picked house has a ring round it, and its walk to the station is teal.
+  - Stations are neutral, comparable sales are orange, and the travel-time area is violet.
+  - Planning layers have their own colours and line styles, including the state's own layers.
+  - Labels and contours read clearly over the satellite photos.
+- The Houses page, rethought:
+  - One search box that suggests filters as you type (a suburb, tag, "3 bed", "land over 600", "townhouse", a person's verdicts).
+  - **In play / Shortlist / Results / Ruled out / All**.
+  - Filters on anyone's verdicts, and an easy filter on any other field.
+  - Grouping by suburb, then street.
+- New house cards: tidier, with travel as compact chips, school zones, the sale countdown, a photo count and a Floor plan button.
+
 ### 0.4.3
 
 - Photos open full screen in a new viewer: swipe between them, pinch or double-tap to zoom, and drag around a zoomed photo. Portrait photos from phones now show the right way up and the right shape. On a phone, Back closes the viewer. Floor plans open in the floor plan viewer.

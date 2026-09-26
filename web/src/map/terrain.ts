@@ -17,8 +17,8 @@ dem.setupMaplibre(maplibregl);
 const contours = (thresholds: Record<number, number[]>) =>
   dem.contourProtocolUrl({ thresholds, elevationKey: "ele", levelKey: "level", contourLayer: "contours", overzoom: 1 });
 export const contourTiles = {
-  coarse: contours({ 11: [20, 100], 12: [10, 50], 14: [5, 25] }),
-  fine: contours({ 11: [10, 50], 12: [5, 25], 14: [2, 10] }),
+  coarse: contours({ 9: [50, 250], 11: [20, 100], 12: [10, 50], 14: [5, 25] }),
+  fine: contours({ 9: [25, 100], 11: [10, 50], 12: [5, 25], 14: [2, 10] }),
 };
 export type ContourDetail = keyof typeof contourTiles;
 

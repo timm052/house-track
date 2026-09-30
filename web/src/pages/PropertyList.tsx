@@ -244,10 +244,8 @@ export default function PropertyList() {
             </ul>
           )}
         </div>
-        {toRate > 0 && (
-          <Link to="/rate" className="rate-launch" title="Rate new houses">
-            <button className="icon-btn"><Heart /><span className="label">Rate</span><span className="count-badge">{toRate}</span></button></Link>
-        )}
+        <Link to="/rate" className="rate-launch" title={toRate ? `Rate new houses (${toRate})` : "Rate new houses"}>
+          <button className="icon-btn"><Heart /><span className="label">Rate</span>{toRate > 0 && <span className="count-badge">{toRate}</span>}</button></Link>
         <button className={`icon-btn ${comparing ? "on" : ""}`} aria-pressed={comparing != null} title="Pick houses to compare"
           onClick={() => setComparing(comparing ? null : [])}><Scale /><span className="label">Compare</span></button>
         <Link to="/add"><button className="primary"><Plus /> <span className="label">Add house</span></button></Link>

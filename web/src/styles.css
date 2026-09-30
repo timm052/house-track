@@ -1337,3 +1337,8 @@ a.plan-open:active { transform: scale(0.98); transition-duration: 0ms; }
 .rate-done { text-align: center; }
 .rate-flash { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 30;
   max-width: calc(100% - 32px); padding: 10px 16px; border-radius: 12px; background: var(--text); color: var(--bg); box-shadow: var(--shadow-lift); }
+
+/* Planner: the To inspect switch and the list's houses not open that day. */
+.plan-only { margin: 0 0 10px; }
+.plan-not-today { margin-top: 12px; }
+.plan-not-today h3 { margin: 0 0 6px; font-size: 0.95rem; }

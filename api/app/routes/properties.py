@@ -331,7 +331,17 @@ def shortlist(property_id: UUID, person: Person) -> dict:
             conn.execute("INSERT INTO status_event (property_id, status, reason) VALUES (%s, 'shortlisted', 'Shortlisted in Rate')",
                          (property_id,))
             status = "shortlisted"
-        conn.execute("INSERT INTO inspect_list (property_id) VALUES (%s) ON CONFLICT (property_id) DO NOTHING", (property_id,))
+        added = conn.execute("INSERT INTO inspect_list (property_id) VALUES (%s) ON CONFLICT (property_id) DO NOTHING",
+                             (property_id,)).rowcount
+        if added:
+            who = conn.execute("SELECT display_name FROM person WHERE id = %s", (person,)).fetchone()
+            p = conn.execute("SELECT unit, street_number, street, suburb, postcode, plan_number, lot_number FROM property WHERE id = %s",
+                             (property_id,)).fetchone()
+    if added:
+        from .. import push
+        from ..address import Address, display
+        push.send("shortlist", f"{who['display_name'] if who else 'Someone'} shortlisted a house",
+                  display(Address(**p)).split(",")[0] + f", {p['suburb']}", f"/p/{property_id}", exclude=person)
     return {"id": property_id, "status": status, "to_inspect": True}
 
 

@@ -158,6 +158,14 @@ def refresh(conn: psycopg.Connection, property_id: UUID, body: ListingUpdateIn) 
         changes.append("Pinned from the listing's map position")
     if live is not None and listing_state(body.listing_status) == "sold":
         changes.append(record_sale(conn, property_id, live, body.sold_price_aud))
+    elif live is None and body.sold_price_aud:
+        # Sold already, with the price held back at the time: the listing shows it now.
+        late = conn.execute("""UPDATE campaign SET sold_price_aud = %s
+                               WHERE id = (SELECT id FROM campaign WHERE property_id = %s AND outcome LIKE 'sold%%'
+                                           ORDER BY outcome_on DESC, created_at DESC LIMIT 1) AND sold_price_aud IS NULL
+                               RETURNING id""", (body.sold_price_aud, property_id)).fetchone()
+        if late:
+            changes.append(f"Sold price: {money(body.sold_price_aud)}")
     added["changes"] = changes
     return added
 

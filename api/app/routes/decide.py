@@ -232,17 +232,21 @@ MAX_TARGETS = 40
 
 @router.get("/listing/targets")
 def refresh_targets() -> list[dict]:
-    """Active houses with a live campaign and a Domain link, least recently checked first."""
+    """Houses with a Domain link, least recently checked first: active ones with a live campaign, and ones sold in
+    the last two weeks whose price we don't have yet (agents often add it a few days after the sale)."""
     with tx() as conn:
         rows = conn.execute(
             """SELECT DISTINCT ON (p.id) p.id, l.url, l.last_checked_at, p.unit, p.street_number, p.street, p.suburb, p.postcode,
                       p.plan_number, p.lot_number
                FROM campaign_link l
-               JOIN campaign c ON c.id = l.campaign_id AND c.outcome IS NULL
+               JOIN campaign c ON c.id = l.campaign_id
                JOIN property p ON p.id = c.property_id
                JOIN property_status s ON s.property_id = p.id
-               WHERE l.portal = 'domain' AND s.status NOT IN ('ruled_out', 'missed_out', 'bought')
-               ORDER BY p.id, l.created_at DESC""").fetchall()
+               WHERE l.portal = 'domain'
+                 AND ((c.outcome IS NULL AND s.status NOT IN ('ruled_out', 'missed_out', 'bought'))
+                      OR (c.outcome LIKE 'sold%%' AND c.sold_price_aud IS NULL AND NOT c.bought_by_us
+                          AND c.outcome_on >= current_date - 14))
+               ORDER BY p.id, (c.outcome IS NULL) DESC, c.created_at DESC, l.created_at DESC""").fetchall()
     out = [{"id": str(r.pop("id")), "url": r.pop("url"), "last_checked_at": r.pop("last_checked_at"), "address": display(Address(**r))}
            for r in rows]
     out.sort(key=lambda t: (t["last_checked_at"] is not None, t["last_checked_at"] or ""))
@@ -297,6 +301,8 @@ def refresh_one(body: RefreshIn, person: Person) -> dict:
                 added["changes"].append(f"{len(photos)} {'photo' if len(photos) == 1 else 'photos'} from the listing")
             if plans:
                 added["changes"].append("Floor plan from the listing")
+    from .. import push
+    push.listing_changed(body.property_id, added["changes"], person)
     # Sold and under offer are recorded above; taken down or withdrawn still need a person to say how it ended.
     status = listing_apply.listing_state(got.get("listing_status"))
     flag = OFF_MARKET.get(status) if status not in ("sold", "underoffer") else None

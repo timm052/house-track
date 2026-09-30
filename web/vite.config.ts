@@ -29,6 +29,8 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // Phone notifications: showing them and opening the house when one is tapped.
+        importScripts: ["push-sw.js"],
         navigateFallback: "/index.html",
         navigateFallbackDenylist: [/^\/api\//, /^\/tiles\//],
         // The bundled fonts, Latin only (the other scripts load on demand, if ever).

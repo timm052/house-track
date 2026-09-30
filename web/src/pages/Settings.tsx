@@ -1,3 +1,4 @@
+import Notifications from "../Notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
@@ -35,6 +36,7 @@ export default function Settings() {
       <h1>Settings</h1>
       <p className="small muted">Shared with the household. Stations and places are in <Link to="/places">Places</Link>.</p>
       <OfflineNote queries={[persons]} />
+      <Notifications />
       <PhoneAdding />
       <Bookmarklets />
       <div className="card stack">

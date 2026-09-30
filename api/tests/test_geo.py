@@ -510,3 +510,11 @@ def test_nothing_leaving_before_six_is_a_commute():
     dawn = {"startTime": "2026-09-28T16:00:00Z", "endTime": "2026-09-28T22:57:00Z", "duration": 25020,
             "legs": [{"mode": "REGIONAL_RAIL", "duration": 3900}]}
     assert pick_journey([dawn], arrive_by=nine) is None
+
+
+def test_satellite_uses_the_arcgis_key_when_set(client, monkeypatch):
+    monkeypatch.delenv("ARCGIS_API_KEY", raising=False)
+    assert client.get("/api/map-config").json() == {"satellite": None}
+    monkeypatch.setenv("ARCGIS_API_KEY", "abc123")
+    url = client.get("/api/map-config").json()["satellite"]
+    assert url.startswith("https://ibasemaps-api.arcgis.com/") and url.endswith("{z}/{y}/{x}?token=abc123")

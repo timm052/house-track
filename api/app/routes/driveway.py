@@ -133,18 +133,25 @@ def upcoming(days: int = 14) -> list[dict]:
 
 
 def _events(conn, days: int) -> list[dict]:
+    """What's coming up. Houses we're finished with (ruled out, or sold to someone else) are left out, without
+    touching their inspections, so they come back if the house does; a house we bought keeps its own."""
     rows = conn.execute(
         """SELECT 'inspection' AS type, i.id, i.kind, i.state, i.starts_at, i.ends_at, p.id AS property_id,
                   p.unit, p.street_number, p.street, p.suburb, p.postcode, p.plan_number, p.lot_number
            FROM inspection i JOIN property p ON p.id = i.property_id
+           JOIN property_status s ON s.property_id = p.id
+           LEFT JOIN campaign c ON c.id = i.campaign_id
            WHERE i.starts_at >= now() - interval '1 day' AND i.starts_at < now() + %(days)s * interval '1 day'
-             AND i.state <> 'cancelled'
+             AND i.state <> 'cancelled' AND s.status NOT IN ('ruled_out', 'missed_out')
+             AND (c.outcome IS NULL OR c.bought_by_us)
            UNION ALL
            SELECT c.sale_method, c.id, c.sale_method, 'planned', coalesce(c.auction_at, c.eoi_closes_at),
                   coalesce(c.auction_at, c.eoi_closes_at) + interval '30 minutes', p.id,
                   p.unit, p.street_number, p.street, p.suburb, p.postcode, p.plan_number, p.lot_number
            FROM campaign c JOIN property p ON p.id = c.property_id
-           WHERE c.outcome IS NULL AND coalesce(c.auction_at, c.eoi_closes_at) >= now() - interval '1 day'
+           JOIN property_status s ON s.property_id = p.id
+           WHERE c.outcome IS NULL AND s.status NOT IN ('ruled_out', 'missed_out')
+             AND coalesce(c.auction_at, c.eoi_closes_at) >= now() - interval '1 day'
              AND coalesce(c.auction_at, c.eoi_closes_at) < now() + %(days)s * interval '1 day'
            ORDER BY starts_at""",
         {"days": days},
@@ -373,6 +380,8 @@ def listing_update(property_id: UUID, body: ListingUpdateIn, person: Person, pre
     if preview:
         added["photos"], added["floorplans"] = len(body.photos), len(body.floorplans)
         return added
+    from .. import push
+    push.listing_changed(property_id, added["changes"], person)
     if body.photos or body.floorplans:
         save_photos_later(property_id, person, body.photos, body.floorplans)
     added["photos"], added["floorplans"] = len(body.photos), len(body.floorplans)

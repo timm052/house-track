@@ -42,6 +42,8 @@ services:
       VALHALLA_URL: ${VALHALLA_URL:-https://valhalla1.openstreetmap.de}
       # Free public geocoding fallback when G-NAF has no match; set to "" to turn off.
       NOMINATIM_URL: ${NOMINATIM_URL-https://nominatim.openstreetmap.org}
+      # Satellite photos: Esri's imagery with a free ArcGIS key (see .env.example); without one, their open tiles.
+      ARCGIS_API_KEY: ${ARCGIS_API_KEY:-}
       REGION: ${REGION:-vic}
       BLOB_DIR: /data/blobs
       BACKUP_DIR: /backups/db

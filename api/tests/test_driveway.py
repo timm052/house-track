@@ -206,3 +206,20 @@ def test_cancel_a_whole_day(client, people):
     assert r.status_code == 200 and r.json()["cancelled"] == 3 and sorted(r.json()["property_ids"]) == sorted(pids)
     left = {e["id"] for e in client.get("/api/inspections?days=10").json() if e["type"] == "inspection" and e["property_id"] in pids}
     assert left == {kept, other}
+
+
+def test_finished_houses_leave_the_calendar(client, people):
+    """Ruled out: its inspections and auction drop off the calendar, and come back if it's back in play."""
+    from datetime import datetime, timedelta, timezone
+    a = as_(people["a"])
+    soon = (datetime.now(timezone.utc) + timedelta(days=2)).replace(microsecond=0)
+    pid = client.post("/api/properties", headers=a, json={
+        "address": {"street_number": "8", "street": "Finished Way", "suburb": "Mitcham", "postcode": "3132"},
+        "campaign": {"sale_method": "auction", "auction_at": (soon + timedelta(days=1)).isoformat()}}).json()["id"]
+    client.post(f"/api/properties/{pid}/inspections", headers=a, json={"starts_at": soon.isoformat()})
+    mine = lambda: sorted(e["type"] for e in client.get("/api/inspections?days=10").json() if e["property_id"] == pid)
+    assert mine() == ["auction", "inspection"]
+    client.post(f"/api/properties/{pid}/status", headers=a, json={"status": "ruled_out"})
+    assert mine() == []
+    client.post(f"/api/properties/{pid}/status", headers=a, json={"status": "interested"})
+    assert mine() == ["auction", "inspection"]

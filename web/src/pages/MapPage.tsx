@@ -22,6 +22,9 @@ import HouseSidePanel, { comparableLabel, type StationRoute, useComparables } fr
 const MELBOURNE: [number, number] = [145.0, -37.81];
 // Free satellite imagery (Esri World Imagery, street-level detail across Melbourne).
 const SATELLITE = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+// With the household's free ArcGIS key (ARCGIS_API_KEY on the server), the same imagery through Esri's keyed service.
+const satelliteTiles: Promise<string> = fetch("/api/map-config").then((r) => r.json())
+  .then((c: { satellite?: string | null }) => c.satellite || SATELLITE).catch(() => SATELLITE);
 // Our layers that go under the basemap's labels, so street and place names stay readable over them.
 const UNDER_LABELS = new Set(["hillshade", "contour-lines", "contour-labels"]);
 /** A basemap layer the satellite photo replaces: its land, water, buildings and roads (not its labels, which stay on
@@ -811,6 +814,9 @@ function priceKey(ramp: string[], breaks: number[], prices: number[]): [string, 
 function addBaseLayers(map: maplibregl.Map, basemapLayers: Set<string>) {
   map.addSource("satellite", { type: "raster", tiles: [SATELLITE], tileSize: 256, maxzoom: 19,
     attribution: "Imagery: Esri, Vantor, Earthstar Geographics" });
+  satelliteTiles.then((url) => {
+    if (url !== SATELLITE) (map.getSource("satellite") as maplibregl.RasterTileSource | undefined)?.setTiles([url]);
+  });
   map.addSource("dem", { type: "raster-dem", encoding: "terrarium", tiles: [dem.sharedDemProtocolUrl], tileSize: 256, maxzoom: 15,
     attribution: TERRAIN_ATTRIBUTION });
   map.addSource("contours", { type: "vector", tiles: [contourTiles.coarse], maxzoom: 15 });

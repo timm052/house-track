@@ -1,5 +1,5 @@
 // The This week tab: what's waiting on you (outcomes to record, statuses out of step, verdicts after an
-// inspection), what changed since you last looked, where you two disagree, and the calendar. Built from the
+// inspection), what changed since you last looked, the houses you all said yes to, where you disagree, and the calendar. Built from the
 // same rows as the house list, so it works offline too.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -56,6 +56,19 @@ export default function ThisWeek() {
   // Nothing to argue about on a house we're done with, or one whose sale is over.
   const disagree = findDisagreements(rows.filter((r) => !CLOSED.includes(r.status as Status) && !saleEnded(r.outcome, r.bought_by_us)), active);
   const shownOutOfStep = outOfStep.slice(0, allNeeds ? undefined : Math.max(0, 5 - needsOutcome.length));
+  // Matches: everyone's latest verdict (after inspecting, else before) is yes. Needs two or more people.
+  const latestVerdict = (r: OverviewRow, id: string) => r[`v:${id}:post`] ?? r[`v:${id}:pre`];
+  const matches = active.length < 2 ? [] : rows.filter((r) => !CLOSED.includes(r.status as Status) && !saleEnded(r.outcome, r.bought_by_us)
+    && active.every((p) => latestVerdict(r, p.id) === "yes"));
+  async function addToInspect(r: OverviewRow) {
+    setError(null);
+    try {
+      await api(`/api/properties/${r.id}/inspect-list`, { method: "PUT" });
+      queryClient.invalidateQueries({ queryKey: ["overview"] });
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
 
   function markSeen() { const today = isoDay(new Date()); setSeen(today); store(seenKey, today); }
   async function fixStatus(r: OverviewRow) {
@@ -115,6 +128,21 @@ export default function ThisWeek() {
             </ul>
           )}
         </div>
+
+        {matches.length > 0 && (
+          <div className="card">
+            <h2>{active.length === 2 ? "You both said yes" : "Everyone said yes"}</h2>
+            <ul className="week-list">
+              {matches.map((r) => (
+                <li key={r.id}>
+                  <span className="grow">{addr(r)}</span>
+                  {r.to_inspect ? <span className="pill">To inspect</span>
+                    : <button className="small-btn" onClick={() => addToInspect(r)}>Add to To inspect</button>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div className="card">
           <h2>Where we disagree</h2>

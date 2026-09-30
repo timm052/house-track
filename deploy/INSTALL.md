@@ -97,6 +97,17 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.6
+
+- **Notifications** on your phone or computer: price guide changes, new inspection times, under offer and sold, and houses the other person shortlists. Turn them on in **Settings → Notifications**, on each device. On iPhone, add House Track to the Home Screen and open it from there first.
+- **This week** shows the houses you both said yes to, with a button to add each to To inspect.
+- The planner starts from your **To inspect** houses, and lists the ones not open that day with their next inspection.
+- Houses you've ruled out, or that sold to someone else, drop off the calendar and the phone calendar feed.
+- A sold house without a price keeps being checked by the weekly refresh for two weeks, so a price the agent adds later is picked up.
+- The **Rate** button is always on the Houses page.
+- Optional: a free ArcGIS key for the satellite photos. Add `ARCGIS_API_KEY=` to `.env` (see `.env.example`).
+- Updating adds one new table (backed up first, as usual).
+
 ### 0.4.5
 
 - **Rate** new houses one at a time from the Houses page: swipe right for yes, left for no, down for maybe, and up to shortlist. Add a comment if you like. It shows only houses you haven't rated yet.

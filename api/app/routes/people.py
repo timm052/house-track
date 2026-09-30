@@ -48,7 +48,8 @@ def update_person(person_id: UUID, body: PersonPatch, _: Person) -> dict:
 # everywhere are handed to whoever deletes them; anything not listed here stops the delete, so a new
 # reference added later can't be silently mishandled.
 REMOVE_WITH_PERSON = {("opinion", "person_id"), ("criterion_score", "person_id"), ("area", "owner_id"),
-                      ("inspection_attendee", "person_id")}  # their own verdicts, scores, areas, attendance
+                      ("inspection_attendee", "person_id"),  # their own verdicts, scores, areas, attendance
+                      ("push_subscription", "person_id")}  # and their devices' notifications
 CLEAR = {("place", "person_id"), ("audit_log", "person_id")}  # "Sam's work" becomes a shared place; the log keeps the rest
 HAND_OVER = {("property", "manual_location_by"), ("checklist_item", "done_by"), ("shared_link", "shared_by")}
 

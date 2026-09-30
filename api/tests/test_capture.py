@@ -314,3 +314,22 @@ def test_share_from_a_phone_adds_the_house_or_keeps_the_link(client, people, mon
     assert other["status"] == "saved" and client.delete(f"/api/shared-links/{link['id']}", headers=a).status_code == 204
     assert not [x for x in client.get("/api/shared-links").json() if x["url"].endswith("145678910")]
     assert client.post("/api/share", headers=a, json={"text": "no link here"}).json()["status"] == "no_link"
+
+
+def test_a_sold_price_that_comes_later(client, people):
+    """Sold with the price held back: the house stays on the refresh list for two weeks, and the price is filled in
+    when the listing shows it."""
+    a = as_(people["a"])
+    url = "https://www.domain.com.au/3-late-lane-mitcham-vic-3132-2029990033"
+    pid = client.post("/api/properties", headers=a, json={
+        "address": {"street_number": "3", "street": "Late Lane", "suburb": "Mitcham", "postcode": "3132"},
+        "campaign": {"sale_method": "private_sale", "url": url}}).json()["id"]
+    client.post(f"/api/properties/{pid}/listing-update", headers=a, json={"listing_status": "sold"})
+    targets = lambda: [t["id"] for t in client.get("/api/listing/targets").json()]
+    assert pid in targets()
+    r = client.post(f"/api/properties/{pid}/listing-update", headers=a,
+                    json={"listing_status": "sold", "listing_price_text": "Sold for $990,000", "sold_price_aud": 990_000}).json()
+    assert "Sold price: $990k" in r["changes"]
+    row = next(x for x in client.get("/api/overview").json()["rows"] if x["id"] == pid)
+    assert (row["outcome"], row["sold_price_aud"]) == ("sold", 990_000)
+    assert pid not in targets()

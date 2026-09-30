@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from . import db, gnaf
 from .geo_services import Nominatim, Transitous, Valhalla
-from .routes import campaigns, decide, driveway, geo, markup, money, overlays, overview, people, properties, tags
+from .routes import campaigns, decide, driveway, geo, markup, money, overlays, overview, people, properties, push, tags
 from .worker import Worker
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -50,6 +50,7 @@ app.include_router(driveway.router)
 app.include_router(money.router)
 app.include_router(overlays.router)
 app.include_router(decide.router)
+app.include_router(push.router)
 app.include_router(tags.router)
 app.include_router(markup.router)
 

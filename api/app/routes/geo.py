@@ -380,3 +380,12 @@ def isochrone(lon: float, lat: float, minutes: int = Query(ge=5, le=60), mode: L
             except OSError as e:
                 raise HTTPException(502, f"The routing service didn't answer ({e}). Try again in a minute.") from None
         return _areas[key]
+
+
+@router.get("/map-config")
+def map_config() -> dict:
+    """Where the map's satellite photos come from: Esri's keyed imagery service with the household's free ArcGIS key
+    (ARCGIS_API_KEY) when there is one; otherwise None, and the map uses Esri's open tiles."""
+    key = os.environ.get("ARCGIS_API_KEY", "").strip()
+    return {"satellite": "https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?token="
+                         + key if key else None}

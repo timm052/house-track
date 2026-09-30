@@ -97,6 +97,11 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.7
+
+- **Rate** is its own tab, next to Houses, with a count of the houses you haven't rated yet.
+- Rate's photos end with the house's floor plans, shown whole.
+
 ### 0.4.6
 
 - **Notifications** on your phone or computer: price guide changes, new inspection times, under offer and sold, and houses the other person shortlists. Turn them on in **Settings → Notifications**, on each device. On iPhone, add House Track to the Home Screen and open it from there first.

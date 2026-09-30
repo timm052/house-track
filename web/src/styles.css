@@ -1253,8 +1253,6 @@ a.plan-open:active { transform: scale(0.98); transition-duration: 0ms; }
 @media (max-width: 480px) { .houses-dir .label { display: none; } }
 /* Six places a house can be: on phones they scroll sideways rather than squeeze. */
 @media (max-width: 600px) { .houses-stage { justify-content: flex-start; } .houses-stage button { flex: none; padding: 0 11px; } }
-.rate-launch .icon-btn { display: inline-flex; align-items: center; gap: 6px; }
-.rate-launch .count-badge { margin-left: 2px; }
 
 /* Grouped by suburb: streets flow side by side, each taking room for its houses (--n), with a divider between them.
    The divider is each block's left edge; the one at the start of a line is tucked outside the clipped edge. */
@@ -1342,3 +1340,19 @@ a.plan-open:active { transform: scale(0.98); transition-duration: 0ms; }
 .plan-only { margin: 0 0 10px; }
 .plan-not-today { margin-top: 12px; }
 .plan-not-today h3 { margin: 0 0 6px; font-size: 0.95rem; }
+
+/* The count on the Rate tab. */
+.topbar nav a .nav-count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 4px; padding: 0 5px;
+  border-radius: 999px; background: var(--brick); color: #fff; font-size: 0.7rem; font-weight: 700; line-height: 1; vertical-align: 1px; }
+@media (max-width: 1100px) {
+  .topbar nav a .nav-count { position: absolute; top: 0; right: 0; min-width: 15px; height: 15px; margin: 0; padding: 0 3px; font-size: 0.62rem; }
+}
+
+/* Rate: a floor plan is shown whole on white, labelled, with the address kept clear of it. */
+.rate-photo.plan { background: #fff; }
+.rate-photo.plan img { object-fit: contain; padding: 8px 8px 44px; }
+.rate-photo.plan .rate-dots span { background: rgb(0 0 0 / 0.18); }
+.rate-photo.plan .rate-dots span.on { background: rgb(0 0 0 / 0.6); }
+.rate-plan-tag { position: absolute; top: 18px; right: 10px; padding: 2px 8px; border-radius: 999px; background: rgb(0 0 0 / 0.6);
+  color: #fff; font-size: 0.75rem; font-weight: 650; }
+.rate-caption.on-plan { background: linear-gradient(transparent, rgb(0 0 0 / 0.75) 45%); padding-top: 18px; }

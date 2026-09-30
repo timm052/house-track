@@ -10,14 +10,14 @@ import Driveway from "./pages/Driveway";
 import Outbox from "./pages/Outbox";
 import Places from "./pages/Places";
 import PropertyDetail from "./pages/PropertyDetail";
-import Rate from "./pages/Rate";
+import Rate, { RateCount } from "./pages/Rate";
 import PropertyList from "./pages/PropertyList";
 import QuickAdd from "./pages/QuickAdd";
 import Settings from "./pages/Settings";
 import Setup from "./pages/Setup";
 import Refresh from "./pages/Refresh";
 import { usePersons } from "./people";
-import { ArrowUpDown, CalendarDays, DoorOpen, House, Map as MapIcon, MapPin, Monitor, Moon, Settings as SettingsIcon, Sheet, Sun, TrendingUp } from "lucide-react";
+import { ArrowUpDown, CalendarDays, DoorOpen, Heart, House, Map as MapIcon, MapPin, Monitor, Moon, Settings as SettingsIcon, Sheet, Sun, TrendingUp } from "lucide-react";
 import { setTheme, useThemeChoice, type ThemeChoice } from "./theme";
 import Plan from "./pages/Plan";
 
@@ -33,6 +33,7 @@ const WIDE = [/^\/$/, /^\/week/, /^\/p\//, /^\/trends/, /^\/compare/, /^\/plan/]
 /** The tabs, in the order of a house hunt: the list, what's on, where things are, then the tools. */
 const NAV: { to: string; label: string; icon: React.ReactNode; desktopOnly?: boolean; end?: boolean }[] = [
   { to: "/", label: "Houses", icon: <House />, end: true },
+  { to: "/rate", label: "Rate", icon: <Heart /> },
   { to: "/week", label: "This week", icon: <CalendarDays /> },
   { to: "/map", label: "Map", icon: <MapIcon /> },
   { to: "/overview", label: "Grid", icon: <Sheet />, desktopOnly: true },
@@ -82,7 +83,7 @@ export default function App() {
         <nav aria-label="Main">
           {NAV.map(({ to, label, icon, desktopOnly, end }) => (
             <NavLink key={to} to={to} end={end} className={desktopOnly ? "desktop-only" : undefined} title={label} aria-label={label}>
-              {icon}<span className="nav-label">{label}</span>
+              {icon}<span className="nav-label">{label}</span>{to === "/rate" && <RateCount />}
             </NavLink>
           ))}
         </nav>

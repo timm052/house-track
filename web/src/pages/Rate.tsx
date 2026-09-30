@@ -21,6 +21,14 @@ export const unrated = (r: OverviewRow, personId: string) =>
   && !["ruled_out", "missed_out", "bought"].includes(String(r.status))
   && !saleEnded(r.outcome, r.bought_by_us) && listingState(r.listing_status) !== "sold";
 
+/** How many houses this person hasn't rated yet: the badge on the Rate tab. */
+export function RateCount() {
+  const { me } = usePeople();
+  const { data } = useQuery({ queryKey: ["overview"], queryFn: () => api<Overview>("/api/overview") });
+  const n = me ? (data?.rows ?? []).filter((r) => unrated(r, me.id)).length : 0;
+  return n > 0 ? <span className="nav-count" aria-label={`${n} to rate`}>{n}</span> : null;
+}
+
 const REDUCED_MOTION = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 const OUT_MS = REDUCED_MOTION ? 120 : 220;
 /** What a swipe does: a verdict, or shortlisting (a yes, plus the shortlist and To inspect). */
@@ -177,14 +185,22 @@ function RateCard({ r, cols, people, me, behind, leaving, onDecide }: {
   behind?: boolean; leaving?: Pick | null; onDecide?: (s: Pick) => void;
 }) {
   const detail = useQuery({ queryKey: ["property", r.id], queryFn: () => api<PropertyDetail>(`/api/properties/${r.id}`), enabled: !behind });
-  const photos = useMemo(() => {
-    const all = (detail.data?.attachments ?? []).filter((a) => a.kind === "photo" && a.sha256 && a.mime_type?.startsWith("image/"));
-    const listing = (a: (typeof all)[number]) => a.caption === "From the listing";
-    return all.sort((a, b) => Number(b.id === r.cover_id) - Number(a.id === r.cover_id) || Number(listing(b)) - Number(listing(a))
-      || a.created_at.localeCompare(b.created_at)).map((a) => a.id).slice(0, 12);
+  // The photos (cover first, then the listing's), then the floor plans: shown whole, and a PDF one as a button.
+  type Slide = { id: string; plan: boolean; pdf: boolean };
+  const slides = useMemo((): Slide[] => {
+    const kept = (detail.data?.attachments ?? []).filter((a) => a.sha256);
+    const photos = kept.filter((a) => a.kind === "photo" && a.mime_type?.startsWith("image/"));
+    const listing = (a: (typeof photos)[number]) => a.caption === "From the listing";
+    const plans = kept.filter((a) => a.kind === "floorplan" && (a.mime_type?.startsWith("image/") || a.mime_type === "application/pdf"));
+    return [
+      ...photos.sort((a, b) => Number(b.id === r.cover_id) - Number(a.id === r.cover_id) || Number(listing(b)) - Number(listing(a))
+        || a.created_at.localeCompare(b.created_at)).slice(0, 12).map((a) => ({ id: a.id, plan: false, pdf: false })),
+      ...plans.map((a) => ({ id: a.id, plan: true, pdf: a.mime_type === "application/pdf" })),
+    ];
   }, [detail.data, r.cover_id]);
-  const shown = photos.length ? photos : r.cover_id ? [String(r.cover_id)] : [];
+  const shown: Slide[] = slides.length ? slides : r.cover_id ? [{ id: String(r.cover_id), plan: false, pdf: false }] : [];
   const [photo, setPhoto] = useState(0);
+  const slide = shown[Math.min(photo, shown.length - 1)];
 
   const el = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState({ x: 0, y: 0, on: false });
@@ -264,14 +280,16 @@ function RateCard({ r, cols, people, me, behind, leaving, onDecide }: {
   return (
     <div ref={el} className={`card rate-card ${behind ? "behind" : ""}`} style={style}
       onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} aria-hidden={behind}>
-      <div className="rate-photo">
-        {shown.length > 0 ? <img src={`/api/attachments/${shown[Math.min(photo, shown.length - 1)]}/file`} alt="" draggable={false} />
-          : <div className="rate-nophoto muted">No photo yet</div>}
+      <div className={`rate-photo ${slide?.plan ? "plan" : ""}`}>
+        {!slide ? <div className="rate-nophoto muted">No photo yet</div>
+          : slide.pdf ? <div className="rate-nophoto"><Link to={`/p/${r.id}/plan/${slide.id}`}><button>Open the floor plan</button></Link></div>
+          : <img src={`/api/attachments/${slide.id}/file`} alt={slide.plan ? "Floor plan" : ""} draggable={false} />}
+        {slide?.plan && <span className="rate-plan-tag">Floor plan</span>}
         {shown.length > 1 && (
-          <div className="rate-dots" aria-hidden>{shown.map((id, i) => <span key={id} className={i === photo ? "on" : ""} />)}</div>
+          <div className="rate-dots" aria-hidden>{shown.map((s, i) => <span key={s.id} className={i === photo ? "on" : ""} />)}</div>
         )}
         {lean && <span className={`rate-stamp ${lean}`} style={{ opacity: strength }}>{STAMP[lean]}</span>}
-        <div className="rate-caption">
+        <div className={`rate-caption ${slide?.plan ? "on-plan" : ""}`}>
           <div className="rate-address">{String(r.address)}</div>
           <div className="small">{String(r.suburb)}</div>
         </div>

@@ -7,7 +7,6 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, whilePending } from "../api";
 import { isSold, LABEL, landArea, listingState, money, moneyRange, saleEnded } from "../format";
-import { unrated } from "./Rate";
 import SoldAgainst from "../SoldAgainst";
 import { STATUSES } from "../api";
 import { catalogue, display, type Column, type OverviewPlace, type OverviewRow } from "../overview/columns";
@@ -16,7 +15,7 @@ import FieldFilter, { fieldOffers } from "../overview/FieldFilter";
 import { usePeople } from "../people";
 import { CLOSED, STATUS_COLOUR, budgetTone, changeTone, minutesTone, soonTone, suburbClass, suburbSlots, tagStyle, useTagColours } from "../colour";
 import { ArrowDown, ArrowUp, Bath, BedDouble, CalendarDays, Camera, Car, ChevronDown, ChevronRight, Footprints, GraduationCap, LandPlot, MapPin,
-  PencilRuler, Plus, Scale, Heart, Search, SlidersHorizontal, TrainFront, TramFront, TriangleAlert } from "lucide-react";
+  PencilRuler, Plus, Scale, Search, SlidersHorizontal, TrainFront, TramFront, TriangleAlert } from "lucide-react";
 import { useNeeds } from "./ThisWeek";
 import { statusOutOfStep } from "../Outcome";
 import type { Outcome, Status } from "../api";
@@ -183,7 +182,6 @@ export default function PropertyList() {
   const [searchOpen, setSearchOpen] = useState(false);
   const takeOffer = (o: { add: () => void }) => { o.add(); setSearch(""); setSearchOpen(false); };
   const needs = useNeeds(data?.rows ?? [], me);
-  const toRate = me ? (data?.rows ?? []).filter((r) => unrated(r, me.id)).length : 0;
   // Inspected: someone has been to an inspection there, or given a verdict after one.
   const inspected = (r: OverviewRow) => ((r.attended_by as string[] | undefined)?.length ?? 0) > 0
     || persons.some((p) => r[`v:${p.id}:post`] != null);
@@ -244,8 +242,6 @@ export default function PropertyList() {
             </ul>
           )}
         </div>
-        <Link to="/rate" className="rate-launch" title={toRate ? `Rate new houses (${toRate})` : "Rate new houses"}>
-          <button className="icon-btn"><Heart /><span className="label">Rate</span>{toRate > 0 && <span className="count-badge">{toRate}</span>}</button></Link>
         <button className={`icon-btn ${comparing ? "on" : ""}`} aria-pressed={comparing != null} title="Pick houses to compare"
           onClick={() => setComparing(comparing ? null : [])}><Scale /><span className="label">Compare</span></button>
         <Link to="/add"><button className="primary"><Plus /> <span className="label">Add house</span></button></Link>

@@ -33,11 +33,11 @@ test.beforeEach(async ({ page }) => {
 
 const open = async (page: Page, path: string) => { await page.goto(path); await expect(page.locator("main")).toBeVisible(); };
 
-test("Houses lists the test house, with its tabs and the Rate button", async ({ page }) => {
+test("Houses lists the test house, with its tabs and the Rate tab", async ({ page }) => {
   await open(page, "/");
   await expect(page.getByRole("radio", { name: /In play/ })).toBeVisible();
   await expect(page.getByRole("radio", { name: /To inspect/ })).toBeVisible();
-  await expect(page.locator(".rate-launch")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Rate" })).toBeVisible();
   await page.getByRole("searchbox").fill(street);
   await expect(page.getByText(`1 ${street}`).first()).toBeVisible();
 });

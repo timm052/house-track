@@ -42,6 +42,17 @@ export default function CalendarSection() {
       setError((err as Error).message);
     }
   }
+  /** Not going to any of a day's inspections: all of them cancelled at once (auctions and EOIs stay, being the sale's). */
+  async function clearDay(date: Date, events: Event[]) {
+    setError(null);
+    const day = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    try {
+      await api("/api/inspections/cancel-day", { method: "POST", body: { day } });
+      for (const key of [["inspections"], ["overview"], ...events.map((e) => ["property", e.property_id])]) queryClient.invalidateQueries({ queryKey: key });
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
   const days = new Map<string, { date: Date; events: Event[] }>();
   for (const e of data) {
     const d = new Date(e.starts_at), k = dayKey(d);
@@ -61,7 +72,16 @@ export default function CalendarSection() {
       {!isPending && data.length === 0 && <div className="card empty">Nothing coming up. Add inspections from a house's page.</div>}
       {[...days.values()].map(({ date, events }) => (
         <div key={dayKey(date)} className="card">
-          <h3>{dayLabel(date)}</h3>
+          <div className="row cal-day-head">
+            <h3 className="grow">{dayLabel(date)}</h3>
+            {(() => {
+              const going = events.filter((e) => e.type === "inspection" && e.state !== "attended");
+              return going.length > 1 && (
+                <ConfirmButton className="link small" title="Cancel every inspection this day" label="Clear the day"
+                  question={`Cancel all ${going.length} inspections?`} yes="Clear the day" onConfirm={() => clearDay(date, going)} />
+              );
+            })()}
+          </div>
           <ul className="cal-list">
             {events.map((e) => {
               const sale = e.type === "auction" || e.type === "eoi";
@@ -86,7 +106,7 @@ export default function CalendarSection() {
       ))}
       <div className="card stack">
         <h2>In your phone's calendar</h2>
-        <p className="small muted" style={{ margin: 0 }}>Subscribe once and inspections, auctions and EOI closings appear in your calendar, with a reminder an hour before. It updates whenever your phone can reach House Track.</p>
+        <p className="small muted" style={{ margin: 0 }}>Inspections, auctions and EOI closings in your calendar, with a reminder an hour before.</p>
         <div className="row">
           <a href={`webcal://${feed}`}><button className="primary">Subscribe</button></a>
           <button onClick={() => navigator.clipboard?.writeText(`${location.protocol}//${feed}`)}>Copy link</button>

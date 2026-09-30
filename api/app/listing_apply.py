@@ -4,6 +4,7 @@ Idempotent, so the same listing can be captured again to pick up what changed: a
 photos already there are skipped, and a price guide is only added when it differs from the latest one.
 """
 
+import re
 from datetime import date, datetime
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -85,7 +86,7 @@ def refresh(conn: psycopg.Connection, property_id: UUID, body: ListingUpdateIn) 
     """A tracked house, captured again: apply the extras, record a new guide, sale method or date if it changed,
     and correct rooms and areas (see apply_details). Returns what it did, including `changes`, sentences for
     people, which the + House Track panel (as a preview) and the weekly refresh both show."""
-    live = conn.execute("""SELECT id, sale_method, listed_on, auction_at, eoi_closes_at FROM campaign
+    live = conn.execute("""SELECT id, sale_method, listed_on, auction_at, eoi_closes_at, listing_status FROM campaign
                            WHERE property_id = %s AND outcome IS NULL""", (property_id,)).fetchone()
     added = apply(conn, property_id, live and live["id"], body)
     added.update(guide=False, date=False, method=None, listed=False, details=[], differs=[])
@@ -105,7 +106,10 @@ def refresh(conn: psycopg.Connection, property_id: UUID, body: ListingUpdateIn) 
     if added["details"]:
         update_columns(conn, "property", property_id, {f: getattr(body, f) for f in added["details"]})
 
+    was_status = listing_state(live and live["listing_status"])
     if live is not None and (body.listing_status or body.listing_price_text):
+        if listing_state(body.listing_status) == "underoffer" and was_status != "underoffer":
+            changes.append("Now under offer")
         conn.execute("""UPDATE campaign SET listing_status = %s, listing_price_text = %s, listing_checked_at = now()
                         WHERE id = %s""", (body.listing_status, body.listing_price_text, live["id"]))
 
@@ -152,5 +156,30 @@ def refresh(conn: psycopg.Connection, property_id: UUID, body: ListingUpdateIn) 
         changes.append(f"{added['tags']} {'tag' if added['tags'] == 1 else 'tags'} added")
     if added["pinned"]:
         changes.append("Pinned from the listing's map position")
+    if live is not None and listing_state(body.listing_status) == "sold":
+        changes.append(record_sale(conn, property_id, live, body.sold_price_aud))
     added["changes"] = changes
     return added
+
+
+def listing_state(s: str | None) -> str:
+    """What a listing says about itself, whatever the spelling: "Under offer", "under_offer" → "underoffer"."""
+    return re.sub(r"[^a-z]", "", (s or "").lower())
+
+
+def record_sale(conn: psycopg.Connection, property_id: UUID, live: dict, price: int | None) -> str:
+    """The listing says it sold: record the outcome (with the price, when the listing shows it), so nobody has to.
+    Sold before an auction date still to come is "sold prior"; otherwise at auction, or plain sold for other methods.
+    If we were offering on it, the house moves to Sold too (bought is for a person to say)."""
+    now = datetime.now(MELBOURNE)
+    auction = live["sale_method"] == "auction" and live["auction_at"]
+    outcome = ("sold_prior" if auction and live["auction_at"] > now else "sold_at_auction" if auction else "sold")
+    sold_on = live["auction_at"].astimezone(MELBOURNE).date() if outcome == "sold_at_auction" else now.date()
+    conn.execute("UPDATE campaign SET outcome = %s, outcome_on = %s, sold_price_aud = %s WHERE id = %s",
+                 (outcome, sold_on, price, live["id"]))
+    status = conn.execute("SELECT status FROM property_status WHERE property_id = %s", (property_id,)).fetchone()
+    if status and status["status"] == "offering":
+        conn.execute("INSERT INTO status_event (property_id, status, reason) VALUES (%s, 'missed_out', 'The listing says it sold')",
+                     (property_id,))
+    return "Sold" + (f" for {money(price)}" if price else "") + ": recorded"
+

@@ -13,7 +13,7 @@ import { STATUS_COLOUR, changeTone, minutesTone, soonTone, suburbClass, tagStyle
 import { Checklist, Comparables, CostAt, PriceHistory } from "./MoneyExtras";
 import { Files, Inspections } from "./PropertyExtras";
 import { ScoresCard } from "./Decide";
-import { Bath, BedDouble, Building2, CalendarDays, CalendarPlus, Camera, Car, ChevronLeft, ChevronRight, CircleDollarSign, CircleHelp, DollarSign, FileText, Gavel, House, ImagePlus, LandPlot, Map as MapIcon, MapPin, Paperclip, PartyPopper, Scale, School, Tag, ThumbsDown, ThumbsUp, TrainFront, TramFront, Trash2, TriangleAlert } from "lucide-react";
+import { Bath, BedDouble, Building2, CalendarDays, CalendarPlus, Camera, Car, ChevronLeft, ChevronRight, CircleDollarSign, CircleHelp, DollarSign, DoorOpen, FileText, Gavel, House, ImagePlus, LandPlot, Map as MapIcon, MapPin, Paperclip, PartyPopper, Scale, School, Tag, ThumbsDown, ThumbsUp, TrainFront, TramFront, Trash2, TriangleAlert } from "lucide-react";
 import Commute from "../Commute";
 import ConfirmButton from "../ConfirmButton";
 import { OutcomeForm, outcomeStatus, statusOutOfStep } from "../Outcome";
@@ -56,7 +56,7 @@ export default function PropertyDetail() {
     },
   });
   if (isPending) return <p className="muted">Loading…</p>;
-  if (isError || !p) return <p className="error">Couldn't load this property. <Link to="/">Back to the list</Link></p>;
+  if (isError || !p) return <p className="error">Couldn't load this house. <Link to="/">Back to the list</Link></p>;
 
   const live = p.campaigns.find((c) => !c.outcome) ?? null;
   const past = p.campaigns.filter((c) => c.outcome);
@@ -236,12 +236,12 @@ function ListingPhoto({ p, compact = false }: { p: Detail; compact?: boolean }) 
   const [state, setState] = useState<{ busy: boolean; msg: string | null }>({ busy: false, msg: null });
   const links = p.campaigns.flatMap((c) => c.links);
   if (!links.length) return compact ? null : (
-    <p className="small muted">Add the listing link on the Price &amp; sale tab to fetch its main photo, or upload photos below.</p>
+    <p className="small muted">Add the listing link under Price &amp; sale to fetch its photo, or upload photos below.</p>
   );
   // Domain and realestate.com.au refuse server reads: their photos come in with the + House Track button.
   if (links.every((l) => l.portal === "domain" || l.portal === "rea")) return compact ? null : (
-    <p className="small muted">To add the listing's photos, open the listing and click <strong>+ House Track</strong> in your bookmarks
-      bar (<Link to="/settings#bookmarklets">set it up</Link>), or upload photos below.</p>
+    <p className="small muted">Use <strong>+ House Track</strong> on the listing to add its photos (<Link to="/settings#bookmarklets">set up</Link>),
+      or upload photos below.</p>
   );
   async function fetchIt() {
     setState({ busy: true, msg: null });
@@ -363,7 +363,7 @@ function Actions({ p, setTab }: { p: Detail; setTab: (t: Tab) => void }) {
       <Link to={`/map?pin=${p.id}`}><button><MapPin /> {p.lat == null ? "Set pin" : "Move pin"}</button></Link>
       <div className="actions-foot">
         <ConfirmButton label={<><Trash2 /> Delete house</>} yes="Delete it"
-          question="This deletes everything recorded about it. If you've ruled it out, change its status instead." onConfirm={remove} />
+          question="Delete this house and everything recorded about it? To keep its history, rule it out instead." onConfirm={remove} />
         {error && <p className="error small">{error}</p>}
       </div>
     </div>
@@ -438,7 +438,7 @@ function AtAGlance({ p, c, setTab }: { p: Detail; c: Campaign | null; setTab: (t
   return (
     <div className="card">
       <h2>At a glance</h2>
-      {items.length === 0 && <p className="small muted">Travel times, school zones and planning appear here once the house is on the map.</p>}
+      {items.length === 0 && <p className="small muted">Travel times, schools and planning show once the house is on the map.</p>}
       <ul className="glance">
         {items.map((it, i) => (
           <li key={i}><span aria-hidden>{it.icon}</span><span className="grow">{it.text}</span>
@@ -523,7 +523,7 @@ function VerdictHistory({ p }: { p: Detail }) {
   return (
     <div className="card">
       <h2>Every verdict</h2>
-      {list.length === 0 && <p className="small muted">No verdicts yet. Record one in the panel on the right.</p>}
+      {list.length === 0 && <p className="small muted">No verdicts yet.</p>}
       <ul className="history small">
         {list.map((o) => (
           <li key={o.id}>
@@ -564,7 +564,7 @@ function About({ p }: { p: Detail }) {
   return (
     <div className="card stack">
       <div className="row"><h2 className="grow">About</h2><button className="link" onClick={() => setEditing(!editing)}>{editing ? "Close" : "Edit details"}</button></div>
-      {p.notes ? <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{p.notes}</p> : <p className="muted small" style={{ margin: 0 }}>No notes yet. Use Edit details to add some.</p>}
+      {p.notes ? <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{p.notes}</p> : <p className="muted small" style={{ margin: 0 }}>No notes.</p>}
       {p.owners_corp_fees_aud_pa != null && <div className="small">Owners corp {money(p.owners_corp_fees_aud_pa)} a year</div>}
       <TagEditor p={p} />
       {editing && <EditProperty p={p} onDone={() => setEditing(false)} />}
@@ -685,6 +685,10 @@ function StatusCard({ p, bare = false }: { p: Detail; bare?: boolean }) {
           {STATUSES.map((s) => <option key={s} value={s}>{LABEL.status[s]}</option>)}
         </select>
       </label>
+      <button className={`inspect-toggle ${p.to_inspect ? "on" : ""}`} aria-pressed={p.to_inspect}
+        title={p.to_inspect ? "Remove from To inspect" : "Add to To inspect"}
+        onClick={() => write.mutate({ path: `/api/properties/${p.id}/inspect-list`, method: p.to_inspect ? "DELETE" : "PUT" })}>
+        <DoorOpen /> {p.to_inspect ? "On To inspect" : "Add to To inspect"}</button>
       {write.error && <p className="error small">{(write.error as Error).message}</p>}
       {ended && statusOutOfStep(ended.outcome, ended.bought_by_us, p.status) && (
         <p className="small tone-warn" style={{ margin: 0 }}>
@@ -720,7 +724,7 @@ function WhereAndGettingAround({ p }: { p: Detail }) {
   else where = "Pinned from an OpenStreetMap search. Check it's right.";
   return (
     <div className="card stack">
-      <h2>Where and getting around</h2>
+      <h2>Location and transport</h2>
       <div className="small">{where}</div>
       <div className="row">
         <Link to={`/map?pin=${p.id}`}><button>{p.lat == null ? "Set pin on map" : "Move pin"}</button></Link>
@@ -754,7 +758,7 @@ function SchoolsAndPlanning({ p }: { p: Detail }) {
           {o.label}
         </div>
       ))}
-      <div className="small muted">From planning and school zone data as at the last setup. Confirm with a planning certificate.</div>
+      <div className="small muted">Check with a planning certificate before relying on this.</div>
     </div>
   );
 }
@@ -790,6 +794,17 @@ function Opinions({ p }: { p: Detail }) {
       setQueuedMsg((e as Error).message);
     }
   }
+  /** Deleting: a whole verdict for a stage (its history too), or one entry from the history. */
+  async function remove(path: string) {
+    try {
+      await api(path, { method: "DELETE" });
+      setQueuedMsg(null);
+    } catch (e) {
+      setQueuedMsg((e as Error).message);
+    }
+    queryClient.invalidateQueries({ queryKey: ["property", p.id] });
+    queryClient.invalidateQueries({ queryKey: ["overview"] });
+  }
 
   return (
     <div className="card stack">
@@ -802,9 +817,12 @@ function Opinions({ p }: { p: Detail }) {
             {(["pre_inspection", "post_inspection"] as const).filter((s) => current(person.id, s)).map((s) => {
               const o = current(person.id, s);
               return (
-                <div key={s} className="small">
-                  {LABEL.stage[s]}:{" "}
-                  {o ? <><span className={`pill ${o.stance}`}>{LABEL.stance[o.stance]}</span> {o.note}</> : <span className="muted">—</span>}
+                <div key={s} className="small opinion-line">
+                  <span>{LABEL.stage[s]}:{" "}
+                    {o ? <><span className={`pill ${o.stance}`}>{LABEL.stance[o.stance]}</span> {o.note}</> : <span className="muted">—</span>}</span>
+                  <ConfirmButton className="link icon-btn opinion-delete" title="Delete this verdict" label={<Trash2 aria-label="Delete" />}
+                    question={`Delete ${person.id === me?.id ? "your" : `${person.display_name}'s`} verdict?`} yes="Delete"
+                    onConfirm={() => remove(`/api/properties/${p.id}/opinions?person_id=${person.id}&stage=${s}`)} />
                 </div>
               );
             })}
@@ -818,7 +836,7 @@ function Opinions({ p }: { p: Detail }) {
         <div className="segmented" role="radiogroup" aria-label="When">
           {(["pre_inspection", "post_inspection"] as const).map((s) => (
             <button key={s} role="radio" aria-checked={stage === s} className={stage === s ? "on" : ""} onClick={() => setStage(s)}>
-              {s === "pre_inspection" ? "Before inspecting" : "After: pursue to buy?"}</button>
+              {s === "pre_inspection" ? "Before inspecting" : "After inspecting"}</button>
           ))}
         </div>
         <textarea placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
@@ -842,6 +860,8 @@ function Opinions({ p }: { p: Detail }) {
                 {byId.get(o.person_id)?.display_name} · {LABEL.stageShort[o.stage]}{" "}
                 <span className={`pill ${o.stance}`}>{LABEL.stance[o.stance]}</span> · {when(o.recorded_at)}
                 {o.created_by !== o.person_id && <span className="muted"> (entered by {byId.get(o.created_by)?.display_name})</span>}
+                <ConfirmButton className="link icon-btn opinion-delete" title="Delete this entry" label={<Trash2 aria-label="Delete" />}
+                  question="Delete this entry?" yes="Delete" onConfirm={() => remove(`/api/opinions/${o.id}`)} />
                 {o.note && <div>{o.note}</div>}
               </li>
             ))}
@@ -928,7 +948,7 @@ function SaleTab({ p, c, showChart }: { p: Detail; c: Campaign; showChart: boole
       </div>
           <div className="card">
             <h2>Our numbers</h2>
-            <p className="small muted" style={{ marginTop: 0 }}>Shared between you. Every change is kept.</p>
+            <p className="small muted" style={{ marginTop: 0 }}>Shared. Every change is kept.</p>
             <div className="numbers">
               {(["expected_sale", "walk_away"] as const).map((k) => {
                 const j = latest(k), all = c.judgements.filter((x) => x.kind === k);
@@ -1096,7 +1116,7 @@ function AddGuide({ propertyId, campaignId }: { propertyId: string; campaignId: 
           <label>To<input placeholder="1.3m" value={high} onChange={(e) => setHigh(e.target.value)} /></label>
         </div>
         {source === "price_statement" && <label>Suburb median<input value={median} onChange={(e) => setMedian(e.target.value)} /></label>}
-        <label>Date seen (leave blank for today)<input type="date" value={seen} onChange={(e) => setSeen(e.target.value)} /></label>
+        <label>Date (defaults to today)<input type="date" value={seen} onChange={(e) => setSeen(e.target.value)} /></label>
         <input placeholder="Note, e.g. &quot;vendor wants 1.3+&quot;" value={note} onChange={(e) => setNote(e.target.value)} />
         {write.error && <p className="error small">{(write.error as Error).message}</p>}
         <button
@@ -1176,7 +1196,7 @@ function RecordOutcome({ propertyId, c }: { propertyId: string; c: Campaign }) {
   const due = !!c.listing_status || (!!(c.auction_at ?? c.eoi_closes_at) && new Date((c.auction_at ?? c.eoi_closes_at)!).getTime() < Date.now());
   return (
     <details open={due}>
-      <summary>{due ? <strong>How did it end? Record the outcome</strong> : "Record outcome"}</summary>
+      <summary>{due ? <strong>Record the outcome</strong> : "Record outcome"}</summary>
       <OutcomeForm propertyId={propertyId} campaignId={c.id} saleMethod={c.sale_method} status={p?.status ?? "watching"}
         latestStatusId={p?.status_history[0]?.id ?? null} listingStatus={c.listing_status} listingPriceText={c.listing_price_text} />
     </details>

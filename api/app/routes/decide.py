@@ -169,12 +169,12 @@ def share(body: ShareIn, person: Person) -> dict:
                     "message": f"Already in House Track: {display(Address(**{k: parts.get(k) for k in ('unit', 'street_number', 'street', 'suburb', 'postcode')}))}"}
         address = display(Address(**{k: parts.get(k) for k in ("unit", "street_number", "street", "suburb", "postcode")}))
         return {"status": "added", "property_id": str(created["id"]),
-                "message": f"Added {address}. Rooms, price and photos arrive with the weekly refresh."}
+                "message": f"Added {address}."}
     with tx(person) as conn:
         conn.execute("""INSERT INTO shared_link (url, shared_by) VALUES (%s, %s)
                         ON CONFLICT (url) DO UPDATE SET shared_at = now(), shared_by = EXCLUDED.shared_by, dismissed_at = NULL""",
                      (url, person))
-    return {"status": "saved", "message": "Link saved. It has no address, so open House Track to finish adding it."}
+    return {"status": "saved", "message": "Link saved. Open House Track to finish adding it."}
 
 
 @router.get("/shared-links")
@@ -218,8 +218,8 @@ def fetch_page(url: str) -> str:
         with urlopen(req, timeout=15) as r:
             return r.read(3_000_000).decode("utf-8", errors="replace")
     except (HTTPError, URLError, TimeoutError) as e:
-        raise HTTPException(502, f"The listing site wouldn't let House Track read the page ({getattr(e, 'code', None) or 'no response'}). "
-                                 "Click + House Track on the listing to add its photo.") from None
+        raise HTTPException(502, f"The listing site blocked the request ({getattr(e, 'code', None) or 'no response'}). "
+                                 "Use + House Track on the listing instead.") from None
 
 
 # ─── weekly refresh: the "Refresh from Domain" bookmarklet ───────────────
@@ -281,7 +281,7 @@ def refresh_one(body: RefreshIn, person: Person) -> dict:
         listed_on=got.get("listed_on"),
         **{f: got.get(f) for f, _ in listing_apply.DETAILS}, apply_details=False,  # unattended: report, don't overwrite
         fill_missing=body.fill_missing,
-        listing_status=got.get("listing_status"), listing_price_text=got.get("price_text"),
+        listing_status=got.get("listing_status"), listing_price_text=got.get("price_text"), sold_price_aud=got.get("sold_price_aud"),
     )
     with tx(person) as conn:
         added = listing_apply.refresh(conn, body.property_id, update)
@@ -297,8 +297,9 @@ def refresh_one(body: RefreshIn, person: Person) -> dict:
                 added["changes"].append(f"{len(photos)} {'photo' if len(photos) == 1 else 'photos'} from the listing")
             if plans:
                 added["changes"].append("Floor plan from the listing")
-    status = (got.get("listing_status") or "").replace("_", "").lower()
-    flag = OFF_MARKET.get(status)
+    # Sold and under offer are recorded above; taken down or withdrawn still need a person to say how it ended.
+    status = listing_apply.listing_state(got.get("listing_status"))
+    flag = OFF_MARKET.get(status) if status not in ("sold", "underoffer") else None
     return {"property_id": str(body.property_id), "changes": added["changes"], "differs": added["differs"],
             "price_text": got.get("price_text"),
             "flag": f"{flag}: check the outcome and update the status." if flag else None}

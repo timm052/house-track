@@ -140,7 +140,8 @@ def test_weekly_refresh_targets_and_updates(client, people, monkeypatch):
     assert "Bedrooms: 3" in r["changes"] and "Land: 650 m²" in r["changes"] and "2 photos from the listing" in r["changes"]
     assert fetched == [mine_img.format(n=2), mine_img.format(n=1)]  # in the listing's order
     assert any(ch.startswith("1 new inspection time: ") for ch in r["changes"])
-    assert "Agents: Pat Agent, Sam Seller" in r["changes"] and r["flag"].startswith("Under offer")
+    # Under offer is news, not a job: it's said once, and the house shows in Under offer.
+    assert "Agents: Pat Agent, Sam Seller" in r["changes"] and "Now under offer" in r["changes"] and r["flag"] is None
     assert "Listed 10 Sep 2026" in r["changes"]  # added from a link with no date: now days listed can be counted
     assert client.get(f"/api/properties/{pid}").json()["campaigns"][0]["listed_on"] == "2026-09-10"
     again = client.post("/api/listing/refresh", headers=a, json={"property_id": pid, "url": url, "status_code": 200,
@@ -217,9 +218,9 @@ def test_update_preview_and_details(client, people):
     assert client.get(f"/api/properties/{pid}").json()["land_m2"] == 10886
 
 
-def test_sold_listing_asks_for_the_outcome(client, people):
-    """A sold listing's price is the sale price, never a new guide; the campaign remembers the listing said sold,
-    and the house is flagged as needing its outcome recorded."""
+def test_sold_listing_records_the_outcome(client, people):
+    """A sold listing's price is the sale price, never a new guide; the sale is recorded from it with no one
+    entering it, and a house we were offering on moves to Sold."""
     sold = {"props": {"pageProps": {"componentProps": {"listingSummary": {
         "stats": [], "status": "sold", "title": "Sold for $1,250,000"}}}}}
     got = extract(URL, "", next_data=json.dumps(sold))
@@ -229,13 +230,24 @@ def test_sold_listing_asks_for_the_outcome(client, people):
     pid = client.post("/api/properties", headers=as_(a), json={
         "address": {"street_number": "8", "street": "Sold Street", "suburb": "Mitcham", "postcode": "3132"},
         "campaign": {"sale_method": "private_sale"}}).json()["id"]
+    assert client.post(f"/api/properties/{pid}/status", headers=as_(a), json={"status": "offering"}).status_code == 201
     row = lambda: next(r for r in client.get("/api/overview").json()["rows"] if r["id"] == pid)
     assert row()["needs_outcome"] is False
     r = client.post(f"/api/properties/{pid}/listing-update", headers=as_(a),
-                    json={"listing_status": "sold", "listing_price_text": "Sold for $1,250,000"})
-    assert r.status_code == 200 and r.json()["guide"] is False
+                    json={"listing_status": "sold", "listing_price_text": "Sold for $1,250,000", "sold_price_aud": 1_250_000})
+    assert r.status_code == 200 and r.json()["guide"] is False and "Sold for $1.25m: recorded" in r.json()["changes"]
     got = row()
-    assert got["needs_outcome"] is True and got["listing_status"] == "sold" and got["listing_price_text"] == "Sold for $1,250,000"
+    assert got["needs_outcome"] is False and got["listing_status"] == "sold" and got["listing_price_text"] == "Sold for $1,250,000"
+    assert (got["outcome"], got["sold_price_aud"], got["status"]) == ("sold", 1_250_000, "missed_out")
+
+    # An auction that sold before its date is "sold prior"; a house we only watched keeps its status.
+    later = (datetime.now(MELBOURNE) + timedelta(days=10)).isoformat()
+    pid = client.post("/api/properties", headers=as_(a), json={
+        "address": {"street_number": "10", "street": "Sold Street", "suburb": "Mitcham", "postcode": "3132"},
+        "campaign": {"sale_method": "auction", "auction_at": later}}).json()["id"]
+    assert client.post(f"/api/properties/{pid}/listing-update", headers=as_(a), json={"listing_status": "sold"}).status_code == 200
+    got = row()
+    assert (got["outcome"], got["sold_price_aud"], got["status"]) == ("sold_prior", None, "watching")
 
 
 def test_address_from_a_shared_domain_link(monkeypatch):

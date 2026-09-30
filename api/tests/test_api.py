@@ -306,3 +306,50 @@ def test_delete_a_house(client, people):
     assert client.get(f"/api/properties/{pid}").status_code == 404
     assert all(r["id"] != pid for r in client.get("/api/overview").json()["rows"])
     assert client.delete(f"/api/properties/{pid}", headers=as_(a)).status_code == 404
+
+
+def test_verdicts_can_be_deleted(client, people):
+    """A single mistaken entry can go (the one before is current again), or a whole verdict for a stage."""
+    a, b = people["a"], people["b"]
+    pid = client.post("/api/properties", headers=as_(a), json={
+        "address": {"street_number": "5", "street": "Takeback Lane", "suburb": "Mitcham", "postcode": "3132"}}).json()["id"]
+    say = lambda who, stance, stage="pre_inspection": client.post(f"/api/properties/{pid}/opinions", headers=as_(who),
+                                                                  json={"stage": stage, "stance": stance}).json()["id"]
+    say(a, "maybe")
+    oops = say(a, "no")
+    say(a, "yes", "post_inspection")
+    say(b, "yes")
+    assert client.delete(f"/api/opinions/{oops}", headers=as_(a)).status_code == 204
+    assert client.delete(f"/api/opinions/{oops}", headers=as_(a)).status_code == 404
+    mine = lambda: [(o["stage"], o["stance"]) for o in client.get(f"/api/properties/{pid}").json()["opinions"] if o["person_id"] == a["id"]]
+    assert sorted(mine()) == [("post_inspection", "yes"), ("pre_inspection", "maybe")]
+    r = client.delete(f"/api/properties/{pid}/opinions", headers=as_(a), params={"person_id": a["id"], "stage": "pre_inspection"})
+    assert r.status_code == 204 and mine() == [("post_inspection", "yes")]
+    row = next(r for r in client.get("/api/overview").json()["rows"] if r["id"] == pid)
+    assert f"v:{a['id']}:pre" not in row and row[f"v:{b['id']}:pre"] == "yes"
+
+
+def test_shortlist_and_the_inspect_list(client, people):
+    """Swiping up shortlists a house and puts it on To inspect; going to an inspection takes it off; a house already
+    further along keeps its status."""
+    a = as_(people["a"])
+    new = lambda n: client.post("/api/properties", headers=a, json={
+        "address": {"street_number": str(n), "street": "Shortlist Street", "suburb": "Mitcham", "postcode": "3132"}}).json()["id"]
+    pid, offering = new(1), new(2)
+    row = lambda p: next(r for r in client.get("/api/overview").json()["rows"] if r["id"] == p)
+    assert row(pid)["to_inspect"] is False
+    for _ in range(2):  # safe to repeat
+        r = client.post(f"/api/properties/{pid}/shortlist", headers=a)
+        assert r.status_code == 200 and r.json()["status"] == "shortlisted"
+    assert row(pid)["to_inspect"] is True and row(pid)["status"] == "shortlisted"
+    assert client.get(f"/api/properties/{pid}").json()["to_inspect"] is True
+    client.post(f"/api/properties/{offering}/status", headers=a, json={"status": "offering"})
+    assert client.post(f"/api/properties/{offering}/shortlist", headers=a).json()["status"] == "offering"
+    assert row(offering)["to_inspect"] is True
+    assert client.delete(f"/api/properties/{offering}/inspect-list", headers=a).status_code == 204
+    assert row(offering)["to_inspect"] is False
+    assert client.put(f"/api/properties/{offering}/inspect-list", headers=a).status_code == 200 and row(offering)["to_inspect"] is True
+    # Went to see it: off the list.
+    i = client.post(f"/api/properties/{pid}/inspections", headers=a, json={"starts_at": "2026-10-03T10:00:00+10:00"}).json()["id"]
+    assert client.put(f"/api/inspections/{i}/attendees/{people['a']['id']}", headers=a, json={}).status_code == 200
+    assert row(pid)["to_inspect"] is False

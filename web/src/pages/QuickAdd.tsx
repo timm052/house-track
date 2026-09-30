@@ -237,7 +237,7 @@ export default function QuickAdd() {
           {err.existingPropertyId && <Link to={`/p/${err.existingPropertyId}`}>Open it</Link>}
         </p>
       )}
-      <p className="muted small">Only the address is needed. The + House Track button on a listing fills in most of the rest.</p>
+      <p className="muted small">Only the address is required.</p>
 
       {capture?.existing_property_id && (
         <>
@@ -279,7 +279,7 @@ export default function QuickAdd() {
             setByLot(false);
           }} />
         </label>
-        {gnafPid && <p className="small muted">Address found. It goes straight on the map.</p>}
+        {gnafPid && <p className="small muted">Address found.</p>}
         <label>
           Or paste one from a listing
           <div className="row" style={{ marginTop: 4 }}>
@@ -335,7 +335,7 @@ export default function QuickAdd() {
           <label>Land area (m² or ha)<input inputMode="decimal" placeholder="e.g. 652" value={land} onChange={(e) => setLand(e.target.value)} /></label>
           <label>Building area (m²)<input inputMode="decimal" value={building} onChange={(e) => setBuilding(e.target.value)} /></label>
         </div>
-        {(Number.isNaN(area(land)) || Number.isNaN(area(building))) && <p className="error small">Areas look like 652, 652 m² or 0.25 ha.</p>}
+        {(Number.isNaN(area(land)) || Number.isNaN(area(building))) && <p className="error small">Enter an area like 652, 652 m² or 0.25 ha.</p>}
         {/^\d+(\.\d+)?$/.test(land.trim()) && Number(land) > 0 && Number(land) < 50 && (
           <p className="small tone-warn">{land.trim()} m² is tiny. For acres or hectares, type “{land.trim()} acres” or “{land.trim()} ha”.</p>
         )}

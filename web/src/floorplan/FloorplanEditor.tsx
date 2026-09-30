@@ -976,7 +976,7 @@ export default function FloorplanEditor() {
   const versions = markups.data ?? [];
 
   if (property.isError) return <p className="error">Couldn't load the house.</p>;
-  if (property.data && !attachment) return <p>That floor plan isn't on this house any more. <Link to={`/p/${propertyId}`}>Back to the house</Link></p>;
+  if (property.data && !attachment) return <p>This floor plan has been removed. <Link to={`/p/${propertyId}`}>Back to the house</Link></p>;
 
   const TOOLS: { t: Tool; icon: React.ReactNode; label: string; title: string }[] = [
     { t: "select", icon: <MousePointer2 />, label: "Select", title: "Select and move things" },
@@ -1026,7 +1026,7 @@ export default function FloorplanEditor() {
           ))}
         </div>
         <div className="fp-tools">
-          <button className={snap ? "on" : ""} aria-pressed={snap} title="Snap to corners, straight lines and 45°. Hold Alt to turn it off."
+          <button className={snap ? "on" : ""} aria-pressed={snap} title="Snap to corners and 45° (hold Alt to override)"
             onClick={() => setSnap(!snap)}><Magnet /></button>
           <button disabled={!past.length} title="Undo (Ctrl+Z)" onClick={undo}><Undo2 /></button>
           <button disabled={!future.length} title="Redo (Ctrl+Shift+Z)" onClick={redo}><Redo2 /></button>
@@ -1060,11 +1060,11 @@ export default function FloorplanEditor() {
           {drawLoupe()}
           {!editing && bg && markups.isSuccess && (versions.length === 0 || !scaled) && (
             <div className="fp-hint top">{versions.length === 0
-              ? <>Nobody has marked up this plan yet. Press <strong>Edit</strong> to set its scale, measure rooms and try furniture.</>
-              : <>This version has no scale yet, so it can't be measured. Press <strong>Edit</strong> to set it.</>}</div>
+              ? <>No markup yet. Press <strong>Mark up</strong> to set the scale and add furniture.</>
+              : <>No scale set. Press <strong>Edit</strong> to set one.</>}</div>
           )}
           {!editing && tool === "measure" && !draft && temp.length === 0 && (
-            <div className="fp-float"><span className="small">{COARSE ? "Tap" : "Click"} both ends to measure. Measurements aren't saved.</span></div>
+            <div className="fp-float"><span className="small">{COARSE ? "Tap" : "Click"} both ends to measure. Not saved.</span></div>
           )}
           {!editing && bg && (
             <button className="primary fp-edit" onClick={startEditing}><Pencil /> {versions.length ? "Edit" : "Mark up"}</button>
@@ -1124,13 +1124,13 @@ export default function FloorplanEditor() {
                 {(markups.data ?? []).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                 {!base.id && <option value="new">{doc.name} (not saved)</option>}
               </select>
-              <button className="small-btn" title="New version, starting from this one" onClick={() => switchVersion("new")}><Plus /></button>
+              <button className="small-btn" title="New version from this one" onClick={() => switchVersion("new")}><Plus /></button>
             </div>
             <label className="small">Name<input value={doc.name} maxLength={80}
               onChange={(e) => { const name = e.target.value; setDoc((d) => ({ ...d, name })); setDirty(true); }} /></label>
             <div className="row">
               <button className="primary grow" disabled={saving || (!dirty && !!base.id)} onClick={() => save(false)}><Save /> {base.id ? "Save" : "Save version"}</button>
-              {base.id && <button disabled={saving} onClick={() => save(true)} title="Keep this version as it was and save your changes as a new one"><Copy /> Save as new</button>}
+              {base.id && <button disabled={saving} onClick={() => save(true)} title="Save as a new version"><Copy /> Save as new</button>}
             </div>
             {current && <div className="tiny muted">Saved by {author ?? "someone"}, {when.format(new Date(current.updated_at))}{dirty && " · unsaved changes"}</div>}
             {msg && <div className={`small ${msg.bad ? "error" : "muted"}`}>{msg.text}</div>}
@@ -1167,16 +1167,15 @@ export default function FloorplanEditor() {
           <section>
             <div className="section-title"><Sofa /> Furniture</div>
             {!scaled && <div className="tiny muted">Set the scale to add furniture.</div>}
-            <div className="tiny muted">Drag a piece onto the plan, or tap it and then tap where it goes.</div>
+            <div className="tiny muted">Drag a piece onto the plan, or tap it then tap the plan.</div>
             {GROUPS.map((g) => (
               <details key={g} className="fp-group">
                 <summary className="small">{g}</summary>
                 {g === "Fridges" && (
-                  <p className="tiny muted" style={{ margin: "2px 0 6px" }}>Typical sizes. Check your model and allow the air gap it
-                    needs, usually 20–50 mm each side and more on top. Use <strong>Measure</strong> to check the space.</p>
+                  <p className="tiny muted" style={{ margin: "2px 0 6px" }}>Typical sizes. Allow 20–50 mm each side for airflow.</p>
                 )}
                 {g === "Doors & windows" && (
-                  <p className="tiny muted" style={{ margin: "2px 0 6px" }}>A door's wall is along its bottom edge. Rotate it to fit.</p>
+                  <p className="tiny muted" style={{ margin: "2px 0 6px" }}>The bottom edge goes against the wall.</p>
                 )}
                 <div className="fp-palette">
                   {FURNITURE.filter((f) => f.group === g).map((f) => (
@@ -1193,10 +1192,9 @@ export default function FloorplanEditor() {
             ))}
           </section>
           <div className="tiny muted fp-keys">
-            <p>Scroll or pinch to zoom. Drag the plan, or hold Space, to pan. Press 0 to fit.</p>
-            <p>Drag a selected shape's handles to reshape it, and a piece's round handle to turn it. Hold Alt for any angle and no
-              snapping.</p>
-            <p>Arrow keys nudge. R turns furniture 90°. Delete removes. Ctrl+Z undoes. Esc cancels.</p>
+            <p>Scroll or pinch to zoom. Drag or hold Space to pan. 0 fits the plan.</p>
+            <p>Drag handles to resize, the round handle to rotate. Alt turns off snapping.</p>
+            <p>Arrows nudge · R rotates 90° · Delete removes · Ctrl+Z undoes · Esc cancels</p>
           </div>
         </aside>}
       </div>
@@ -1235,7 +1233,7 @@ function ScaleDialog({ pixels, onSet, onCancel }: { pixels: number; onSet: (metr
   return (
     <div className="fp-dialog" role="dialog" aria-label="Set the scale">
       <strong>How long is that line?</strong>
-      <p className="small muted" style={{ margin: 0 }}>Enter it as printed on the plan, e.g. 3.6 or 3600 mm.</p>
+      <p className="small muted" style={{ margin: 0 }}>As printed on the plan, e.g. 3.6 or 3600 mm.</p>
       <input autoFocus value={text} placeholder="e.g. 3.6 m" inputMode="decimal" onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter" && m) onSet(m); if (e.key === "Escape") onCancel(); }} />
       {m && <div className="tiny muted">{metres(m)}: 1 m = {(pixels / m).toFixed(1)} plan pixels</div>}

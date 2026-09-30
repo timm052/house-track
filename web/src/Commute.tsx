@@ -104,13 +104,13 @@ export default function Commute({ travel, station, stationNote, note = true }: {
               )}
               {pt != null && (
                 <button className={`commute-time commute-pt ${open === d.place_id ? "on" : ""}`} aria-expanded={open === d.place_id}
-                  title="Public transport, arriving by 9am. Click for the trip."
+                  title="Public transport, arriving by 9am"
                   onClick={() => setOpen(open === d.place_id ? null : d.place_id)}>
                   <TramFront /><span className={tone(pt, "transit")}>{minutes(pt)}</span>
                 </button>
               )}
               {d.transit && pt == null && (
-                <span className="commute-time tiny muted" title="Nothing gets you there by 9am unless you leave before 6am">
+                <span className="commute-time tiny muted" title="No trip arrives by 9am without leaving before 6am">
                   <TramFront />no practical trip</span>
               )}
             </div>
@@ -118,21 +118,17 @@ export default function Commute({ travel, station, stationNote, note = true }: {
           </div>
         );
       })}
-      {travel.pending > 0 && <div className="tiny muted">Working out travel times…</div>}
+      {travel.pending > 0 && <div className="tiny muted">Calculating travel times…</div>}
       {note && (anyPeak || anyTransit) && (
         <div className="tiny muted commute-note">
           {[anyPeak && "Drives at peak hour", anyTransit && "public transport there by 9am, home from 5pm"].filter(Boolean).join(" · ")}
-          <button className="link" aria-label="How these are worked out" aria-expanded={explain} onClick={() => setExplain(!explain)}><Info /></button>
+          <button className="link" aria-label="How these are calculated" aria-expanded={explain} onClick={() => setExplain(!explain)}><Info /></button>
           {explain && (
             <div style={{ margin: "4px 0 0", display: "grid", gap: 4 }}>
-              <p style={{ margin: 0 }}>Drive times are for peak hour. Freeways and main roads slow down the most, side streets hardly at
-                all. Hover over a drive to see it with no traffic.</p>
-              <p style={{ margin: 0 }}>Public transport is for a weekday: the latest trip that gets you there by 9am, and the first one home
-                after 5pm. It walks up to 30 minutes to a station rather than take a bus, unless the bus saves 20 minutes or more. Trips
-                that start before 6am don't count. Timetables are from PTV and V/Line, via <a href="https://transitous.org" target="_blank"
-                rel="noreferrer">Transitous</a>.</p>
-              <p style={{ margin: 0 }}>Schools are the government schools the house is zoned for. Walks over 45 minutes aren't shown.
-                These are all estimates, so check before you rely on them.</p>
+              <p style={{ margin: 0 }}>Drive times are at peak hour. Hover a drive for the time with no traffic.</p>
+              <p style={{ margin: 0 }}>Public transport is the latest weekday trip arriving by 9am, and the first home after 5pm.
+                Timetables from PTV and V/Line via <a href="https://transitous.org" target="_blank" rel="noreferrer">Transitous</a>.</p>
+              <p style={{ margin: 0 }}>Schools are the government schools the house is zoned for. All times are estimates.</p>
             </div>
           )}
         </div>

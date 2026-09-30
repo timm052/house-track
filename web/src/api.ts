@@ -110,6 +110,7 @@ export type PropertyDetail = PropertyBase & {
   overlays: { code: string; title: string; effect: "info" | "soft_warn" | "hard_exclude"; label: string }[];
   tags: string[];
   cover_id: string | null;
+  to_inspect: boolean;  // on the household's To inspect list
 };
 
 export type Settings = { walk_limit_min: number };

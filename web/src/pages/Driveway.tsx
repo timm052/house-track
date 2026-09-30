@@ -140,10 +140,10 @@ export default function Driveway() {
           <div className="segmented" role="radiogroup" aria-label="When">
             {(["pre_inspection", "post_inspection"] as const).map((s) => (
               <button key={s} role="radio" aria-checked={activeStage === s} className={activeStage === s ? "on" : ""} onClick={() => setStage(s)}>
-                {s === "pre_inspection" ? "Before inspecting" : "After: pursue to buy?"}</button>
+                {s === "pre_inspection" ? "Before inspecting" : "After inspecting"}</button>
             ))}
           </div>
-          <textarea placeholder="Add a note, or tap the mic to dictate" value={note} onChange={(e) => setNote(e.target.value)} />
+          <textarea placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
           <div className="stance big">
             {(["yes", "maybe", "no"] as const).map((s) => (
               <button key={s} className={`on ${s}`} onClick={() => record(s)}>{LABEL.stance[s]}</button>

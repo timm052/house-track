@@ -469,7 +469,7 @@ export default function Overview() {
         {conflicts.length > 0 && (
           <aside className="conflicts">
             <strong>Changed by someone else</strong>
-            <p className="small muted">Someone changed these after you loaded them. Choose which value to keep. History fields keep both either way.</p>
+            <p className="small muted">Choose which value to keep.</p>
             {conflicts.map(([key, s]) => {
               const [rowId, column] = key.split("|");
               const col = byKey.get(column)!;
@@ -511,7 +511,7 @@ export default function Overview() {
           onApply={(fs) => { change({ filters: [...current.filters.filter((x) => x.column !== filterFor.key), ...fs] }); setFilterFor(null); }}
           onClose={() => setFilterFor(null)} />
       )}
-      <p className="narrow-note small muted">Overview needs a bigger screen. On a phone, use <Link to="/">Houses</Link>.</p>
+      <p className="narrow-note small muted">The Grid needs a larger screen. On a phone, use <Link to="/">Houses</Link>.</p>
     </div>
   );
 }
@@ -647,8 +647,7 @@ function ColumnPicker({ cols, selected, onChange, onClose, onFitAll }: {
     <aside className="picker">
       <div className="row"><strong className="grow">Columns</strong><button className="link" onClick={onClose}>Done</button></div>
       <input type="search" placeholder="Find a column" value={find} onChange={(e) => setFind(e.target.value)} style={{ margin: "6px 0" }} />
-      <p className="small muted">To reorder, drag a column's header in the grid, or use its ⏷ menu.
-        Widths fit the longest value; a width you drag is kept on this device.
+      <p className="small muted">Drag a column header to reorder.
         {onFitAll && <> <button className="link" onClick={onFitAll}>Fit all widths</button></>}</p>
       {groups.map((g) => {
         const inGroup = cols.filter((c) => c.group === g);

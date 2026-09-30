@@ -42,6 +42,9 @@ export function soldAgainst(sold: number, firstLow: number | null, firstHigh: nu
 }
 
 /** An outcome that means the house sold. */
+/** What a listing says about itself, whatever the spelling: "Under offer", "under_offer", "underOffer" → "underoffer". */
+export const listingState = (s: unknown) => String(s ?? "").toLowerCase().replace(/[^a-z]/g, "");
+
 export const isSold = (outcome: unknown) => typeof outcome === "string" && outcome.startsWith("sold");
 
 /** Its sale is over and someone else has it (sold, withdrawn or gone; a pass-in can still sell): whatever our status,
@@ -75,7 +78,7 @@ export const fromLocalInput = (v: string): string | null => (v ? new Date(v).toI
 export const LABEL = {
   status: {
     watching: "Watching", interested: "Interested", shortlisted: "Shortlisted", offering: "Offering",
-    bought: "Bought", missed_out: "Missed out", ruled_out: "Ruled out",
+    bought: "Bought", missed_out: "Sold", ruled_out: "Ruled out",
   } satisfies Record<Status, string>,
   method: { auction: "Auction", eoi: "EOI", private_sale: "Private sale", other: "Other" } satisfies Record<SaleMethod, string>,
   stage: { pre_inspection: "Before inspecting", post_inspection: "After inspecting" } satisfies Record<Stage, string>,

@@ -118,7 +118,7 @@ export default function ThisWeek() {
 
         <div className="card">
           <h2>Where we disagree</h2>
-          {disagree.length === 0 ? <p className="small muted">Nothing to argue about right now.</p> : (
+          {disagree.length === 0 ? <p className="small muted">No disagreements.</p> : (
             <ul className="week-list">
               {disagree.map(({ r, stage, stances }) => (
                 <li key={r.id}>

@@ -5,7 +5,7 @@ import { useState } from "react";
 import { api, OUTCOMES, type Outcome, type SaleMethod, type Status } from "./api";
 import { LABEL, parseMoney } from "./format";
 
-/** The status a sale's end suggests, if any: bought when it's ours, missed out when someone else got it while we
+/** The status a sale's end suggests, if any: bought when it's ours, sold when someone else got it while we
  *  were offering. Otherwise none: watching a house to see its result doesn't make it lost, and a withdrawal or
  *  pass-in is the sale's news, not ours. */
 export function outcomeStatus(outcome: Outcome | null | undefined, boughtByUs: boolean, status: Status): Status | null {

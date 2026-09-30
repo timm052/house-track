@@ -10,7 +10,7 @@ from .. import gnaf, listing_apply
 from ..address import Address, address_key, display, normalise, parse
 from ..db import tx
 from ..deps import OptionalPerson, Person, not_found, update_columns
-from ..schemas import AddressIn, OpinionIn, PriceGuideIn, PropertyIn, PropertyPatch, Status, StatusIn
+from ..schemas import AddressIn, OpinionIn, PriceGuideIn, PropertyIn, PropertyPatch, Stage, Status, StatusIn
 from .campaigns import insert_campaign, insert_link, insert_price_guide
 from .driveway import attachments_for, inspections_for, save_photos_later
 from .geo import travel_for
@@ -164,6 +164,7 @@ def get_property(property_id: UUID) -> dict:
             (property_id,),
         ).fetchall()
         prop["status"] = prop["status_history"][0]["status"] if prop["status_history"] else "watching"
+        prop["to_inspect"] = conn.execute("SELECT 1 FROM inspect_list WHERE property_id = %s", (property_id,)).fetchone() is not None
         prop["opinions"] = conn.execute(
             "SELECT id, person_id, campaign_id, stage, stance, note, recorded_at, created_by FROM opinion"
             " WHERE property_id = %s ORDER BY recorded_at DESC, id DESC",
@@ -283,6 +284,55 @@ def add_opinion(property_id: UUID, body: OpinionIn, person: Person) -> dict:
              body.note, body.recorded_at),
         ).fetchone()
     return {"id": row["id"] if row else body.id}
+
+
+@router.delete("/properties/{property_id}/opinions", status_code=204)
+def clear_opinion(property_id: UUID, person_id: UUID, stage: Stage, person: Person) -> None:
+    """Take back a verdict: someone's before- or after-inspecting verdict and its history go, so the house shows no
+    verdict from them for that stage (and comes back to Rate). Each deleted entry is kept in the audit log."""
+    with tx(person) as conn:
+        conn.execute("DELETE FROM opinion WHERE property_id = %s AND person_id = %s AND stage = %s", (property_id, person_id, stage))
+
+
+@router.delete("/opinions/{opinion_id}", status_code=204)
+def delete_opinion(opinion_id: UUID, person: Person) -> None:
+    """One entry from a verdict's history, say a mistaken tap; the one before it becomes current again."""
+    with tx(person) as conn:
+        if conn.execute("DELETE FROM opinion WHERE id = %s RETURNING id", (opinion_id,)).fetchone() is None:
+            raise not_found("Verdict")
+
+
+# ─── the "To inspect" list ─────────────────────────────────────────────
+@router.put("/properties/{property_id}/inspect-list")
+def add_to_inspect(property_id: UUID, person: Person) -> dict:
+    with tx(person) as conn:
+        if conn.execute("SELECT 1 FROM property WHERE id = %s", (property_id,)).fetchone() is None:
+            raise not_found("Property")
+        conn.execute("INSERT INTO inspect_list (property_id) VALUES (%s) ON CONFLICT (property_id) DO NOTHING", (property_id,))
+    return {"id": property_id, "to_inspect": True}
+
+
+@router.delete("/properties/{property_id}/inspect-list", status_code=204)
+def remove_from_inspect(property_id: UUID, person: Person) -> None:
+    with tx(person) as conn:
+        conn.execute("DELETE FROM inspect_list WHERE property_id = %s", (property_id,))
+
+
+@router.post("/properties/{property_id}/shortlist")
+def shortlist(property_id: UUID, person: Person) -> dict:
+    """Swiped up in Rate: onto the shortlist (unless it's already further along, say offering) and the To inspect
+    list. Safe to repeat, so it can wait in the offline outbox."""
+    with tx(person) as conn:
+        if conn.execute("SELECT 1 FROM property WHERE id = %s", (property_id,)).fetchone() is None:
+            raise not_found("Property")
+        now = conn.execute("SELECT status FROM property_status WHERE property_id = %s", (property_id,)).fetchone()
+        status = now["status"] if now else "watching"
+        if status in ("watching", "interested"):
+            conn.execute("INSERT INTO status_event (property_id, status, reason) VALUES (%s, 'shortlisted', 'Shortlisted in Rate')",
+                         (property_id,))
+            status = "shortlisted"
+        conn.execute("INSERT INTO inspect_list (property_id) VALUES (%s) ON CONFLICT (property_id) DO NOTHING", (property_id,))
+    return {"id": property_id, "status": status, "to_inspect": True}
 
 
 @router.post("/properties/{property_id}/status", status_code=201)

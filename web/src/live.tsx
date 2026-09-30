@@ -18,5 +18,5 @@ export function Live({ queries, children }: { queries: UseQueryResult[]; childre
 /** Said once on a page whose settings couldn't be checked with the server. */
 export function OfflineNote({ queries }: { queries: UseQueryResult[] }) {
   if (!queries.some((q) => q.isError)) return null;
-  return <p className="small error">Can't reach House Track. This is what this device last saw, and it can't be changed until you're back online.</p>;
+  return <p className="small error">You're offline. These are the last saved settings, and they can't be changed until you reconnect.</p>;
 }

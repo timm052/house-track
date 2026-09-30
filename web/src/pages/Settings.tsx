@@ -33,7 +33,7 @@ export default function Settings() {
   return (
     <div style={{ marginTop: 12 }}>
       <h1>Settings</h1>
-      <p className="small muted">These settings are shared by the household. Stations and places are in <Link to="/places">Places</Link>.</p>
+      <p className="small muted">Shared with the household. Stations and places are in <Link to="/places">Places</Link>.</p>
       <OfflineNote queries={[persons]} />
       <PhoneAdding />
       <Bookmarklets />
@@ -50,8 +50,7 @@ export default function Settings() {
             </button>
             {p.id !== me?.id && (
               <ConfirmButton label="Delete" yes={`Delete ${p.display_name}`} onConfirm={() => remove.mutate(p.id)}
-                question={<>Their verdicts, scores, map areas and attendance go. Houses, prices and notes they entered stay, credited to
-                  you ({me?.display_name ?? "you"}). This can't be undone.</>} />
+                question={<>Their verdicts, scores and map areas will be deleted. Houses and notes they added move to you. This can't be undone.</>} />
             )}
           </div>
         ))}
@@ -103,17 +102,17 @@ function MoneySettings() {
   return (
     <div className="card stack">
       <h2>Budget</h2>
-      <p className="small muted">Used to work out total costs and the most you can bid. Stamp duty uses Victorian rates. Check with the State Revenue Office before relying on it.</p>
+      <p className="small muted">Used for total costs and your maximum bid. Stamp duty uses Victorian rates.</p>
       <Live queries={[costs]}>
       <div className="grid2">{text("cash", "Cash for the purchase")}{text("loan", "Loan pre-approval")}</div>
       <label>Pre-approval expires<input type="date" value={String(form.expiry)} onChange={(e) => setF({ ...form, expiry: e.target.value })} /></label>
       {expiring && <p className="small error">Your pre-approval expires within 30 days.</p>}
       <label className="check"><input type="checkbox" checked={!!form.fhb} onChange={(e) => setF({ ...form, fhb: e.target.checked })} /> First home buyers</label>
-      <label className="check"><input type="checkbox" checked={!!form.ppr} onChange={(e) => setF({ ...form, ppr: e.target.checked })} /> We'll live in it (principal place of residence)</label>
+      <label className="check"><input type="checkbox" checked={!!form.ppr} onChange={(e) => setF({ ...form, ppr: e.target.checked })} /> Principal place of residence</label>
       <div className="grid3">{text("conv", "Conveyancing")}{text("insp", "Inspections")}{text("other", "Other fees")}</div>
       <button className="primary" onClick={() => save.mutate()} disabled={save.isPending}>Save budget</button>
       </Live>
-      {data?.max_bid != null && <p>Most you can bid, including costs: <strong>{money(data.max_bid)}</strong></p>}
+      {data?.max_bid != null && <p>Maximum bid, after costs: <strong>{money(data.max_bid)}</strong></p>}
     </div>
   );
 }
@@ -135,13 +134,13 @@ function LayerSettings() {
   return (
     <div className="card stack">
       <h2>Schools and planning layers</h2>
-      <p className="small muted">Choose what happens to houses inside each layer. Run setup again to update the data.</p>
+      <p className="small muted">Choose how each layer affects the houses inside it.</p>
       <Live queries={[overlays]}>
       {data.map((l) => (
         <div key={l.code} className="row">
           <span className="grow small">{l.title}{l.data_as_of && <span className="muted"> · {l.data_as_of}</span>}</span>
           <select value={l.effect} onChange={(e) => set(l.code, e.target.value)} style={{ width: "auto" }} aria-label={`Effect of ${l.title}`}>
-            <option value="info">Just show it</option>
+            <option value="info">Show</option>
             <option value="soft_warn">Warn</option>
             <option value="hard_exclude">Exclude</option>
           </select>
@@ -235,9 +234,8 @@ function PhoneAdding() {
     <div className="card stack" id="phone">
       <h2>Adding houses from your phone</h2>
       <p className="small" style={{ margin: 0 }}>
-        Share a listing to House Track from the Domain or realestate.com.au app, or from your browser. Domain links include the
-        address. The rooms, price, photos and floor plan are added at the next weekly refresh, if <strong>Fill in what's
-        missing</strong> is ticked. For realestate.com.au links, you type the address.
+        Share a listing to House Track from the Domain or realestate.com.au app, or your browser. For realestate.com.au links,
+        you enter the address.
       </p>
       {!ios && (
         <details open={android}>
@@ -253,12 +251,10 @@ function PhoneAdding() {
         <details open={ios}>
           <summary><strong>iPhone and iPad</strong></summary>
           <p className="small" style={{ margin: "6px 0" }}>
-            iPhones don't let web apps into the Share menu, so you use a shortcut instead. There are two. Set up either or both on
-            each phone, with different names.</p>
+            On iPhone, use a shortcut. There are two; set up either or both.</p>
           <h3 className="small" style={{ margin: "8px 0 2px" }}>Add in the background</h3>
           <p className="small" style={{ margin: 0 }}>
-            Adds the house without opening a browser, then shows a notification. Domain listings are added right away. realestate.com.au
-            links wait at the top of the Houses page for you to finish.</p>
+            Adds the house in the background and shows a notification.</p>
           <ol className="small steps">
             <li>Open <strong>Shortcuts</strong>, tap <strong>+</strong>, and rename the shortcut <strong>Add to House Track</strong>.</li>
             <li>Tap the name, then <strong>Details</strong> (or <strong>ⓘ</strong>), and turn on <strong>Show in Share Sheet</strong>. In
@@ -280,7 +276,7 @@ function PhoneAdding() {
           </ol>
           <h3 className="small" style={{ margin: "12px 0 2px" }}>Check it first</h3>
           <p className="small" style={{ margin: 0 }}>
-            Opens the filled-in <strong>Add a house</strong> form in your browser, so you can check it before saving.</p>
+            Opens the filled-in <strong>Add a house</strong> form to review before saving.</p>
           <ol className="small steps">
             <li>In <strong>Shortcuts</strong>, tap <strong>+</strong> and name it <strong>Check in House Track</strong>.</li>
             <li>Turn on <strong>Show in Share Sheet</strong> as above, with the same three input types.</li>
@@ -289,11 +285,9 @@ function PhoneAdding() {
               the keyboard so it follows <code>url=</code>:
               <CopyLine text={`${location.origin}/add?url=`} /></li>
             <li>Add <strong>Open URLs</strong>. It should read <em>Open Text</em>. Tap <strong>Done</strong>.</li>
-            <li>To use it, tap <strong>Share → Check in House Track</strong> on a listing. It opens in your default browser, since iOS
-              can't open links in home-screen apps.</li>
+            <li>To use it, tap <strong>Share → Check in House Track</strong> on a listing. It opens in your browser.</li>
           </ol>
-          <p className="small muted" style={{ margin: 0 }}>Both need Tailscale on. Each person uses their own ID, so houses are added in
-            their name.</p>
+          <p className="small muted" style={{ margin: 0 }}>Both need Tailscale. Each person uses their own ID.</p>
         </details>
       )}
     </div>
@@ -307,8 +301,7 @@ function Bookmarklets() {
     <div className="card stack" id="bookmarklets">
       <h2>Browser buttons</h2>
       <p className="small" style={{ margin: 0 }}>
-        Two bookmarks-bar buttons for adding and updating houses from Domain and realestate.com.au. They work in Chrome, Edge,
-        Firefox and Safari on a computer.
+        Add and update houses from Domain and realestate.com.au in a desktop browser.
       </p>
       <ol className="small steps">
         <li>Show the bookmarks bar with <kbd>{mac ? "⌘" : "Ctrl"}</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd>.</li>
@@ -318,23 +311,20 @@ function Bookmarklets() {
       <div className="bm-item">
         <BookmarkletButton code={captureCode(origin)} label="+ House Track" />
         <p className="small muted">
-          Click it on a listing to add the house. It fills in the address, rooms, land, sale details and price guide, and lets you
-          choose photos, agents, inspections, the Statement of Information and tags. On a house you already track, it shows what's
-          changed.
+          Click it on a listing to add the house, or to update one you already track.
         </p>
       </div>
       <div className="bm-item">
         <BookmarkletButton code={refreshCode(origin)} label="⟳ Refresh from Domain" />
         <p className="small muted">
-          Once a week, click it on any Domain page. It checks each active house's listing and records new price guides, dates,
-          inspections and agents. <Link to="/refresh">See what it checks</Link>
+          Click it on any Domain page to update all active houses. <Link to="/refresh">Details</Link>
         </p>
       </div>
 
       <details>
         <summary className="small">On a phone browser instead</summary>
         <p className="small" style={{ margin: "6px 0" }}>
-          Sharing is easier on a phone, but the buttons can work too. Not every phone browser supports them.</p>
+          Not every phone browser supports these.</p>
         <ol className="small steps">
           <li>Tap <strong>Copy code</strong> next to a button.</li>
           <li><strong>Android Chrome:</strong> bookmark any page, edit the bookmark and paste the code as its URL. To use it, type its
@@ -352,8 +342,7 @@ function Bookmarklets() {
         </ol>
       </details>
       <p className="small muted" style={{ margin: 0 }}>
-        Buttons last updated {BOOKMARKLETS_UPDATED}. If yours are older, replace them. They can stop working if Domain or
-        realestate.com.au change their sites.
+        Buttons updated {BOOKMARKLETS_UPDATED}. Replace older copies.
       </p>
     </div>
   );

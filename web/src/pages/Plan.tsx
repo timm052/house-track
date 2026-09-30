@@ -80,9 +80,9 @@ export default function Plan() {
   return (
     <div style={{ marginTop: 12 }}>
       <h1>Plan the inspections</h1>
-      <p className="small muted">Each day's inspections in order, with the drive between them and when you'd arrive. Drives assume no traffic.</p>
+      <p className="small muted">A day's inspections in order, with drive and arrival times. Drives assume no traffic.</p>
       {events.isPending ? <p className="muted">Loading…</p> : days.length === 0 ? (
-        <div className="card empty">No inspections in the next two weeks. Add them from a house's page, or with the + House Track button.</div>
+        <div className="card empty">No inspections in the next two weeks.</div>
       ) : (
         <>
           <div className="chips" aria-label="Day">
@@ -119,7 +119,7 @@ export default function Plan() {
                       {t?.leg === null && (n > 1 || start) && !off && legs.isFetched && <div className="plan-leg small muted">No drive time</div>}
                       <div><strong>{time.format(new Date(e.starts_at))}{e.ends_at && `–${time.format(new Date(e.ends_at))}`}</strong> {KIND[e.kind] ?? "Inspection"}</div>
                       <div><Link to={`/p/${e.property_id}`}>{e.address.split(",")[0]}</Link> <span className="muted small">{e.suburb}</span></div>
-                      {!where && <div className="small tone-warn">Not on the map yet, so it's left out of the route. <Link to={`/map?pin=${e.property_id}`}>Set the pin</Link></div>}
+                      {!where && <div className="small tone-warn">Not on the map, so it's not in the route. <Link to={`/map?pin=${e.property_id}`}>Set the pin</Link></div>}
                       {t && !off && (
                         <div className={`small ${t.late === "missed" ? "tone-bad" : t.late === "after-start" ? "tone-warn" : "tone-good"}`}>
                           {t.late === "missed" ? `You'd get there at ${time.format(t.arrive)}, after it closes` : `Arrive ${time.format(t.arrive)}`}

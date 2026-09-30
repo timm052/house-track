@@ -120,6 +120,8 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
     scores = by_property("SELECT property_id, person_id, score FROM property_score WHERE property_id = ANY(%s)")
     attended = by_property("""SELECT DISTINCT i.property_id, a.person_id FROM inspection_attendee a
                               JOIN inspection i ON i.id = a.inspection_id WHERE i.property_id = ANY(%s)""")
+    to_inspect = {r["property_id"]: r for r in conn.execute(
+        "SELECT property_id, created_at FROM inspect_list WHERE property_id = ANY(%s)", (ids,)).fetchall()}
     covers = {r["property_id"]: str(r["attachment_id"]) for r in conn.execute(
         "SELECT property_id, attachment_id FROM property_cover WHERE property_id = ANY(%s)", (ids,)).fetchall()}
     # For the house card: how many photos, and the floor plan kept in House Track (to open its viewer).
@@ -166,6 +168,7 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
             "suburb": p["suburb"], "postcode": p["postcode"],
             "plan_lot": f"{p['lot_number']}\\{p['plan_number']}" if p["plan_number"] else None,
             "created_at": _day(p["created_at"]),
+            "added_at": p["created_at"].isoformat(),  # to the second, for "newest added" among a day's additions
             "pin_source": "manual" if p["manual_location"] else p["geocode_source"],
             "lat": p["lat"], "lon": p["lon"],
             **{k: p[k] for k in PROPERTY_FIELDS},
@@ -200,6 +203,7 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
             "photo_count": media[pid]["photos"] if pid in media else 0,
             "floorplan_id": str(media[pid]["plan"]) if pid in media and media[pid]["plan"] else None,
             "attended_by": [str(r["person_id"]) for r in attended.get(pid, [])],
+            "to_inspect": pid in to_inspect, "to_inspect_since": _day(to_inspect[pid]["created_at"]) if pid in to_inspect else None,
             **{k: (cj[k]["amount_aud"] if k in cj else None) for k in JUDGEMENTS},
             "sold_vs_guide_pct": (round((c["sold_price_aud"] / guide_high - 1) * 100, 1)
                                   if c and c["sold_price_aud"] and guide_high else None),

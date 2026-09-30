@@ -9,7 +9,7 @@ export default function Outbox() {
   return (
     <div className="card stack" style={{ marginTop: 12 }}>
       <h2>Waiting to send</h2>
-      {items.length === 0 && <p className="muted">Nothing waiting. Everything's saved on the server.</p>}
+      {items.length === 0 && <p className="muted">Nothing waiting to send.</p>}
       {items.map((i) => (
         <div key={i.id} className="conflict">
           <div>{i.label}</div>

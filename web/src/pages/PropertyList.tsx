@@ -1,11 +1,13 @@
 // Houses (phone-first). Built on the same rows, filters and shared saved views as Overview (D18). One search box that
-// also offers filters as you type (a suburb, a tag, "auction", "this week"…); where you're up to (active, bought,
-// done); a sort that can group by suburb and street; and every filter that's on shown once, as a chip to remove.
+// also offers filters as you type (a suburb, a tag, "auction", "this week"…); where each house is up to (in play,
+// shortlisted, under offer, sold, ruled out); a sort either way round, or grouped by suburb and street as a compact
+// list; and every filter that's on shown once, as a chip to remove.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, whilePending } from "../api";
-import { isSold, LABEL, landArea, money, moneyRange, saleEnded } from "../format";
+import { isSold, LABEL, landArea, listingState, money, moneyRange, saleEnded } from "../format";
+import { unrated } from "./Rate";
 import SoldAgainst from "../SoldAgainst";
 import { STATUSES } from "../api";
 import { catalogue, display, type Column, type OverviewPlace, type OverviewRow } from "../overview/columns";
@@ -13,8 +15,8 @@ import { applyView, builtInDefault, describe, useViews, type Filter, type Sort }
 import FieldFilter, { fieldOffers } from "../overview/FieldFilter";
 import { usePeople } from "../people";
 import { CLOSED, STATUS_COLOUR, budgetTone, changeTone, minutesTone, soonTone, suburbClass, suburbSlots, tagStyle, useTagColours } from "../colour";
-import { ArrowDownUp, Bath, BedDouble, CalendarDays, Camera, Car, ChevronDown, ChevronRight, Footprints, GraduationCap, LandPlot, MapPin,
-  PencilRuler, Plus, Scale, Search, SlidersHorizontal, TrainFront, TramFront, TriangleAlert } from "lucide-react";
+import { ArrowDown, ArrowUp, Bath, BedDouble, CalendarDays, Camera, Car, ChevronDown, ChevronRight, Footprints, GraduationCap, LandPlot, MapPin,
+  PencilRuler, Plus, Scale, Heart, Search, SlidersHorizontal, TrainFront, TramFront, TriangleAlert } from "lucide-react";
 import { useNeeds } from "./ThisWeek";
 import { statusOutOfStep } from "../Outcome";
 import type { Outcome, Status } from "../api";
@@ -25,19 +27,41 @@ type Quick = { thisWeek: boolean; statuses: string[]; methods: string[]; verdict
                suburbs: string[]; tags: string[]; affordable: boolean };
 const NO_QUICK: Quick = { thisWeek: false, statuses: [], methods: [], verdicts: {}, hideExcluded: false, suburbs: [], tags: [], affordable: false };
 /** Which houses: you buy one, and watch the rest to learn what things sell for. Every house is in exactly one of
- *  looking, shortlist, results (its sale is over) and ruled out; "In play" is the first two together. */
-type Stage = "inplay" | "shortlist" | "results" | "out" | "all";
-type Phase = "looking" | "shortlist" | "results" | "out";
-const phaseOf = (r: OverviewRow): Phase =>
-  r.status === "ruled_out" ? "out"
-  : r.status === "missed_out" || saleEnded(r.outcome, r.bought_by_us) ? "results"
-  : ["shortlisted", "offering", "bought"].includes(String(r.status)) ? "shortlist" : "looking";
-const STAGE_PHASES: Record<Stage, Phase[]> = { inplay: ["looking", "shortlist"], shortlist: ["shortlist"], results: ["results"], out: ["out"],
-  all: ["looking", "shortlist", "results", "out"] };
-const STAGE_LABEL: Record<Stage, string> = { inplay: "In play", shortlist: "Shortlist", results: "Results", out: "Ruled out", all: "All" };
+ *  looking, shortlist, under offer (the listing says so), sold (or otherwise off the market) and ruled out; "In
+ *  play" is the first three together. Under offer and sold follow the listing, so nobody has to move them. */
+type Stage = "inplay" | "inspect" | "shortlist" | "offer" | "sold" | "out" | "all";
+type Phase = "looking" | "shortlist" | "offer" | "sold" | "out";
+const phaseOf = (r: OverviewRow): Phase => {
+  if (r.status === "ruled_out") return "out";
+  if (r.status === "bought") return "shortlist";
+  const listing = r.outcome ? "" : listingState(r.listing_status);
+  if (r.status === "missed_out" || saleEnded(r.outcome, r.bought_by_us) || listing === "sold") return "sold";
+  if (listing === "underoffer") return "offer";
+  return ["shortlisted", "offering"].includes(String(r.status)) ? "shortlist" : "looking";
+};
+// To inspect is a list rather than a stage: houses shortlisted in Rate (or added on the house page) that nobody has
+// been to see yet, whatever else is going on with them.
+const STAGES = ["inplay", "inspect", "shortlist", "offer", "sold", "out", "all"] as const;
+const STAGE_PHASES: Record<Stage, Phase[]> = { inplay: ["looking", "shortlist", "offer"], inspect: [], shortlist: ["shortlist"], offer: ["offer"],
+  sold: ["sold"], out: ["out"], all: ["looking", "shortlist", "offer", "sold", "out"] };
+const inStage = (r: OverviewRow, st: Stage) => (st === "inspect" ? Boolean(r.to_inspect) : STAGE_PHASES[st].includes(phaseOf(r)));
+const STAGE_LABEL: Record<Stage, string> = { inplay: "In play", inspect: "To inspect", shortlist: "Shortlist", offer: "Under offer", sold: "Sold",
+  out: "Ruled out", all: "All" };
 const STAGE_TITLE: Record<Stage, string> = {
-  inplay: "Everything you're still looking at or have shortlisted", shortlist: "Shortlisted, offering or bought",
-  results: "Sale's over: sold, withdrawn or someone else's. For what things sell for", out: "Ruled out", all: "Every house" };
+  inplay: "Houses still in the running", inspect: "Houses to go and see",
+  shortlist: "Shortlisted, offering or bought",
+  offer: "Listed as under offer", sold: "Sold or off the market", out: "Ruled out", all: "Every house" };
+/** The sorts, each with the way round it starts and what each way means. */
+const SORTS: { key: string; label: string; desc?: boolean; asc: string; dsc: string }[] = [
+  { key: "", label: "Sale date", asc: "Soonest first", dsc: "Latest first" },
+  { key: "street", label: "Suburb, then street", asc: "A to Z", dsc: "Z to A" },
+  { key: "created_at", label: "Date added", desc: true, asc: "Oldest first", dsc: "Newest first" },
+  { key: "guide_high", label: "Guide price", asc: "Cheapest first", dsc: "Dearest first" },
+  { key: "score_avg", label: "Score", desc: true, asc: "Lowest first", dsc: "Best first" },
+  { key: "nearest_station_walk", label: "Walk to station", asc: "Closest first", dsc: "Furthest first" },
+  { key: "nearest_station_drive", label: "Drive to station", asc: "Closest first", dsc: "Furthest first" },
+];
+const DRIVE_SORT = { asc: "Closest first", dsc: "Furthest first" };
 const METHODS = ["auction", "eoi", "private_sale"] as const;
 const VERDICTS = ["yes", "maybe", "no", "unset"] as const;
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
@@ -53,11 +77,18 @@ export default function PropertyList() {
   const [viewId, setViewId] = useState<string | null>(null);
   const view = views.data?.find((v) => v.id === viewId) ?? views.data?.find((v) => v.is_default) ?? builtInDefault(cols);
   // Remembered on this device: where you're up to and the sort (grouping by suburb, say) stay as chosen.
-  const [stage, setStage] = useState<Stage>(() => { const v = stored("housetrack.houses.stage") as Stage | null; return v && v in STAGE_LABEL ? v : "inplay"; });
+  const [stage, setStage] = useState<Stage>(() => {
+    const v = stored("housetrack.houses.stage");
+    return v === "results" ? "sold" : v && v in STAGE_LABEL ? v as Stage : "inplay";
+  });
   useEffect(() => store("housetrack.houses.stage", stage), [stage]);
   const [sortKey, setSortKey] = useState<string>(() => stored("housetrack.houses.sort") ?? "");
   useEffect(() => store("housetrack.houses.sort", sortKey), [sortKey]);
+  const [reversed, setReversed] = useState(() => stored("housetrack.houses.reversed") === "1");
+  useEffect(() => store("housetrack.houses.reversed", reversed ? "1" : "0"), [reversed]);
   const grouped = sortKey === "street";
+  const sortInfo = SORTS.find((s) => s.key === sortKey) ?? { key: sortKey, label: "", desc: false, ...DRIVE_SORT };
+  const descending = Boolean(sortInfo.desc) !== reversed;
   const [search, setSearch] = useState("");
   const [quick, setQuick] = useState<Quick>(NO_QUICK);
   const [extra, setExtra] = useState<Filter[]>([]);
@@ -76,10 +107,11 @@ export default function PropertyList() {
   if (quick.affordable) filters.push({ column: "budget", op: "in", value: ["within", "stretch"] });
   const verdictOf = (r: OverviewRow, personId: string) => ((r[`v:${personId}:post`] ?? r[`v:${personId}:pre`]) as string | undefined) ?? "unset";
   const verdictPicks = Object.entries(quick.verdicts).filter(([, vs]) => vs.length);
-  const keep = (r: OverviewRow) => (quick.statuses.length > 0 || STAGE_PHASES[stage].includes(phaseOf(r)))
+  const keep = (r: OverviewRow) => (quick.statuses.length > 0 || inStage(r, stage))
     && verdictPicks.every(([pid, vs]) => vs.includes(verdictOf(r, pid)));
-  const sort: Sort[] = grouped ? view.sort
-    : sortKey ? [{ column: sortKey, dir: ["created_at", "score_avg"].includes(sortKey) ? "desc" : "asc" }] : view.sort;
+  // Date added sorts to the second (several houses are often added on one day). Reversed turns every key round.
+  const baseSort: Sort[] = grouped ? [] : sortKey ? [{ column: sortKey === "created_at" ? "added_at" : sortKey, dir: sortInfo.desc ? "desc" : "asc" }] : view.sort;
+  const sort: Sort[] = reversed ? baseSort.map((s) => ({ ...s, dir: s.dir === "asc" ? "desc" : "asc" })) : baseSort;
   const filterKey = JSON.stringify(filters), sortJson = JSON.stringify(sort);
   // Houses whose sale is over (to someone else) go to the bottom, in the same order among themselves.
   const rows = useMemo(() => {
@@ -88,7 +120,7 @@ export default function PropertyList() {
     return [...shown.filter((r) => !over(r)), ...shown.filter(over)];
   },
     [data, filterKey, sortJson, search, cols, quick.verdicts, quick.statuses, stage]); // eslint-disable-line react-hooks/exhaustive-deps
-  const stageCount = (st: Stage) => (data?.rows ?? []).filter((r) => STAGE_PHASES[st].includes(phaseOf(r))).length;
+  const stageCount = (st: Stage) => (data?.rows ?? []).filter((r) => inStage(r, st)).length;
   const tagNames = [...new Set((data?.rows ?? []).flatMap((r) => (r.tags as string[] | undefined) ?? []))].sort();
   const suburbs = [...new Set((data?.rows ?? []).map((r) => String(r.suburb)))].sort();
   const slots = useMemo(() => suburbSlots(data?.rows ?? []), [data]);
@@ -151,6 +183,7 @@ export default function PropertyList() {
   const [searchOpen, setSearchOpen] = useState(false);
   const takeOffer = (o: { add: () => void }) => { o.add(); setSearch(""); setSearchOpen(false); };
   const needs = useNeeds(data?.rows ?? [], me);
+  const toRate = me ? (data?.rows ?? []).filter((r) => unrated(r, me.id)).length : 0;
   // Inspected: someone has been to an inspection there, or given a verdict after one.
   const inspected = (r: OverviewRow) => ((r.attended_by as string[] | undefined)?.length ?? 0) > 0
     || persons.some((p) => r[`v:${p.id}:post`] != null);
@@ -160,16 +193,20 @@ export default function PropertyList() {
   const card = (r: OverviewRow) => <Card key={r.id} r={r} people={active} favourites={favourites} cols={cols} slots={slots} tagColours={tagColours}
     picked={comparing ? comparing.includes(r.id) : undefined} onPick={pick} />;
   // Grouped by suburb, then street (headings for each, A to Z, houses by number), or one grid in the chosen order.
-  const cards = (list: OverviewRow[]) => !grouped ? <div className="card-grid">{list.map(card)}</div> : suburbGroups(list).map((sg) => (
+  // Grouped: a suburb's streets sit side by side, several to a line, each with its heading and a divider between
+  // them; a street takes room for its houses, so a street of one doesn't leave a line to itself.
+  const cards = (list: OverviewRow[]) => !grouped ? <div className="card-grid">{list.map(card)}</div> : suburbGroups(list, reversed).map((sg) => (
     <section key={sg.suburb} className="suburb-group">
       <h2 className={`suburb-heading ${suburbClass(slots, sg.suburb)}`}><span className="suburb-swatch" />{sg.suburb}
-        <span className="muted"> · {sg.count} {sg.count === 1 ? "house" : "houses"}</span></h2>
-      {sg.streets.map((g) => (
-        <div key={g.street} className="street-group">
-          <h3 className="street-heading">{g.street}{g.rows.length > 1 && <span className="muted"> · {g.rows.length}</span>}</h3>
-          <div className="card-grid">{g.rows.map(card)}</div>
-        </div>
-      ))}
+        <span className="muted"> · {sg.count}</span></h2>
+      <div className="street-flow">
+        {sg.streets.map((g) => (
+          <div key={g.street} className="street-block" style={{ "--n": g.rows.length } as React.CSSProperties}>
+            <div className="street-heading">{g.street}{g.rows.length > 1 && <span className="muted"> · {g.rows.length}</span>}</div>
+            <div className="street-cards">{g.rows.map(card)}</div>
+          </div>
+        ))}
+      </div>
     </section>
   ));
   // Compare: tap "Compare", tap up to four cards, then open them side by side.
@@ -207,6 +244,10 @@ export default function PropertyList() {
             </ul>
           )}
         </div>
+        {toRate > 0 && (
+          <Link to="/rate" className="rate-launch" title="Rate new houses">
+            <button className="icon-btn"><Heart /><span className="label">Rate</span><span className="count-badge">{toRate}</span></button></Link>
+        )}
         <button className={`icon-btn ${comparing ? "on" : ""}`} aria-pressed={comparing != null} title="Pick houses to compare"
           onClick={() => setComparing(comparing ? null : [])}><Scale /><span className="label">Compare</span></button>
         <Link to="/add"><button className="primary"><Plus /> <span className="label">Add house</span></button></Link>
@@ -214,24 +255,20 @@ export default function PropertyList() {
 
       <div className="houses-controls">
         <div className="houses-stage" role="radiogroup" aria-label="Which houses">
-          {(["inplay", "shortlist", "results", "out", "all"] as const).map((st) => (
+          {STAGES.map((st) => (
             <button key={st} role="radio" aria-checked={stage === st} className={stage === st ? "on" : ""} title={STAGE_TITLE[st]} onClick={() => setStage(st)}>
               {STAGE_LABEL[st]} <span className="houses-stage-n">{stageCount(st)}</span></button>
           ))}
         </div>
-        <label className="houses-sort">
-          <ArrowDownUp aria-hidden />
-          <select value={sortKey} onChange={(e) => setSortKey(e.target.value)} aria-label="Sort">
-            <option value="">Sale date</option>
-            <option value="street">Suburb, then street</option>
-            <option value="guide_high">Guide price</option>
-            <option value="created_at">Newest</option>
-            <option value="score_avg">Best score</option>
-            <option value="nearest_station_walk">Walk to station</option>
-            <option value="nearest_station_drive">Drive to station</option>
+        <div className="houses-sort">
+          <select value={sortKey} onChange={(e) => { setSortKey(e.target.value); setReversed(false); }} aria-label="Sort by">
+            {SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
             {favourites.map((f) => <option key={f.id} value={`drive:${f.id}`}>Drive to {f.name}</option>)}
           </select>
-        </label>
+          <button className="houses-dir" onClick={() => setReversed(!reversed)} title="Reverse order"
+            aria-label={`${descending ? sortInfo.dsc : sortInfo.asc}. Reverse order`}>
+            {descending ? <ArrowDown /> : <ArrowUp />}<span className="label">{descending ? sortInfo.dsc : sortInfo.asc}</span></button>
+        </div>
         <button className={`houses-filters-btn ${panelOpen ? "on" : ""}`} aria-expanded={panelOpen} onClick={() => setPanelOpen(!panelOpen)}>
           <SlidersHorizontal /> Filters{onChips.length > 0 && <span className="count-badge">{onChips.length}</span>}</button>
       </div>
@@ -264,7 +301,7 @@ export default function PropertyList() {
             </div>
           </section>
           <section>
-            <div className="section-title">Verdicts <span className="muted small">after inspecting, or before if not yet</span></div>
+            <div className="section-title">Verdicts <span className="muted small">most recent</span></div>
             <div className="houses-verdicts">
               {[...active].sort((a, b) => Number(b.id === me?.id) - Number(a.id === me?.id)).map((person) => (
                 <div key={person.id} className="houses-verdict-row">
@@ -361,8 +398,8 @@ function streetOrder(r: OverviewRow): [number, string, number] {
   return [m ? Number(m[1]) : Number.MAX_SAFE_INTEGER, (m?.[2] ?? "").toUpperCase(), Number(String(r.unit ?? "").match(/\d+/)?.[0] ?? 0)];
 }
 
-/** Houses by suburb, then street, both A to Z, and each street's houses by number. */
-function suburbGroups(rows: OverviewRow[]) {
+/** Houses by suburb, then street, both A to Z (or Z to A), and each street's houses by number. */
+function suburbGroups(rows: OverviewRow[], reversed = false) {
   const cmp = (a: [number, string, number], b: [number, string, number]) => a[0] - b[0] || a[1].localeCompare(b[1]) || a[2] - b[2];
   const bySuburb = new Map<string, Map<string, OverviewRow[]>>();
   for (const r of rows) {
@@ -371,10 +408,11 @@ function suburbGroups(rows: OverviewRow[]) {
     const streets = bySuburb.get(suburb)!;
     streets.set(street, [...(streets.get(street) ?? []), r]);
   }
-  return [...bySuburb.entries()].sort(([a], [b]) => a.localeCompare(b, "en-AU")).map(([suburb, streets]) => ({
+  const way = reversed ? -1 : 1;
+  return [...bySuburb.entries()].sort(([a], [b]) => way * a.localeCompare(b, "en-AU")).map(([suburb, streets]) => ({
     suburb, count: [...streets.values()].reduce((n, l) => n + l.length, 0),
-    streets: [...streets.entries()].sort(([a], [b]) => a.localeCompare(b, "en-AU", { numeric: true }))
-      .map(([street, list]) => ({ street, rows: list.sort((a, b) => cmp(streetOrder(a), streetOrder(b))) })),
+    streets: [...streets.entries()].sort(([a], [b]) => way * a.localeCompare(b, "en-AU", { numeric: true }))
+      .map(([street, list]) => ({ street, rows: list.sort((a, b) => way * cmp(streetOrder(a), streetOrder(b))) })),
   }));
 }
 
@@ -423,7 +461,7 @@ function Card({ r, people, favourites, cols, slots, tagColours, picked, onPick }
   ].filter(Boolean) as ReactNode[];
   const notes = [
     change != null && change !== 0 && <span key="g" className={`pill tone-${changeTone(change)}`}>guide {change > 0 ? "↑" : "↓"} {money(Math.abs(change))}</span>,
-    (r.budget === "over" || r.budget === "stretch") && <span key="bu" className={`pill tone-${budgetTone(r.budget)}`} title="Guide against the most you can bid. Set it in Settings.">
+    (r.budget === "over" || r.budget === "stretch") && <span key="bu" className={`pill tone-${budgetTone(r.budget)}`} title="Guide compared with your maximum bid (Settings)">
       {r.budget === "over" ? "Over budget" : "Stretch"}</span>,
     r.walk_away != null && <span key="w" className="pill">our max {money(n("walk_away"))}</span>,
     Boolean(r.days_on_market != null && r.sale_method && !r.outcome) && <span key="d" className="pill quiet">{String(r.days_on_market)} {r.days_on_market === 1 ? "day" : "days"} listed</span>,
@@ -457,6 +495,8 @@ function Card({ r, people, favourites, cols, slots, tagColours, picked, onPick }
 
         <div className="pc-badges">
           <span className="pill status-pill"><span className="status-dot" style={{ background: STATUS_COLOUR[r.status as never] }} />{display(col("status"), r.status)}</span>
+          {!r.outcome && listingState(r.listing_status) === "underoffer" && <span className="pill maybe">Under offer</span>}
+          {Boolean(r.to_inspect) && <span className="pill" title="On the To inspect list">To inspect</span>}
           {soon && <span className={`pill tone-${soonTone(r.sale_at)}`}><CalendarDays /> {r.sale_method === "eoi" ? "Closes" : "Auction"} {soon}</span>}
           {Boolean(r.excluded) && <span className="pill no">Excluded</span>}
           {Boolean(r.floorplan_id) && (
@@ -476,7 +516,7 @@ function Card({ r, people, favourites, cols, slots, tagColours, picked, onPick }
               </span>
             )}
             {places.map((f) => (
-              <span key={f.id} className="pc-chip" title={`To ${f.name}: minutes by car and public transport`}>
+              <span key={f.id} className="pc-chip" title={`Minutes to ${f.name} by car and public transport`}>
                 <MapPin /><span className="pc-chip-name">{f.name}</span>
                 {r[`drive:${f.id}`] != null && <> <Car />{mins(r[`drive:${f.id}`], "drive")}</>}
                 {r[`transit:${f.id}`] != null && <> <TramFront />{mins(r[`transit:${f.id}`], "transit")}</>}
@@ -537,7 +577,7 @@ function SharedLinks() {
   }
   return (
     <div className="card stack shared-links">
-      <strong>Shared from a phone, still to add</strong>
+      <strong>Shared links to add</strong>
       {data.map((l) => (
         <div key={l.id} className="row small">
           <span className="grow" style={{ minWidth: 0, overflowWrap: "anywhere" }}>

@@ -97,6 +97,18 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.5
+
+- **Rate** new houses one at a time from the Houses page: swipe right for yes, left for no, down for maybe, and up to shortlist. Add a comment if you like. It shows only houses you haven't rated yet.
+- A new **To inspect** list: houses you shortlist in Rate go on it, or add one from its page. A house leaves the list once someone records going to an inspection there.
+- Sales follow the listing: when a listing says sold, the sale and price are recorded automatically. New **Under offer** and **Sold** tabs replace Results, and "Missed out" is now "Sold".
+- Sorting works both ways, and **Date added** sorts by when a house went into House Track.
+- Grouped by suburb, streets now sit side by side, each with its own heading.
+- Delete a verdict, or one entry in its history, from the house page.
+- **Clear the day** on the calendar cancels all of that day's inspections.
+- Shorter, plainer wording throughout.
+- Updating adds one new table (backed up first, as usual).
+
 ### 0.4.4
 
 - The map, redesigned:

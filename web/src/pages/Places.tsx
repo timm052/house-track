@@ -55,8 +55,7 @@ export default function Places() {
   return (
     <div style={{ marginTop: 12 }}>
       <h1>Places</h1>
-      <p className="small muted">Where travel times are worked out to, from every house. They show on the house cards, each house's
-        Location tab and as columns in the grid.</p>
+      <p className="small muted">Travel times from every house are calculated to these places.</p>
       <OfflineNote queries={[places, settings]} />
 
       <div className="card stack">
@@ -66,7 +65,7 @@ export default function Places() {
         {destinations.map((d) => (
           <div key={d.id} className="place-row">
             <button className={`link place-star ${d.is_favourite ? "on" : ""}`} aria-pressed={d.is_favourite}
-              title={d.is_favourite ? "Shown on house cards. Click to hide." : "Show on the house cards"}
+              title={d.is_favourite ? "Shown on house cards" : "Show on house cards"}
               onClick={() => favourite.mutate({ id: d.id, on: !d.is_favourite })}><Star /></button>
             <div className="grow">
               <input className="place-name" defaultValue={d.name} key={d.name} aria-label="Name"
@@ -115,17 +114,15 @@ export default function Places() {
               <button onClick={() => navigate(`/map?pick=place&name=${encodeURIComponent(name.trim())}&person=${person}&modes=${modes.join(",")}`)}>
                 <MapPin /> Or pick it on the map</button>
             </>
-          ) : <p className="small muted" style={{ margin: 0 }}>Name it first, then find its address or pick it on the map.</p>}
+          ) : <p className="small muted" style={{ margin: 0 }}>Name it, then search for the address or pick it on the map.</p>}
         </div>
         </Live>
       </div>
 
       <div className="card stack">
         <h2>Train stations</h2>
-        <p className="small" style={{ margin: 0 }}>Every house gets its <strong>nearest station</strong> automatically, out of all
-          {stationCount.data ? ` ${stationCount.data.n}` : ""} stations, with the walk and the drive to it.</p>
-        <p className="small muted" style={{ margin: 0 }}>Add stations you'd use anyway (on your line, say) to see the walk to them from every house too.
-          They show on a house when they're within the walking limit.</p>
+        <p className="small" style={{ margin: 0 }}>Each house shows its <strong>nearest station</strong>, with walk and drive times.</p>
+        <p className="small muted" style={{ margin: 0 }}>Add other stations to see walk times to them too.</p>
         <Live queries={[places, settings]}>
         {settings.data && (
           <label className="row small" style={{ gap: 8 }}>Walking limit

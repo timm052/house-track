@@ -112,6 +112,7 @@ class ListingUpdateIn(ListingExtras):
     # What the listing itself says now (sold, under offer, archived) and its price wording, kept on the campaign.
     listing_status: str | None = Field(default=None, max_length=40)
     listing_price_text: str | None = Field(default=None, max_length=300)
+    sold_price_aud: Aud | None = None  # a sold listing's price line ("Sold for $1,250,000")
 
 
 class PropertyIn(BaseModel):

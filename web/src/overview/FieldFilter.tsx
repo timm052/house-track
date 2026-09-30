@@ -251,7 +251,7 @@ function FieldEditor({ col, rows, current, onApply, onBack }: {
         </div>
         <p className="small field-summary">{dateSummary
           ? <><strong>{dateSummary}</strong> · {matching} of {values.length} {values.length === 1 ? "house" : "houses"}</>
-          : <span className="muted">Pick a period above, or set either date.</span>}</p>
+          : <span className="muted">Choose a period, or enter dates.</span>}</p>
       </>}
       {!listed && !numeric && !dated && <>
         {common.length > 0 && common.length <= 30 && (

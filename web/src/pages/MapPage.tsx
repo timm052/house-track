@@ -342,7 +342,7 @@ export default function MapPage() {
     if (!commute || !commuteOrigin) { source.setData({ type: "FeatureCollection", features: [] }); return; }
     let cancelled = false;
     const [lon, lat] = commuteOrigin.coords;
-    setCommuteMsg("Working out the area…");
+    setCommuteMsg("Calculating the area…");
     api<GeoJSON.Feature>(`/api/isochrone?lon=${lon}&lat=${lat}&minutes=${commute.minutes}&mode=${commute.mode}`)
       .then((f) => { if (!cancelled) { source.setData({ type: "FeatureCollection", features: [f] }); setCommuteMsg(null); } })
       .catch((e) => { if (!cancelled) setCommuteMsg((e as Error).message); });
@@ -595,15 +595,15 @@ export default function MapPage() {
                   <div key={st}><span className="key-pin" style={{ background: pal.status[st], borderColor: look === "light" ? "#ffffff" : pal.pinStroke }} />
                     {LABEL.status[st]}</div>
                 ))}
-                <div><span className="key-pin key-ring" style={{ borderColor: pal.select }} />The house you've picked</div>
-                <div><span className="key-station" style={{ borderColor: pal.station, background: pal.stationFill }} />Train station, named when zoomed in</div>
-                <div><span className="key-line" style={{ borderTopColor: pal.route }} />Its walk to the nearest station
+                <div><span className="key-pin key-ring" style={{ borderColor: pal.select }} />Selected house</div>
+                <div><span className="key-station" style={{ borderColor: pal.station, background: pal.stationFill }} />Train station</div>
+                <div><span className="key-line" style={{ borderTopColor: pal.route }} />Walk to nearest station
                   <span className="key-line dashed" style={{ borderTopColor: pal.drive, marginLeft: 6 }} />drive</div>
-                <div><span className="comp-key" style={{ borderColor: pal.comp, background: pal.compFill }} />A comparable sale, while its house is picked</div>
-                <div><span className="key-area" style={{ borderColor: pal.reach, background: pal.reach }} />Travel time, when shown</div>
+                <div><span className="comp-key" style={{ borderColor: pal.comp, background: pal.compFill }} />Comparable sale</div>
+                <div><span className="key-area" style={{ borderColor: pal.reach, background: pal.reach }} />Travel time area</div>
               </div>
-              <p className="small muted">{colourBy === "price" ? "Price is the sale price once sold, otherwise the middle of the latest guide. " : ""}
-                Faded: ruled out, missed out, sale over or excluded.</p>
+              <p className="small muted">{colourBy === "price" ? "Price is the sold price, or the middle of the latest guide. " : ""}
+                Faded: ruled out, sold or excluded.</p>
             </>}
             {panel === "layers" && <>
               <section>
@@ -615,7 +615,7 @@ export default function MapPage() {
                 <Seg label="Contour lines" value={height ? contourDetail : "off"} options={[["off", "Off"], ["coarse", "Coarse"], ["fine", "Fine"]]}
                   onChange={(v) => { setHeight(v !== "off"); if (v !== "off") setContourDetail(v); }} />
                 {height && <p className="small muted">{contourDetail === "coarse" ? "Every 5 m, labelled every 25 m" : "Every 2 m, labelled every 10 m"},
-                  with hill shading. From 30 m survey data: the lie of the land, not a single block.</p>}
+                  with hill shading. Approximate.</p>}
               </section>
               <section>
                 <div className="section-title">Hide excluded houses</div>
@@ -625,8 +625,7 @@ export default function MapPage() {
               </section>
             </>}
             {panel === "planning" && <>
-              <p className="small muted">Shown when zoomed in to street level. What a house inside each one means is set in
-                <Link to="/settings"> Settings</Link>.</p>
+              <p className="small muted">Shown when zoomed in. Set what each layer does in <Link to="/settings">Settings</Link>.</p>
               <div className="map-overlay-list">
                 {(overlayList.data ?? []).map((l) => (
                   <label key={l.code} className="map-toggle">
@@ -640,8 +639,8 @@ export default function MapPage() {
               {enabled.length > 0 && <button className="link" style={{ justifySelf: "start" }} onClick={() => setEnabled([])}>Turn them all off</button>}
             </>}
             {panel === "travel" && <>
-              <p className="small muted">Shades everywhere you can reach in that time from a house or place. Drives assume no traffic.</p>
-              {commuteFrom.length === 0 ? <p className="small">Select a house on the map, or add places on the <Link to="/places">Places</Link> tab.</p> : (
+              <p className="small muted">Shows where you can reach in the time chosen. Drives assume no traffic.</p>
+              {commuteFrom.length === 0 ? <p className="small">Select a house, or add places in <Link to="/places">Places</Link>.</p> : (
                 <>
                   <select value={commute?.from ?? ""} aria-label="From"
                     onChange={(e) => setCommute(e.target.value ? { minutes: 30, mode: "drive", ...commute, from: e.target.value } : null)}>
@@ -657,7 +656,7 @@ export default function MapPage() {
                           <button key={m} className={`chip ${commute.minutes === m ? "on" : ""}`} onClick={() => setCommute({ ...commute, minutes: m })}>{m} min</button>
                         ))}
                       </div>
-                      <button className="link" style={{ justifySelf: "start" }} onClick={() => setCommute(null)}>Clear it from the map</button>
+                      <button className="link" style={{ justifySelf: "start" }} onClick={() => setCommute(null)}>Clear</button>
                     </>
                   )}
                   {commuteMsg && <p className="small muted">{commuteMsg}</p>}
@@ -665,11 +664,11 @@ export default function MapPage() {
               )}
             </>}
             {panel === "draw" && <>
-              <p className="small muted">Draw a shape on the map, one corner at a time. It only changes your own map and lists.</p>
+              <p className="small muted">Draw an area on the map. Only you see its effect.</p>
               <button className="map-choice" onClick={() => { setPanel(null); startDrawing("hard_exclude"); }}>
-                <Ban /><span><strong>Exclude the houses inside</strong><span className="small muted">They're marked excluded for you, and can be hidden.</span></span></button>
+                <Ban /><span><strong>Exclude the houses inside</strong><span className="small muted">Marked excluded for you.</span></span></button>
               <button className="map-choice" onClick={() => { setPanel(null); startDrawing("soft_warn"); }}>
-                <TriangleAlert /><span><strong>Warn about the houses inside</strong><span className="small muted">They get a warning, say for a flight path.</span></span></button>
+                <TriangleAlert /><span><strong>Warn about the houses inside</strong><span className="small muted">Flagged with a warning, e.g. a flight path.</span></span></button>
             </>}
           </MapPanel>
         )}

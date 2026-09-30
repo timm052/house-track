@@ -27,7 +27,7 @@ export default function Auction() {
   const [overLimit, setOverLimit] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  if (isError) return <p className="error">Auction mode needs a connection to House Track.</p>;
+  if (isError) return <p className="error">Auction mode needs a connection.</p>;
   if (!s) return <p className="muted">Loading…</p>;
   const last = s.bids[s.bids.length - 1];
   const high = last?.amount_aud ?? 0;

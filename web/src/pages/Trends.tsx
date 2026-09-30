@@ -2,7 +2,6 @@
 // for any mix of suburbs, house types, sizes and time.
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { api, PROPERTY_TYPES } from "../api";
 import { money } from "../format";
 import type { OverviewPlace, OverviewRow } from "../overview/columns";
@@ -166,7 +165,7 @@ export default function Trends() {
             </tbody>
           </table>
         </div>
-        <p className="small muted">Record sale outcomes and add comparables from Statements of Information to fill this in. <Link to="/overview">Grid</Link></p>
+        <p className="small muted">Fills in as sales are recorded.</p>
       </div>
     </div>
   );

@@ -209,7 +209,7 @@ export function Files({ propertyId, attachments, coverId, address }: { propertyI
             <>
               <a className="grow" href={d.url} target="_blank" rel="noreferrer">{d.caption ?? d.url} ↗</a>
               <button className="link" disabled={keeping === d.id} onClick={() => keepCopy(d.id)}
-                title="Save a copy in House Track so it works offline">{keeping === d.id ? "Saving…" : "Keep a copy"}</button>
+                title="Save a copy (works offline)">{keeping === d.id ? "Saving…" : "Keep a copy"}</button>
             </>
           ) : (
             <button className="link grow doc-open" onClick={() => setViewing({ items: docItems, start: fileDocs.indexOf(d) })}>
@@ -239,7 +239,7 @@ export function Files({ propertyId, attachments, coverId, address }: { propertyI
         </label>
       </div>
       <div className="row">
-        <input className="grow" type="url" placeholder="Or paste a link, e.g. the agent's document portal" value={url} onChange={(e) => setUrl(e.target.value)} />
+        <input className="grow" type="url" placeholder="Or paste a link" value={url} onChange={(e) => setUrl(e.target.value)} />
         <button disabled={!/^https?:\/\//.test(url)} onClick={addLink}>Add link</button>
       </div>
       {error && <p className="error small">{error}</p>}

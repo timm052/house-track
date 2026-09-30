@@ -237,7 +237,7 @@ export default function HouseSidePanel({ p, route, routeError, onClose, onTravel
         </div>
         <div className="map-side-primary">
           <Link to={`/p/${p.id}`}><button className="primary"><ExternalLink /> Open the house</button></Link>
-          <button onClick={onTravel} title="Shade how far you can get from here"><Timer /> Travel time</button>
+          <button onClick={onTravel} title="Show how far you can travel from here"><Timer /> Travel time</button>
         </div>
       </div>
       <div className="map-side-body">
@@ -265,7 +265,7 @@ export default function HouseSidePanel({ p, route, routeError, onClose, onTravel
             {d.land_m2 != null && <span><LandPlot /> {landArea(d.land_m2)}</span>}
             {d.building_m2 != null && <span><Building2 /> {d.building_m2.toLocaleString()} m²</span>}
             <span className="muted">{d.property_type[0].toUpperCase() + d.property_type.slice(1)}{d.build_status !== "established" ? `, ${d.build_status.replace(/_/g, " ")}` : ""}</span>
-            {elevation != null && <span title="Height above sea level, from 30 m survey data"><Mountain /> about {Math.round(elevation)} m</span>}
+            {elevation != null && <span title="Approximate height above sea level"><Mountain /> about {Math.round(elevation)} m</span>}
           </div>
         )}
 

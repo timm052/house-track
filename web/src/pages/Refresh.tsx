@@ -88,28 +88,27 @@ export default function Refresh() {
       <h1>Refresh from Domain</h1>
       {!opened && (
         <div className="card stack">
-          <p style={{ margin: 0 }}>Checks every active house's Domain listing and records what changed: new price guides, auction or EOI dates,
-            inspection times, agents and the Statement of Information. Rooms and areas that differ are reported, not changed.</p>
+          <p style={{ margin: 0 }}>Updates each active house from its Domain listing: price guides, sale dates, inspections, agents and the
+            Statement of Information.</p>
           <label className="check"><input type="checkbox" checked={fill} onChange={(e) => setFill(e.target.checked)} />
-            Fill in what's missing: rooms, land and building size you haven't entered, and the photos and floor plan if a house has none</label>
+            Fill in missing details, photos and floor plans</label>
           <ol className="small" style={{ margin: 0, paddingLeft: 18 }}>
             <li>Drag the button below to your bookmarks bar (once).</li>
-            <li>Open any page on domain.com.au and click it. This page opens and shows progress.</li>
-            <li>Leave the Domain tab open until it finishes: it loads one listing every {GAP_MS / 1000} seconds.</li>
+            <li>Open domain.com.au and click it.</li>
+            <li>Keep the Domain tab open until it finishes.</li>
           </ol>
           <div>{refreshBookmarklet()}</div>
-          <p className="small muted" style={{ margin: 0 }}>It runs in your own browser at the pace you'd click through the listings yourself.
-            Keep it to your shortlist (it checks at most 40 houses, least recently checked first). Domain can change their pages or block this at any time.</p>
+          <p className="small muted" style={{ margin: 0 }}>Checks up to 40 houses a run, least recently checked first. May stop working if Domain changes its site.</p>
         </div>
       )}
 
       {rows == null && waitedTooLong && (
         <div className="card stack" style={{ borderColor: "var(--maybe)" }}>
-          <h2>The Domain tab hasn't answered</h2>
+          <h2>No response from the Domain tab</h2>
           <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>
-            <li>Keep the Domain tab open. It does the loading.</li>
-            <li>Drag the button from Settings again. Older copies don't work with this page.</li>
-            <li>Click it in the bookmarks bar while you're on domain.com.au, not in House Track.</li>
+            <li>Keep the Domain tab open.</li>
+            <li>Add the button from Settings again. Older versions don't work.</li>
+            <li>Click it while on domain.com.au, not House Track.</li>
           </ul>
           <div>{refreshBookmarklet()}</div>
         </div>
@@ -118,7 +117,7 @@ export default function Refresh() {
       {rows == null && (
         <div className="card">
           <h2>{opened ? "Connecting to the Domain tab…" : "Houses it will check"}</h2>
-          {targets.data?.length === 0 && <p className="small muted">No active houses have a Domain link on a live campaign.</p>}
+          {targets.data?.length === 0 && <p className="small muted">No active houses with a Domain link.</p>}
           <ul className="history small">
             {targets.data?.map((t) => (
               <li key={t.id}><Link to={`/p/${t.id}`}>{t.address}</Link>

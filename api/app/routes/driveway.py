@@ -1,6 +1,6 @@
 """Milestone 3: inspections, photos and documents, and the calendar feed."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -86,6 +86,22 @@ def update_inspection(inspection_id: UUID, body: InspectionPatch, person: Person
     return {"id": inspection_id}
 
 
+class DayIn(BaseModel):
+    day: date  # a Melbourne day
+
+
+@router.post("/inspections/cancel-day")
+def cancel_day(body: DayIn, person: Person) -> dict:
+    """Not going to any of a day's inspections: cancel them all. Cancelled, not deleted, so the weekly refresh
+    doesn't add them back from the listing; ones already attended keep their notes and stay."""
+    with tx(person) as conn:
+        rows = conn.execute(
+            """UPDATE inspection SET state = 'cancelled'
+               WHERE (starts_at AT TIME ZONE 'Australia/Melbourne')::date = %s AND state IN ('planned', 'skipped')
+               RETURNING id, property_id""", (body.day,)).fetchall()
+    return {"cancelled": len(rows), "property_ids": sorted({str(r["property_id"]) for r in rows})}
+
+
 @router.put("/inspections/{inspection_id}/attendees/{person_id}")
 def set_attendee(inspection_id: UUID, person_id: UUID, body: AttendeeIn, person: Person) -> dict:
     """Record who went and their own notes. Marks the inspection attended."""
@@ -98,6 +114,8 @@ def set_attendee(inspection_id: UUID, person_id: UUID, body: AttendeeIn, person:
             (inspection_id, person_id, body.note),
         )
         conn.execute("UPDATE inspection SET state = 'attended' WHERE id = %s AND state = 'planned'", (inspection_id,))
+        # Been to see it: off the To inspect list.
+        conn.execute("DELETE FROM inspect_list WHERE property_id = (SELECT property_id FROM inspection WHERE id = %s)", (inspection_id,))
     return {"id": inspection_id}
 
 

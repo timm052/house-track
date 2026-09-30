@@ -10,6 +10,7 @@ import Driveway from "./pages/Driveway";
 import Outbox from "./pages/Outbox";
 import Places from "./pages/Places";
 import PropertyDetail from "./pages/PropertyDetail";
+import Rate from "./pages/Rate";
 import PropertyList from "./pages/PropertyList";
 import QuickAdd from "./pages/QuickAdd";
 import Settings from "./pages/Settings";
@@ -100,6 +101,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<PropertyList />} />
           <Route path="/add" element={<QuickAdd />} />
+          <Route path="/rate" element={<Rate />} />
           <Route path="/p/:id" element={<PropertyDetail />} />
           <Route path="/p/:id/plan/:attachmentId" element={<Suspense fallback={<p className="muted">Loading…</p>}><FloorplanEditor /></Suspense>} />
           <Route path="/map" element={<Suspense fallback={<p className="muted">Loading map…</p>}><MapPage /></Suspense>} />

@@ -13,6 +13,7 @@ export type Capture = {
   land_m2: number | null; building_m2?: number | null;
   sale_method: SaleMethod | null; auction_at?: string | null; eoi_closes_at?: string | null; listed_on?: string | null;
   guide_low_aud: number | null; guide_high_aud: number | null; price_text?: string | null;
+  listing_status?: string | null; sold_price_aud?: number | null;
   headline?: string | null; description?: string | null; features?: string[]; suggested_tags?: string[];
   lat?: number | null; lon?: number | null;
   agents?: { name: string; mobile: string | null; email: string | null; agency_name: string | null }[];
@@ -58,7 +59,7 @@ export function CaptureReview({ c, ch, set }: { c: Capture; ch: Choices; set: (c
   return (
     <div className="card stack capture">
       <h2>Also from the listing</h2>
-      <p className="small muted" style={{ margin: 0 }}>The form below is filled in. Choose what else to keep.</p>
+      <p className="small muted" style={{ margin: 0 }}>Choose what else to keep.</p>
       {c.price_text && <div className="small"><span className="muted">Listing says:</span> <strong>{c.price_text}</strong></div>}
 
       {photos.length > 0 && (
@@ -93,7 +94,7 @@ export function CaptureReview({ c, ch, set }: { c: Capture; ch: Choices; set: (c
       )}
       {c.soi_url && <div className="small">Statement of Information <span className="muted">· always kept ·</span>{" "}
         <a href={c.soi_url} target="_blank" rel="noreferrer">Open</a></div>}
-      {c.lat != null && <label className="check">{tick("pin")}<span>Listing's map pin <span className="muted">· only if the address isn't found</span></span></label>}
+      {c.lat != null && <label className="check">{tick("pin")}<span>Listing's map pin <span className="muted">· if the address isn't found</span></span></label>}
       {(c.headline || c.description) && (
         <label className="check">{tick("notes")}<span>Copy the listing description into notes{c.headline && <span className="muted"> · “{c.headline}”</span>}</span></label>
       )}
@@ -123,6 +124,8 @@ function updateBody(c: Capture, ch: Choices) {
     auction_at: c.sale_method === "auction" ? c.auction_at ?? null : null,
     eoi_closes_at: c.sale_method === "eoi" ? c.eoi_closes_at ?? null : null, listed_on: c.listed_on ?? null,
     beds: c.beds, baths: c.baths, car_spaces: c.car_spaces, land_m2: c.land_m2, building_m2: c.building_m2 ?? null,
+    // What the listing says now: under offer is shown on the house, and sold is recorded as its outcome.
+    listing_status: c.listing_status ?? null, listing_price_text: c.price_text?.slice(0, 300) ?? null, sold_price_aud: c.sold_price_aud ?? null,
   };
 }
 
@@ -160,7 +163,7 @@ export function ExistingUpdate({ c }: { c: Capture }) {
       {preview.isPending ? <p className="small muted">Checking what's new…</p>
         : preview.isError ? <p className="error small">{(preview.error as Error).message}</p>
         : changes.length === 0 && photos.length === 0 ? (
-          <p className="small muted" style={{ margin: 0 }}>Nothing new on the listing since you last captured it.</p>
+          <p className="small muted" style={{ margin: 0 }}>No changes since the last update.</p>
         ) : (
           <>
             {changes.length > 0 && <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>{changes.map((t) => <li key={t}>{t}</li>)}</ul>}

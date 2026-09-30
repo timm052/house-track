@@ -139,11 +139,15 @@ def test_price_history_columns(client, people):
     a = people["a"]
     pid = new_house(client, a, 151)
     cid = row_for(client, a, pid)["campaign_id"]
+    # A day after the house's first guide (which is now), whatever today is.
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    later = datetime.now(ZoneInfo("Australia/Melbourne")).replace(hour=9, minute=0, second=0, microsecond=0) + timedelta(days=1)
     client.post(f"/api/campaigns/{cid}/price-guides", headers=as_(a),
-                json={"source": "advertised", "low_aud": 850_000, "high_aud": 935_000, "observed_at": "2026-09-30T09:00:00+10:00"})
+                json={"source": "advertised", "low_aud": 850_000, "high_aud": 935_000, "observed_at": later.isoformat()})
     row = row_for(client, a, pid)
     assert (row["first_guide_low"], row["first_guide_high"]) == (900_000, 990_000)
-    assert row["guide_changes"] == 1 and row["last_guide_change"] == "2026-09-30" and row["guide_change"] == -52_500
+    assert row["guide_changes"] == 1 and row["last_guide_change"] == later.date().isoformat() and row["guide_change"] == -52_500
 
 
 def test_sale_method_switch_from_the_grid_and_the_house_page(client, people):

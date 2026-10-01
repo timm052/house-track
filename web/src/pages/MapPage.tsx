@@ -1,8 +1,8 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as maplibregl from "maplibre-gl";
 import type { GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { Ban, Landmark, Layers, PenLine, Search, Timer, TriangleAlert, X } from "lucide-react";
+import { Ban, Landmark, LandPlot, Layers, PenLine, Search, Timer, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { TerraDraw, TerraDrawPolygonMode, TerraDrawSelectMode } from "terra-draw";
@@ -18,6 +18,9 @@ import { usePeople } from "../people";
 import { CLOSED, STATUS_COLOUR, useDarkMode } from "../colour";
 import { isDark as pageIsDark } from "../theme";
 import HouseSidePanel, { comparableLabel, type StationRoute, useComparables } from "../map/HouseSidePanel";
+import { useBlockPrefs, useBlockSuburbs, type BlockPrefs } from "../blocks";
+import { addBlockLayers, BLOCK_COLOURS, BLOCK_LAYERS, boundsOf, prepare, setBlockData, syncBlockLayers, type BlockColour } from "../map/blocks";
+import { BlockSheet, BlocksPanel, type BlockView, type Street } from "../map/BlocksPanel";
 
 const MELBOURNE: [number, number] = [145.0, -37.81];
 // Free satellite imagery (Esri World Imagery, street-level detail across Melbourne).
@@ -26,7 +29,7 @@ const SATELLITE = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Im
 const satelliteTiles: Promise<string> = fetch("/api/map-config").then((r) => r.json())
   .then((c: { satellite?: string | null }) => c.satellite || SATELLITE).catch(() => SATELLITE);
 // Our layers that go under the basemap's labels, so street and place names stay readable over them.
-const UNDER_LABELS = new Set(["hillshade", "contour-lines", "contour-labels"]);
+const UNDER_LABELS = new Set(["hillshade", "contour-lines", "contour-labels", ...BLOCK_LAYERS]);
 /** A basemap layer the satellite photo replaces: its land, water, buildings and roads (not its labels, which stay on
  *  top). The styles mix labels in among these, so they're hidden rather than left to draw over the photo. */
 const underPhoto = (l: { type: string }) => l.type !== "symbol" && l.type !== "background";
@@ -49,9 +52,10 @@ const store = (key: string, value: string) => { try { localStorage.setItem(key, 
 type Filter = "all" | "mine" | "either";
 
 type Selected = { kind: "property"; p: MapProperty } | { kind: "area"; a: MapArea } | null;
-type Panel = "key" | "layers" | "planning" | "travel" | "draw" | null;
+type Panel = "key" | "layers" | "planning" | "travel" | "draw" | "blocks" | null;
 const PANEL_TITLE: Record<Exclude<Panel, null>, string> = { key: "Key", layers: "Layers", planning: "Schools and planning", travel: "Travel time",
-  draw: "Mark an area" };
+  draw: "Mark an area", blocks: "Blocks" };
+const storedJson = <T,>(key: string, fallback: T): T => { try { return JSON.parse(localStorage.getItem(key) ?? "") as T; } catch { return fallback; } };
 const REDUCED_MOTION = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
 
@@ -170,6 +174,7 @@ export default function MapPage() {
         baseIds.current = { layers: new Set(base.layers.map((l) => l.id)), sources: new Set(Object.keys(base.sources)), hidden: hiddenIn(base.layers) };
         labelPaint.current = labelPaints(base.layers);
         addBaseLayers(map!, baseIds.current.layers);
+        addBlockLayers(map!, map!.getStyle().layers.find((l) => baseIds.current.layers.has(l.id) && l.type === "symbol")?.id);
         addLayers(map!);
         const draw = new TerraDraw({
           adapter: new TerraDrawMapLibreGLAdapter({ map: map! }),
@@ -352,6 +357,73 @@ export default function MapPage() {
     return () => { cancelled = true; };
   }, [ready, commute, commuteOrigin?.coords.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ─── blocks: every block in the analysed suburbs, or areas where many fit ───
+  const [blockView, setBlockView] = useState<BlockView>(() => { const v = stored("housetrack.map.blocks"); return v === "blocks" || v === "areas" ? v : "off"; });
+  const [blockColour, setBlockColour] = useState<BlockColour>(() => {
+    const v = stored("housetrack.map.blockColour"); return BLOCK_COLOURS.some(([c]) => c === v) ? v as BlockColour : "fit"; });
+  const [hiddenSuburbs, setHiddenSuburbs] = useState<string[]>(() => storedJson("housetrack.map.blockSuburbsHidden", []));
+  const [hexSize, setHexSize] = useState(() => Number(stored("housetrack.map.hexSize")) || 250);
+  // Preferences being tried on the map (this device) until saved for the household; null: the household's.
+  const [trial, setTrial] = useState<BlockPrefs | null>(() => storedJson("housetrack.map.blockPrefs", null));
+  const [selectedBlock, setSelectedBlock] = useState<string | null>(null);
+  const [savingPrefs, setSavingPrefs] = useState(false);
+  useEffect(() => {
+    store("housetrack.map.blocks", blockView); store("housetrack.map.blockColour", blockColour); store("housetrack.map.hexSize", String(hexSize));
+    store("housetrack.map.blockSuburbsHidden", JSON.stringify(hiddenSuburbs)); store("housetrack.map.blockPrefs", JSON.stringify(trial));
+  }, [blockView, blockColour, hexSize, hiddenSuburbs, trial]);
+  const householdPrefs = useBlockPrefs();
+  const blockPrefs = trial ?? householdPrefs.data ?? null;
+  const blockSuburbs = useBlockSuburbs(blockView !== "off" || panel === "blocks");
+  const shownSuburbs = (blockSuburbs.data ?? []).filter((x) => x.status === "done" && !hiddenSuburbs.includes(x.suburb));
+  const blockGeo = useQueries({ queries: shownSuburbs.map((x) => ({
+    queryKey: ["block-geojson", x.suburb, x.analysed_at], staleTime: Infinity, enabled: blockView !== "off",
+    queryFn: () => api<GeoJSON.FeatureCollection>(`/api/blocks/geojson?suburb=${encodeURIComponent(x.suburb)}`) })) });
+  const geoStamp = blockGeo.map((q) => q.dataUpdatedAt).join(",");
+  const splitRule = JSON.stringify([blockPrefs?.split, blockPrefs?.split_frontage]);
+  const blockFeatures = useMemo(() => !blockPrefs ? [] : shownSuburbs.flatMap((x, i) => {
+    const fc = blockGeo[i]?.data;
+    return fc ? prepare(fc, x.suburb, blockPrefs) : [];
+  }), [geoStamp, splitRule, shownSuburbs.map((x) => x.suburb).join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+  const areas = useQuery({
+    queryKey: ["block-areas", blockPrefs && [blockPrefs.min_m2, blockPrefs.max_m2, blockPrefs.max_incline, blockPrefs.directions, blockPrefs.include_units], hexSize,
+               (blockSuburbs.data ?? []).map((x) => x.analysed_at).join(",")],
+    enabled: blockView === "areas" && !!blockPrefs, staleTime: 300_000, placeholderData: (prev) => prev,
+    queryFn: () => api<{ hexes: GeoJSON.FeatureCollection; streets: Street[] }>("/api/blocks/areas", { method: "POST", body: {
+      min_m2: blockPrefs!.min_m2, max_m2: blockPrefs!.max_m2, max_incline: blockPrefs!.max_incline, directions: blockPrefs!.directions,
+      include_units: blockPrefs!.include_units, size: hexSize } }),
+  });
+  useEffect(() => {
+    const map = mapRef.current;
+    if (ready && map) setBlockData(map, blockFeatures, areas.data?.hexes);
+  }, [ready, blockFeatures, areas.data]);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (ready && map && blockPrefs) syncBlockLayers(map, { view: blockView, colour: blockColour, prefs: blockPrefs, photo: look === "photo",
+                                                           dark: look === "dark", selected: selectedBlock });
+  }, [ready, blockView, blockColour, blockPrefs, look, selectedBlock]);
+  async function saveBlockPrefs() {
+    if (!trial) return;
+    setSavingPrefs(true);
+    try {
+      await api("/api/blocks/prefs", { method: "PUT", body: trial });
+      setTrial(null);
+      for (const key of [["block-prefs"], ["overview"], ["block"], ["property-block"]]) queryClient.invalidateQueries({ queryKey: key });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSavingPrefs(false);
+    }
+  }
+  function goToSuburb(suburb: string) {
+    const b = boundsOf(blockFeatures.filter((f) => (f.properties as { sub?: string }).sub === suburb));
+    if (b) mapRef.current?.fitBounds(b, { padding: framing(), duration: REDUCED_MOTION ? 0 : 600 });
+  }
+  const houseSuburbs = useMemo(() => {
+    const n = new Map<string, number>();
+    for (const r of overview.data?.rows ?? []) if (r.suburb) n.set(String(r.suburb), (n.get(String(r.suburb)) ?? 0) + 1);
+    return [...n.entries()].sort((a, b) => b[1] - a[1]).map(([x]) => x);
+  }, [overview.data]);
+
   // ─── clicks ──────────────────────────────────────────────────────────
   const modeRef = useRef({ pinFor, pickPlace, drawing: false });
   modeRef.current = { pinFor, pickPlace, drawing: drawKind !== null || editing !== null };
@@ -383,14 +455,21 @@ export default function MapPage() {
         return;
       }
       if (mode.drawing) return;
-      const hit = map.queryRenderedFeatures(e.point, { layers: ["props-circle", "areas-fill"] });
+      const hit = map.queryRenderedFeatures(e.point, { layers: ["props-circle", "areas-fill", "blocks-fill"] });
       const prop = hit.find((f) => f.layer.id === "props-circle");
       const area = hit.find((f) => f.layer.id === "areas-fill");
+      const block = hit.find((f) => f.layer.id === "blocks-fill");
       const current = queryClient.getQueryData<MapData>(["map"]);
+      setSelectedBlock(null);
       if (prop) {
         const p = current?.properties.features.find((f) => f.properties.id === prop.properties.id)?.properties;
         setSelected(p ? { kind: "property", p } : null);
         setPanel(null);
+      } else if (block) {
+        // A block: its card (on a phone it takes the panel's place; on a computer the Blocks panel stays open beside it).
+        setSelected(null);
+        setSelectedBlock(String(block.properties.pfi));
+        if (window.innerWidth < 800) setPanel(null);
       } else if (area) {
         const a = current?.areas.features.find((f) => f.properties.id === area.properties.id)?.properties;
         setSelected(a ? { kind: "area", a } : null);
@@ -554,6 +633,7 @@ export default function MapPage() {
   const swatches = colourBy === "price" ? pal.priceRamp : statusesShown.slice(0, 5).map((st) => pal.status[st]);
   function selectHouse(f: (typeof houses)[number]) {
     setSelected({ kind: "property", p: f.properties });
+    setSelectedBlock(null);
     setPanel(null);
     const at = f.geometry.coordinates as [number, number];
     mapRef.current?.fitBounds(new maplibregl.LngLatBounds(at, at), { padding: framing(), maxZoom: 16, duration: REDUCED_MOTION ? 0 : 600 });
@@ -666,6 +746,13 @@ export default function MapPage() {
                 </>
               )}
             </>}
+            {panel === "blocks" && (blockPrefs ? (
+              <BlocksPanel view={blockView} setView={setBlockView} colour={blockColour} setColour={setBlockColour} prefs={blockPrefs}
+                household={householdPrefs.data} setTrial={setTrial} onSave={saveBlockPrefs} saving={savingPrefs}
+                suburbs={blockSuburbs.data ?? []} hidden={hiddenSuburbs} setHidden={setHiddenSuburbs} features={blockFeatures}
+                streets={areas.data?.streets} areasLoading={areas.isFetching} onGoTo={goToSuburb} hexSize={hexSize} setHexSize={setHexSize}
+                houseSuburbs={houseSuburbs} />
+            ) : <p className="small muted">Loading…</p>)}
             {panel === "draw" && <>
               <p className="small muted">Draw an area on the map. Only you see its effect.</p>
               <button className="map-choice" onClick={() => { setPanel(null); startDrawing("hard_exclude"); }}>
@@ -692,11 +779,19 @@ export default function MapPage() {
             )}
             <button className={panel === "travel" || commute ? "on" : ""} aria-pressed={panel === "travel"} onClick={() => toggle("travel")}>
               <Timer />{commute && commuteOrigin ? `${commute.minutes} min ${commute.mode === "drive" ? "drive" : "walk"}` : "Travel time"}</button>
+            <button className={panel === "blocks" || blockView !== "off" ? "on" : ""} aria-pressed={panel === "blocks"}
+              onClick={() => { toggle("blocks"); if (panel !== "blocks" && blockView === "off") setBlockView("blocks"); }}>
+              <LandPlot />Blocks</button>
             <button className={panel === "draw" ? "on" : ""} aria-pressed={panel === "draw"} onClick={() => toggle("draw")}>
               <PenLine />Mark an area</button>
           </div>
         )}
       </div>
+
+      {/* A tapped block: beside the map on a computer (the Blocks panel stays open to try preferences), a sheet on a phone. */}
+      {selectedBlock && blockPrefs && !busy && (
+        <div className="block-side"><BlockSheet pfi={selectedBlock} prefs={blockPrefs} onClose={() => setSelectedBlock(null)} /></div>
+      )}
 
       {houseOpen && (
         <HouseSidePanel p={selectedNow?.properties ?? selected.p} route={stationRoute.data} routeError={stationRoute.error as Error | null}

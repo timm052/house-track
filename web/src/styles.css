@@ -1726,3 +1726,85 @@ a.plan-open:active { transform: scale(0.98); transition-duration: 0ms; }
 .tab-grid.insp-grid { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
 @media (max-width: 900px) { .tab-grid.insp-grid { grid-template-columns: minmax(0, 1fr); } }
 .ip-acts a { text-decoration: none; font-weight: 600; }
+
+/* ── Blocks ── the drop diagram, a block's card (map, house page), the preferences form and the map's Blocks panel. */
+.fall-diagram { margin: 0; display: grid; gap: 2px; }
+.fall-diagram svg { width: 100%; height: auto; display: block; overflow: visible; }
+.fd-ground { fill: color-mix(in srgb, #8a5a2b 16%, var(--surface)); }
+.fd-hatch { stroke: color-mix(in srgb, #8a5a2b 30%, transparent); stroke-width: 1; }
+.fd-line { fill: none; stroke: #8a5a2b; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+:root[data-theme="dark"] .fd-line { stroke: #d6a874; }
+.fd-street { fill: var(--border-strong); }
+.fd-datum { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 3; opacity: 0.8; }
+.fd-post { stroke: var(--text); stroke-width: 1.5; opacity: 0.55; }
+.fd-dim { stroke: var(--muted); stroke-width: 1; }
+.fd-small { font-size: 10px; font-weight: 600; fill: var(--muted); font-family: var(--font-body); }
+.fd-bg { paint-order: stroke; stroke: var(--surface); stroke-width: 4px; }
+.fd-fall { font-size: 12px; font-weight: 750; fill: var(--text); font-family: var(--font-body); }
+.fd-fall.down { fill: #1c7ed6; } .fd-fall.up { fill: #d9480f; }
+:root[data-theme="dark"] .fd-fall.down { fill: #74c0fc; } :root[data-theme="dark"] .fd-fall.up { fill: #ffa94d; }
+
+.block-facts { display: grid; gap: 10px; }
+.block-fit { display: flex; flex-wrap: wrap; gap: 6px; }
+.block-fit .pill { white-space: normal; }
+.pill.tone-good { background: color-mix(in srgb, var(--yes) 14%, transparent); }
+.pill.tone-warn { background: color-mix(in srgb, var(--maybe) 14%, transparent); }
+.pill.dir-down { color: #1c7ed6; } .pill.dir-up { color: #d9480f; } .pill.dir-across { color: #9c36b5; }
+:root[data-theme="dark"] .pill.dir-down { color: #74c0fc; } :root[data-theme="dark"] .pill.dir-up { color: #ffa94d; } :root[data-theme="dark"] .pill.dir-across { color: #e599f7; }
+.block-dl { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px 14px; margin: 0; }
+.block-dl > div { min-width: 0; }
+.block-dl dt { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.block-dl dd { margin: 1px 0 0; font-weight: 600; font-size: 0.92rem; }
+.block-facts > p { margin: 0; }
+.house-block h2 { margin: 0; }
+
+.block-prefs { display: grid; gap: 12px; }
+.bp-row { display: grid; gap: 6px; }
+.bp-label { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.bp-range { display: flex; align-items: center; gap: 8px; }
+.bp-range input { width: 96px; min-height: 38px; }
+.bp-custom { display: inline-flex; align-items: center; gap: 4px; }
+.bp-custom input { width: 48px; min-height: 26px; padding: 0 6px; border-radius: 6px; font-size: 0.85rem; }
+.bp-check { display: flex; align-items: center; gap: 8px; font-size: 0.92rem; }
+.bp-zones { display: grid; gap: 6px; }
+.bp-zones label { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 0.9rem; }
+.bp-unit { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.bp-unit input { width: 84px; min-height: 36px; }
+.bk-settings-list { list-style: none; margin: 0; padding: 0; }
+.bk-settings-list li { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 0; }
+.bk-settings-list li + li { border-top: 1px solid var(--border); }
+
+.bk-field { display: grid; gap: 6px; }
+.bk-field .section-title { margin: 0; }
+.bk-ramp { display: flex !important; grid-template-columns: none; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--muted); }
+.bk-ramp i { flex: 1; height: 10px; border-radius: 5px; }
+.bk-streets { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: 0.88rem; }
+.bk-streets li > span { display: inline; }
+.bk-streets li { display: list-item; }
+.bk-streets li .muted { margin-left: 6px; }
+.bk-suburbs { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.bk-suburbs li { display: flex; align-items: center; gap: 6px; }
+.bk-suburbs label { display: flex; align-items: center; gap: 10px; min-height: 40px; cursor: pointer; }
+.bk-suburbs label > span { display: flex; flex-wrap: wrap; column-gap: 4px; }
+.map-page .bk-suburbs .icon-btn { min-height: 34px; min-width: 34px; padding: 0; justify-content: center; border: 0; background: none; color: var(--accent); }
+.bk-suburbs .icon-btn .lucide { width: 18px; height: 18px; }
+.bk-prefs .section-title { display: flex; align-items: center; gap: 8px; }
+.bk-prefs .section-title .pill { text-transform: none; letter-spacing: 0; background: var(--accent); color: var(--accent-text); }
+
+/* A tapped block: a card at the right on a computer, a sheet from the bottom on a phone. */
+.block-side { position: absolute; z-index: 6; top: 72px; right: 56px; width: 380px; max-width: calc(100% - 24px); max-height: calc(100% - 100px);
+  overflow-y: auto; overscroll-behavior: contain; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.22); }
+.map-page.house-open .block-side { display: none; }
+.block-sheet { padding: 14px 16px; }
+.block-sheet .row strong { font-size: 1.02rem; }
+.block-sheet .row .link { display: grid; place-items: center; min-width: 32px; min-height: 32px; padding: 0; }
+.block-sheet .row .lucide { width: 18px; height: 18px; }
+@media (max-width: 799px) {
+  .block-side { top: auto; left: 0; right: 0; bottom: 0; width: auto; max-width: none; max-height: 72vh; border-width: 1px 0 0;
+    border-radius: 18px 18px 0 0; box-shadow: 0 -8px 28px rgb(0 0 0 / 0.22); }
+  .block-sheet { padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
+}
+.chip.on .muted { color: inherit; opacity: 0.8; }
+.fall-diagram { max-width: 440px; }
+.chip .muted { margin-left: 4px; }

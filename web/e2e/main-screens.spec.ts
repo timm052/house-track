@@ -37,7 +37,7 @@ test("Houses lists the test house, with its tabs and the Rate tab", async ({ pag
   await open(page, "/");
   await expect(page.getByRole("radio", { name: /In play/ })).toBeVisible();
   await expect(page.getByRole("radio", { name: /To inspect/ })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Rate" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /^Rate/ })).toBeVisible();
   await page.getByRole("searchbox").fill(street);
   await expect(page.getByText(`1 ${street}`).first()).toBeVisible();
 });
@@ -143,4 +143,21 @@ test("The Houses card and the house's Inspections tab share the To inspect list,
   await expect(page.locator(".insp-panel .ip-head .pill")).toHaveText("Already inspected");
   await api(request, "DELETE", `/api/properties/${house}/inspected`);
   await api(request, "DELETE", `/api/properties/${house}/inspect-list`);
+});
+
+test("Blocks: the map's panel, Settings → Blocks and the house's block card", async ({ page }) => {
+  await open(page, "/map");
+  await page.getByRole("button", { name: "Blocks" }).click();
+  await expect(page.getByRole("dialog", { name: "Blocks" })).toBeVisible();
+  await open(page, "/settings");
+  const card = page.locator("#blocks");
+  await expect(card.getByRole("heading", { name: "The household's block preferences" })).toBeVisible();
+  // Changing a preference offers Save; Cancel puts it back without saving.
+  await card.getByRole("button", { name: /Moderate/ }).click();
+  await expect(card.getByRole("button", { name: "Save" })).toBeVisible();
+  await card.getByRole("button", { name: "Cancel" }).click();
+  await expect(card.getByRole("button", { name: "Save" })).toHaveCount(0);
+  await open(page, `/p/${house}`);
+  await page.getByRole("tab", { name: "Location" }).click();
+  await expect(page.locator(".house-block").getByRole("heading", { name: "The block" })).toBeVisible();
 });

@@ -19,13 +19,14 @@ import { ArrowDown, ArrowUp, Bath, BedDouble, CalendarDays, Camera, Car, Chevron
   PencilRuler, Plus, Scale, Search, SlidersHorizontal, TrainFront, TramFront, TriangleAlert } from "lucide-react";
 import { useNeeds } from "./Updates";
 import { statusOutOfStep } from "../Outcome";
+import { inclineText, type Direction } from "../blocks";
 import type { Outcome, Status } from "../api";
 
 type Overview = { rows: OverviewRow[]; places: OverviewPlace[]; pending?: number };
 // verdicts: person id → the verdicts to show (theirs after inspecting, else before; "unset" for none yet)
 type Quick = { thisWeek: boolean; statuses: string[]; methods: string[]; verdicts: Record<string, string[]>; hideExcluded: boolean;
-               suburbs: string[]; tags: string[]; affordable: boolean };
-const NO_QUICK: Quick = { thisWeek: false, statuses: [], methods: [], verdicts: {}, hideExcluded: false, suburbs: [], tags: [], affordable: false };
+               suburbs: string[]; tags: string[]; affordable: boolean; blockFits: boolean };
+const NO_QUICK: Quick = { thisWeek: false, statuses: [], methods: [], verdicts: {}, hideExcluded: false, suburbs: [], tags: [], affordable: false, blockFits: false };
 /** Which houses: you buy one, and watch the rest to learn what things sell for. Every house is in exactly one of
  *  looking, shortlist, under offer (the listing says so), sold (or otherwise off the market) and ruled out; "In
  *  play" is the first three together. Under offer and sold follow the listing, so nobody has to move them. */
@@ -105,6 +106,7 @@ export default function PropertyList() {
   if (quick.tags.length) filters.push({ column: "tags", op: "in", value: quick.tags });
   if (quick.hideExcluded) filters.push({ column: "excluded", op: "in", value: ["false"] });
   if (quick.affordable) filters.push({ column: "budget", op: "in", value: ["within", "stretch"] });
+  if (quick.blockFits) filters.push({ column: "block_fits", op: "in", value: ["true"] });
   const verdictOf = (r: OverviewRow, personId: string) => ((r[`v:${personId}:post`] ?? r[`v:${personId}:pre`]) as string | undefined) ?? "unset";
   const verdictPicks = Object.entries(quick.verdicts).filter(([, vs]) => vs.length);
   const keep = (r: OverviewRow) => (quick.statuses.length > 0 || inStage(r, stage))
@@ -145,6 +147,7 @@ export default function PropertyList() {
     ...verdictPicks.flatMap(([pid, vs]) => vs.map((v) => ({ key: `v:${pid}:${v}`, label: verdictLabel(pid, v), off: () => flipVerdict(pid, v) }))),
     ...(quick.thisWeek ? [{ key: "week", label: "Selling this week", off: () => setQuick({ ...quick, thisWeek: false }) }] : []),
     ...(quick.affordable ? [{ key: "budget", label: "Within budget", off: () => setQuick({ ...quick, affordable: false }) }] : []),
+    ...(quick.blockFits ? [{ key: "block", label: "Fits our block preferences", off: () => setQuick({ ...quick, blockFits: false }) }] : []),
     ...(quick.hideExcluded ? [{ key: "excl", label: "Hiding my excluded", off: () => setQuick({ ...quick, hideExcluded: false }) }] : []),
     ...extra.map((f, i) => ({ key: `x:${i}`, label: describe(f, byKey.get(f.column)), off: () => setExtra(extra.filter((_, j) => j !== i)),
       edit: () => { setFieldStart(f.column); setPanelOpen(true); } })),
@@ -292,6 +295,10 @@ export default function PropertyList() {
               ))}
               {(data?.rows ?? []).some((r) => r.budget) && (
                 <button className={`chip ${quick.affordable ? "on" : ""}`} onClick={() => setQuick({ ...quick, affordable: !quick.affordable })}>Within budget</button>
+              )}
+              {(data?.rows ?? []).some((r) => r.block_fits != null) && (
+                <button className={`chip ${quick.blockFits ? "on" : ""}`} title="Block size and slope, from Settings → Blocks"
+                  onClick={() => setQuick({ ...quick, blockFits: !quick.blockFits })}>Fits our block preferences</button>
               )}
             </div>
           </section>
@@ -451,7 +458,8 @@ function Card({ r, people, favourites, cols, slots, tagColours, picked, onPick }
     r.beds != null && <span key="b"><BedDouble /> {String(r.beds)}</span>,
     r.baths != null && <span key="ba"><Bath /> {String(r.baths)}</span>,
     r.car_spaces != null && <span key="c"><Car /> {String(r.car_spaces)}</span>,
-    r.land_m2 != null && <span key="l"><LandPlot /> {landArea(Number(r.land_m2))}</span>,
+    r.land_m2 != null ? <span key="l"><LandPlot /> {landArea(Number(r.land_m2))}</span>
+      : r.block_m2 != null && <span key="l" title="Block size from the property boundary"><LandPlot /> {landArea(Number(r.block_m2))}</span>,
     r.property_type !== "house" && r.property_type != null && <span key="t" className="muted">{display(col("property_type"), r.property_type)}</span>,
   ].filter(Boolean) as ReactNode[];
   const notes = [
@@ -459,6 +467,9 @@ function Card({ r, people, favourites, cols, slots, tagColours, picked, onPick }
     (r.budget === "over" || r.budget === "stretch") && <span key="bu" className={`pill tone-${budgetTone(r.budget)}`} title="Guide compared with your maximum bid (Settings)">
       {r.budget === "over" ? "Over budget" : "Stretch"}</span>,
     r.walk_away != null && <span key="w" className="pill">our max {money(n("walk_away"))}</span>,
+    r.block_incline != null && <span key="bk" className={`pill ${r.block_fits === false ? "tone-warn" : r.block_fits ? "tone-good" : "quiet"}`}
+      title={r.block_fits === false ? "Outside your block preferences" : r.block_fits ? "Fits your block preferences" : undefined}>
+      {inclineText({ incline_pct: n("block_incline"), direction: r.block_falls as Direction })}</span>,
     Boolean(r.days_on_market != null && r.sale_method && !r.outcome) && <span key="d" className="pill quiet">{String(r.days_on_market)} {r.days_on_market === 1 ? "day" : "days"} listed</span>,
   ].filter(Boolean) as ReactNode[];
   const go = (e: React.MouseEvent, to: string) => { e.preventDefault(); e.stopPropagation(); navigate(to); };

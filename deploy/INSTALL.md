@@ -97,6 +97,15 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.13
+
+- **Blocks.** Add the suburbs you're searching in **Settings → Blocks** (or from the map), and House Track downloads every property boundary there from Victoria's open map data, with the 1 m contours, roads and planning zones around them, and measures each block: size, frontage, depth, shape (including battle-axe blocks), the fall front to back and side to side, how steep it is, whether it slopes up or down from the street or across, which way the back faces, and how many lots it could be split into under your rules for its zone. A suburb takes about a minute; re-run it now and then for new subdivisions.
+- **Block preferences** for the household: a size range, the steepest incline (Flat under 3%, Gentle up to 8%, Moderate up to 15%, or your own %), which ways a block may fall, whether unit lots count, and the subdivision rules by zone.
+- **Map → Blocks:** every block in those suburbs, including houses that aren't for sale, coloured by whether it fits, size, slope, which way it falls, whether it could be split, or which way the back faces. Your houses' blocks are outlined. Tap a block for its card, with a drop diagram from the street to the back fence. **Areas** shades hexagons by the share of blocks that fit and lists the streets with the most. Preferences can be tried on the map and then **saved for the household**.
+- **Houses:** a slope badge on each card (green when the block fits, amber when it doesn't), the block size where the listing has no land size, and a **Fits our block preferences** filter. **Grid:** a Block group of columns (fits, size, incline, falls, rise to back, frontage, depth, shape, back faces, could split into).
+- **A house's Location tab** has **The block** card with the drop diagram, or a button to analyse its suburb.
+- Database: migration `0021_blocks` (new tables only). Block outlines are sent compressed (the API now gzips large responses).
+
 ### 0.4.12
 
 - **A house's Inspections tab, redesigned.** A tag shows where the house stands on the Inspections page (On To inspect, Already inspected, Passed on, In the list) with the button to change it and the **We've been to this house** tick. Times are split into **Coming up** (Calendar, Not going) and **Earlier** (Went, Cancelled, or "Did you go?" with **I went**, **Didn't go** and **Cancelled by the agent**). **Not going** keeps who removed each time, with **Add back**. Adding a time is one row.

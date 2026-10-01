@@ -8,6 +8,8 @@ import { money, parseMoney } from "../format";
 import { CriteriaSettings } from "./Decide";
 import ConfirmButton from "../ConfirmButton";
 import { LIVE, Live, OfflineNote } from "../live";
+import { AddSuburb, PrefsEditor, samePrefs, suburbName, useBlockPrefs, useBlockSuburbs, type BlockPrefs } from "../blocks";
+import type { OverviewRow } from "../overview/columns";
 
 export default function Settings() {
   const queryClient = useQueryClient();
@@ -68,6 +70,7 @@ export default function Settings() {
 
       <MoneySettings />
       <LayerSettings />
+      <BlockSettings />
       <CriteriaSettings />
       <TagSettings />
     </div>
@@ -122,6 +125,76 @@ function MoneySettings() {
 type Layer = { code: string; title: string; effect: "info" | "soft_warn" | "hard_exclude"; data_as_of: string | null };
 
 /** Per-layer effect for the whole household (milestone 5): e.g. make floodways exclude houses outright. */
+/** Blocks (the map's Blocks mode): the suburbs analysed and the household's block preferences, which decide what the
+ *  Houses list, the Grid and each house's page count as fitting. */
+function BlockSettings() {
+  const queryClient = useQueryClient();
+  const suburbs = useBlockSuburbs();
+  const saved = useBlockPrefs();
+  const overview = useQuery({ queryKey: ["overview"], queryFn: () => api<{ rows: OverviewRow[] }>("/api/overview") });
+  const [draft, setDraft] = useState<BlockPrefs | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const prefs = draft ?? saved.data;
+  const changed = draft != null && !samePrefs(draft, saved.data);
+  const counts = new Map<string, number>();
+  for (const r of overview.data?.rows ?? []) if (r.suburb) counts.set(String(r.suburb), (counts.get(String(r.suburb)) ?? 0) + 1);
+  const suggestions = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([x]) => x);
+  const act = async (fn: () => Promise<unknown>) => {
+    setError(null);
+    try { await fn(); } catch (e) { setError((e as Error).message); }
+    queryClient.invalidateQueries({ queryKey: ["block-suburbs"] });
+  };
+  async function save() {
+    setError(null);
+    try {
+      await api("/api/blocks/prefs", { method: "PUT", body: draft });
+      setDraft(null);
+      for (const key of [["block-prefs"], ["overview"], ["block"], ["property-block"]]) queryClient.invalidateQueries({ queryKey: key });
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  const when = new Intl.DateTimeFormat("en-AU", { day: "numeric", month: "short", year: "numeric" });
+  return (
+    <div className="card stack" id="blocks">
+      <h2>Blocks</h2>
+      <p className="small muted">Every property's block in the suburbs below is measured from Victoria's open map data: its size, frontage,
+        shape, slope and which way it falls. The map's <Link to="/map">Blocks</Link> mode shows them all, including houses that aren't for
+        sale. Re-run a suburb now and then to pick up new subdivisions.</p>
+      <Live queries={[suburbs]}>
+        {(suburbs.data ?? []).length > 0 && (
+          <ul className="bk-settings-list">
+            {suburbs.data!.map((x) => (
+              <li key={x.suburb}>
+                <span className="grow"><strong>{suburbName(x.suburb)}</strong>
+                  <span className="small muted"> · {x.status === "done" ? `${(x.blocks ?? 0).toLocaleString()} blocks, ${x.analysed_at ? when.format(new Date(x.analysed_at)) : ""}`
+                    : x.status === "error" ? "couldn't be analysed" : x.status === "running" ? "analysing now…" : "waiting to be analysed…"}</span>
+                  {x.status === "error" && x.error && <span className="small error" style={{ display: "block" }}>{x.error}</span>}</span>
+                {(x.status === "done" || x.status === "error") && <button className="link" onClick={() => act(() => api(`/api/blocks/suburbs/${encodeURIComponent(x.suburb)}/refresh`, { method: "POST" }))}>
+                  {x.status === "error" ? "Try again" : "Re-run"}</button>}
+                <ConfirmButton label="Remove" yes={`Remove ${suburbName(x.suburb)}`} question="Its blocks leave the map, and its houses lose their block details."
+                  onConfirm={() => act(() => api(`/api/blocks/suburbs/${encodeURIComponent(x.suburb)}`, { method: "DELETE" }))} />
+              </li>
+            ))}
+          </ul>
+        )}
+        <AddSuburb have={(suburbs.data ?? []).map((x) => x.suburb)} suggestions={suggestions} />
+      </Live>
+      <h3 style={{ margin: "8px 0 0" }}>The household's block preferences</h3>
+      <p className="small muted" style={{ margin: 0 }}>Used to mark houses that fit on the Houses list, the Grid and each house's page. The map can try
+        others out first.</p>
+      {prefs && <PrefsEditor value={prefs} onChange={setDraft} full />}
+      {error && <p className="error small">{error}</p>}
+      {changed && (
+        <div className="row">
+          <button className="primary" onClick={save} disabled={prefs!.max_m2 < prefs!.min_m2}>Save</button>
+          <button className="link" onClick={() => setDraft(null)}>Cancel</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LayerSettings() {
   const queryClient = useQueryClient();
   const overlays = useQuery({ queryKey: ["overlays"], queryFn: () => api<Layer[]>("/api/overlays"), ...LIVE });

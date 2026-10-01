@@ -1003,7 +1003,7 @@ The `gnaf` database, tiles and routing data are left out of backups because setu
 | Public transport journey times (OpenTripPlanner + GTFS). | `travel_estimate.mode` gains a value |
 | Walking-time rings around designated stations (Valhalla isochrones) as a map layer. | None |
 | Noise and proximity layers: airport noise contours, freeway/rail buffers, transmission lines. | Polygons fit `overlay_feature`; point layers additive |
-| Lot boundaries from the state's parcel data: real shape, land-size check, rear orientation. | Additive nullable `property.parcel` |
+| ✅ Lot boundaries from the state's parcel data: real shape, land-size check, rear orientation. Done as **Blocks** (0.4.13): every block in chosen suburbs with size, frontage, shape, slope and fall, back orientation and subdivision potential; the map's Blocks mode, Settings → Blocks, a house's Block card. | Separate `block` tables (migration `0021`), matched to houses by location rather than a `property.parcel` column |
 | Off-the-plan contract tracking: deposit, sunset date, stage, construction progress. | Additive columns on `campaign` |
 | Positive "focus" areas and a map of where your yes verdicts cluster. | Widen the `area.kind` CHECK |
 | Push reminders ("auction in 2 hours"). | Additive subscription table |

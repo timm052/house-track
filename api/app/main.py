@@ -5,11 +5,12 @@ from contextlib import asynccontextmanager
 
 import psycopg
 from fastapi import FastAPI, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
 from . import db, gnaf
 from .geo_services import Nominatim, Transitous, Valhalla
-from .routes import campaigns, decide, driveway, geo, markup, money, overlays, overview, people, properties, push, tags, updates
+from .routes import blocks, campaigns, decide, driveway, geo, markup, money, overlays, overview, people, properties, push, tags, updates
 from .worker import Worker
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -41,6 +42,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="House Track", version="0.1.0", lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=4096)   # the map's block outlines are a few MB as JSON
 app.include_router(people.router)
 app.include_router(properties.router)
 app.include_router(campaigns.router)
@@ -54,6 +56,7 @@ app.include_router(push.router)
 app.include_router(updates.router)
 app.include_router(tags.router)
 app.include_router(markup.router)
+app.include_router(blocks.router)
 
 
 @app.get("/api/health")

@@ -15,6 +15,7 @@ import { Files, Inspections } from "./PropertyExtras";
 import { ScoresCard } from "./Decide";
 import { Bath, BedDouble, Building2, CalendarDays, CalendarPlus, Camera, Car, ChevronLeft, ChevronRight, CircleDollarSign, CircleHelp, DollarSign, DoorOpen, FileText, Gavel, House, ImagePlus, LandPlot, Map as MapIcon, MapPin, Paperclip, PartyPopper, Scale, School, Tag, ThumbsDown, ThumbsUp, TrainFront, TramFront, Trash2, TriangleAlert } from "lucide-react";
 import Commute from "../Commute";
+import { HouseBlockCard } from "../blocks";
 import ConfirmButton from "../ConfirmButton";
 import { OutcomeForm, outcomeStatus, statusOutOfStep } from "../Outcome";
 
@@ -104,6 +105,7 @@ export default function PropertyDetail() {
                 <Link className="banner-badge top" to={`/map?house=${p.id}`}>Open the full map</Link>
               </div>
             )}
+            <HouseBlockCard propertyId={p.id} suburb={p.suburb} propertyType={p.property_type} />
             <WhereAndGettingAround p={p} />
             <SchoolsAndPlanning p={p} />
           </>

@@ -106,6 +106,20 @@ export function catalogue(persons: Person[], places: OverviewPlace[]): Column[] 
     cols.push({ key: `score:${p.id}`, label: `${p.display_name} score`, group: "Scores", kind: "int", width: 90 });
   }
   cols.push({ key: "score_avg", label: "Average score", group: "Scores", kind: "int", byDefault: true, width: 90 });
+  // The block under the house, where its suburb has been analysed (Settings → Blocks; the map's Blocks mode).
+  cols.push(
+    { key: "block_fits", label: "Fits block prefs", group: "Block", kind: "enum", width: 105, options: { true: "Fits", false: "Doesn't fit" } },
+    { key: "block_m2", label: "Block m²", group: "Block", kind: "int", width: 80 },
+    { key: "block_incline", label: "Incline %", group: "Block", kind: "int", width: 75 },
+    { key: "block_falls", label: "Falls", group: "Block", kind: "enum", width: 110,
+      options: { level: "Level", down: "Down from street", up: "Up from street", across: "Across" } },
+    { key: "block_fall_m", label: "Rise to back m", group: "Block", kind: "int", width: 95 },
+    { key: "block_frontage", label: "Frontage m", group: "Block", kind: "int", width: 85 },
+    { key: "block_depth", label: "Depth m", group: "Block", kind: "int", width: 70 },
+    { key: "block_shape", label: "Block shape", group: "Block", kind: "text", width: 110 },
+    { key: "block_rear", label: "Back faces", group: "Block", kind: "text", width: 90 },
+    { key: "block_split", label: "Could split into", group: "Block", kind: "int", width: 100 },
+  );
   cols.push(
     { key: "nearest_station", label: "Nearest station", group: "Getting around", kind: "text", byDefault: true, width: 120 },
     { key: "nearest_station_drive", label: "Drive to station", group: "Getting around", kind: "minutes", byDefault: true, width: 90 },

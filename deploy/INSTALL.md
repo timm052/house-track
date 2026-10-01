@@ -97,6 +97,14 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.12
+
+- **A house's Inspections tab, redesigned.** A tag shows where the house stands on the Inspections page (On To inspect, Already inspected, Passed on, In the list) with the button to change it and the **We've been to this house** tick. Times are split into **Coming up** (Calendar, Not going) and **Earlier** (Went, Cancelled, or "Did you go?" with **I went**, **Didn't go** and **Cancelled by the agent**). **Not going** keeps who removed each time, with **Add back**. Adding a time is one row.
+- **Every verdict** is gone from the tab; the Opinions card's History has the same list.
+- The Inspections tab count, the About tab's next inspection and the timeline leave out times you're not going to or that were cancelled.
+- The sidebar button reads **Inspected · add again** for a house you've been to.
+- No database changes.
+
 ### 0.4.11
 
 - **Houses:** each house card has a **To inspect** button to put it on, or take it off, the Inspections list. Cards also show an **Inspected** badge once someone has been.

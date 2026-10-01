@@ -1697,3 +1697,32 @@ a.plan-open:active { transform: scale(0.98); transition-duration: 0ms; }
   .upd-thumb .insp-thumb { border-radius: 12px; }
   .upd-time { align-self: start; padding-top: 2px; font-size: 0.72rem; }
 }
+
+/* A house's Inspections tab: where it stands on the Inspections page, then the times coming up, earlier ones and Not going. */
+.insp-panel { gap: 14px; }
+.insp-panel .ip-head { display: flex; align-items: center; gap: 10px; }
+.insp-panel .ip-head h2 { margin: 0; flex: 1; }
+.insp-panel .ip-head .pill.on { background: var(--accent-soft, var(--surface-2)); color: var(--accent); }
+.ip-standing { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
+.ip-standing .grow { min-width: 160px; }
+.ip-sub { margin: 0 0 6px; font-size: 0.8rem; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.ip-empty { margin: 0; }
+.ip-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ip-list > li { display: flex; align-items: flex-start; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); }
+.ip-list > li:first-child { border-top: 0; }
+.ip-date { flex: none; width: 60px; padding: 4px 0; border-radius: 8px; border: 1px solid var(--border); text-align: center; line-height: 1.15; }
+.ip-date span { display: block; font-size: 0.72rem; color: var(--muted); text-transform: uppercase; }
+.ip-date strong { display: block; font-size: 0.85rem; }
+.ip-acts { display: flex; align-items: center; gap: 12px; white-space: nowrap; }
+.ip-past { gap: 4px; min-width: 0; }
+.ip-fold summary { cursor: pointer; }
+.ip-fold .ip-list { margin-top: 8px; }
+.ip-add { display: flex; flex-wrap: wrap; gap: 8px; }
+.ip-add select { flex: 1 1 120px; min-width: 0; } .ip-add input { flex: 2 1 170px; min-width: 0; } .ip-add button { flex: none; }
+@media (max-width: 520px) { .ip-acts { flex-direction: column; align-items: flex-end; gap: 4px; } }
+.ip-what { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.ip-time { font-size: 0.95rem; }
+.ip-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.tab-grid.insp-grid { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+@media (max-width: 900px) { .tab-grid.insp-grid { grid-template-columns: minmax(0, 1fr); } }
+.ip-acts a { text-decoration: none; font-weight: 600; }

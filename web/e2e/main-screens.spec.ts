@@ -130,17 +130,17 @@ test("The Houses card and the house's Inspections tab share the To inspect list,
   const id = (await api(request, "POST", `/api/properties/${house}/inspections`, { kind: "open", starts_at: start })).id;
   await open(page, `/p/${house}`);
   await page.getByRole("tab", { name: /Inspections/ }).click();
-  await expect(page.getByText("On your To inspect list")).toBeVisible();
+  await expect(page.locator(".insp-panel .ip-head .pill")).toHaveText("On To inspect");
   await page.getByRole("button", { name: "Not going" }).click();
   await page.getByRole("button", { name: "Remove", exact: true }).click();
   await expect(page.getByText(/Removed by/)).toBeHidden();   // folded away
-  await page.getByText("Not going", { exact: false }).first().click();
+  await page.locator(".ip-fold summary").click();
   await expect(page.getByText(/Removed by/)).toBeVisible();
   await page.getByRole("button", { name: "Add back" }).click();
   await expect.poll(async () => (await api(request, "GET", `/api/properties/${house}`)).inspections.find((i: { id: string }) => i.id === id).state).toBe("planned");
 
   await page.getByLabel("We've been to this house").click();
-  await expect(page.getByText(/Already inspected/)).toBeVisible();
+  await expect(page.locator(".insp-panel .ip-head .pill")).toHaveText("Already inspected");
   await api(request, "DELETE", `/api/properties/${house}/inspected`);
   await api(request, "DELETE", `/api/properties/${house}/inspect-list`);
 });

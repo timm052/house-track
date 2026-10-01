@@ -4,7 +4,7 @@ import { lazy, Suspense, useState } from "react";
 import { FileText, PencilRuler } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api, type Opinion } from "../api";
-import { fromLocalInput, INSPECTION_KINDS, when } from "../format";
+import { fromLocalInput, INSPECTION_KINDS } from "../format";
 import { newId, sendOrQueue, uploadFiles, uploadMessage } from "../outbox";
 import { usePeople } from "../people";
 import ConfirmButton from "../ConfirmButton";
@@ -43,106 +43,154 @@ function useRefresh(propertyId: string) {
   };
 }
 
-/** Where this house stands on the Inspections page, by the same rules as that page: on the To inspect list it's in
- *  the day's list; otherwise a house someone has been to is under "Already inspected", and one someone said No to is
- *  under "Passed on". Anything else is in the list. The button puts it in the list, or takes it out. */
-function ListStanding({ propertyId, toInspect, inspectedBy, opinions, onDone }: {
-  propertyId: string; toInspect: boolean; inspectedBy: string[]; opinions: Opinion[]; onDone: () => void;
-}) {
-  const { active } = usePeople();
-  const latest = new Map<string, Opinion>();
-  for (const o of opinions) if (!latest.has(o.person_id) || o.recorded_at > latest.get(o.person_id)!.recorded_at) latest.set(o.person_id, o);
-  const no = active.filter((p) => latest.get(p.id)?.stance === "no").map((p) => p.display_name);
-  const call = (method: "PUT" | "DELETE") => api(`/api/properties/${propertyId}/inspect-list`, { method }).then(onDone);
-  let text: string, button: [string, "PUT" | "DELETE"] | null;
-  if (toInspect) { text = "On your To inspect list. It shows on the Inspections page."; button = ["Remove from list", "DELETE"]; }
-  else if (inspectedBy.length > 0) { text = "Already inspected, so it's kept out of the Inspections list."; button = ["Add again", "PUT"]; }
-  else if (no.length > 0) { text = `${no.join(" and ")} said No, so it's kept out of the Inspections list.`; button = ["Add back", "PUT"]; }
-  else { text = "Shows on the Inspections page."; button = ["Add to To inspect", "PUT"]; }
-  return (
-    <div className="row small">
-      <span className="grow">{text}</span>
-      {button && <button className="small-btn" onClick={() => call(button![1])}>{button[0]}</button>}
-    </div>
-  );
+const dayName = new Intl.DateTimeFormat("en-AU", { weekday: "short" });
+const dayMonth = new Intl.DateTimeFormat("en-AU", { day: "numeric", month: "short" });
+const clockFmt = new Intl.DateTimeFormat("en-AU", { hour: "numeric", minute: "2-digit" });
+const clock = (t: string) => clockFmt.format(new Date(t)).toLowerCase();
+const STATE_LABEL: Record<string, string> = { attended: "Went", skipped: "Not going", cancelled: "Cancelled", planned: "Did you go?" };
+
+/** Where this house stands on the Inspections page, by that page's rules: on the To inspect list it's in the day's list;
+ *  otherwise a house you've been to is under "Already inspected" and one someone said No to is under "Passed on";
+ *  anything else is in the list. The words, a short tag, and the button that changes it. */
+function standing(toInspect: boolean, inspectedBy: string[], no: string[]) {
+  if (toInspect) return { tag: "On To inspect", text: "In the Inspections list.", action: ["Take off the list", "DELETE"] as const };
+  if (inspectedBy.length > 0) return { tag: "Already inspected", text: "Kept under Already inspected on the Inspections page.", action: ["Add again", "PUT"] as const };
+  if (no.length > 0) return { tag: "Passed on", text: `${no.join(" and ")} said No, so it's under Passed on.`, action: ["Add back", "PUT"] as const };
+  return { tag: "In the list", text: "Its times show on the Inspections page.", action: ["Add to To inspect", "PUT"] as const };
 }
 
-export function Inspections({ propertyId, inspections, toInspect, inspectedBy, opinions }: {
-  propertyId: string; inspections: Inspection[]; toInspect: boolean; inspectedBy: string[]; opinions: Opinion[];
+export function Inspections({ propertyId, inspections, toInspect, inspected, inspectedBy, opinions }: {
+  propertyId: string; inspections: Inspection[]; toInspect: boolean; inspected: boolean; inspectedBy: string[]; opinions: Opinion[];
 }) {
   const refresh = useRefresh(propertyId);
-  const { me, byId } = usePeople();
+  const { me, byId, active } = usePeople();
   const [kind, setKind] = useState("open");
   const [at, setAt] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  async function add() {
+  const run = async (fn: () => Promise<unknown>) => {
     setError(null);
-    try {
-      await api(`/api/properties/${propertyId}/inspections`, { method: "POST", body: { kind, starts_at: fromLocalInput(at) } });
-      setAt("");
-      refresh();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
-  const setState = (id: string, state: string) =>
-    api(`/api/inspections/${id}`, { method: "PATCH", body: { state } }).then(refresh);
-  // Not going is kept (and shown on the Inspections page under Not going), with who took it off. Add back restores it.
+    try { await fn(); refresh(); } catch (e) { setError((e as Error).message); }
+  };
+  const add = () => run(async () => {
+    await api(`/api/properties/${propertyId}/inspections`, { method: "POST", body: { kind, starts_at: fromLocalInput(at) } });
+    setAt("");
+  });
+  const setState = (id: string, state: string) => run(() => api(`/api/inspections/${id}`, { method: "PATCH", body: { state } }));
+
+  const latest = new Map<string, Opinion>();
+  for (const o of opinions) if (!latest.has(o.person_id) || o.recorded_at > latest.get(o.person_id)!.recorded_at) latest.set(o.person_id, o);
+  const no = active.filter((p) => latest.get(p.id)?.stance === "no").map((p) => p.display_name);
+  const st = standing(toInspect, inspectedBy, no);
+
+  // Coming up: planned and not over yet. Earlier: what's happened (or was cancelled), newest first. Not going is kept,
+  // folded away, with who took it off, the same as on the Inspections page.
+  const now = Date.now();
+  const over = (i: Inspection) => new Date(i.ends_at ?? i.starts_at).getTime() < now;
+  const upcoming = inspections.filter((i) => i.state === "planned" && !over(i)).sort((x, y) => x.starts_at.localeCompare(y.starts_at));
   const notGoing = inspections.filter((i) => i.state === "skipped");
-  const shown = inspections.filter((i) => i.state !== "skipped");
+  const earlier = inspections.filter((i) => !upcoming.includes(i) && i.state !== "skipped");
+
+  const date = (i: Inspection) => (
+    <div className="ip-date" aria-hidden><span>{dayName.format(new Date(i.starts_at))}</span><strong>{dayMonth.format(new Date(i.starts_at))}</strong></div>
+  );
+  const what = (i: Inspection) => <><strong className="ip-time">{clock(i.starts_at)}{i.ends_at ? `–${clock(i.ends_at)}` : ""}</strong>
+    <span className="small muted">{KINDS[i.kind] ?? i.kind}</span></>;
 
   return (
-    <div className="card stack">
-      <h2>Inspections</h2>
-      <ListStanding propertyId={propertyId} toInspect={toInspect} inspectedBy={inspectedBy} opinions={opinions} onDone={refresh} />
-      {shown.length === 0 && <p className="small muted">None yet.</p>}
-      {shown.map((i) => {
-        const mine = i.attendees.find((a) => a.person_id === me?.id);
-        return (
-          <div key={i.id} className="inspection">
-            <div className="row">
-              <strong className="grow">{when(i.starts_at)} · {KINDS[i.kind] ?? i.kind}</strong>
-              <span className="pill">{i.state}</span>
-              <a className="small" href={`/api/events/inspection/${i.id}.ics`}>Add to calendar</a>
-            </div>
-            {i.inspector && <div className="small">Inspector: {i.inspector}</div>}
-            {i.attendees.map((a) => (
-              <div key={a.person_id} className="small">
-                <span className="dot" style={{ background: byId.get(a.person_id)?.colour }} />
-                {byId.get(a.person_id)?.display_name} went{a.note ? `: ${a.note}` : ""}
+    <div className="card stack insp-panel">
+      <div className="ip-head">
+        <h2>Inspections</h2>
+        <span className={`pill ${toInspect ? "on" : ""}`}>{st.tag}</span>
+      </div>
+      <div className="ip-standing">
+        <span className="small muted grow">{st.text}</span>
+        <button className="small-btn" onClick={() => run(() => api(`/api/properties/${propertyId}/inspect-list`, { method: st.action[1] }))}>{st.action[0]}</button>
+        <label className="check small"><input type="checkbox" checked={inspected}
+          onChange={(e) => run(() => api(`/api/properties/${propertyId}/inspected`, { method: e.target.checked ? "PUT" : "DELETE" }))} />
+          We've been to this house</label>
+      </div>
+
+      <section>
+        <h3 className="ip-sub">Coming up</h3>
+        {upcoming.length === 0 && <p className="small muted ip-empty">Nothing booked. Add a time below, or update the house from its listing.</p>}
+        <ul className="ip-list">
+          {upcoming.map((i) => (
+            <li key={i.id}>
+              {date(i)}
+              <div className="grow ip-what">
+                {what(i)}
+                {i.inspector && <div className="small muted">Inspector: {i.inspector}</div>}
               </div>
-            ))}
-            <AttendeeNote inspectionId={i.id} initial={mine?.note ?? ""} attended={!!mine} onDone={refresh} />
-            {i.state === "planned" && (
-              <div className="row">
-                <ConfirmButton className="link" label="Not going" question="Not going?" yes="Remove" onConfirm={() => setState(i.id, "skipped")} />
-                <button className="link" onClick={() => setState(i.id, "cancelled")}>Cancelled by the agent</button>
+              <div className="ip-acts">
+                <a className="small" href={`/api/events/inspection/${i.id}.ics`}>Calendar</a>
+                <ConfirmButton className="link small" label="Not going" question="Not going?" yes="Remove" onConfirm={() => setState(i.id, "skipped")} />
               </div>
-            )}
-          </div>
-        );
-      })}
-      {notGoing.length > 0 && (
-        <details>
-          <summary className="small"><strong>Not going</strong> <span className="muted">· {notGoing.length}</span></summary>
-          {notGoing.map((i) => (
-            <div key={i.id} className="row small" style={{ marginTop: 6 }}>
-              <span className="grow">{when(i.starts_at)} · {KINDS[i.kind] ?? i.kind}
-                <span className="muted"> · Removed by {i.updated_by_name ?? "someone"}</span></span>
-              <button className="small-btn" onClick={() => setState(i.id, "planned")}>Add back</button>
-            </div>
+            </li>
           ))}
+        </ul>
+      </section>
+
+      {earlier.length > 0 && (
+        <section>
+          <h3 className="ip-sub">Earlier</h3>
+          <ul className="ip-list">
+            {earlier.map((i) => {
+              const mine = i.attendees.find((x) => x.person_id === me?.id);
+              return (
+                <li key={i.id}>
+                  {date(i)}
+                  <div className="grow stack ip-past">
+                    <div className="ip-row"><div className="grow ip-what">{what(i)}</div>
+                      <span className={`pill ${i.state === "attended" ? "yes" : "quiet"}`}>{STATE_LABEL[i.state] ?? i.state}</span></div>
+                    {i.attendees.map((x) => (
+                      <div key={x.person_id} className="small">
+                        <span className="dot" style={{ background: byId.get(x.person_id)?.colour }} />
+                        {byId.get(x.person_id)?.display_name} went{x.note ? `: ${x.note}` : ""}
+                      </div>
+                    ))}
+                    {i.state === "attended" && <AttendeeNote inspectionId={i.id} initial={mine?.note ?? ""} attended={!!mine} onDone={refresh} />}
+                    {i.state === "planned" && (
+                      <div className="ip-row small">
+                        <button className="small-btn" onClick={() => me && run(() => api(`/api/inspections/${i.id}/attendees/${me.id}`, { method: "PUT", body: { note: null } }))}>I went</button>
+                        <button className="link" onClick={() => setState(i.id, "skipped")}>Didn't go</button>
+                        <button className="link" onClick={() => setState(i.id, "cancelled")}>Cancelled by the agent</button>
+                      </div>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
+      {notGoing.length > 0 && (
+        <details className="ip-fold">
+          <summary><strong>Not going</strong> <span className="muted">· {notGoing.length}</span></summary>
+          <ul className="ip-list">
+            {notGoing.map((i) => (
+              <li key={i.id}>
+                {date(i)}
+                <div className="grow ip-what">{what(i)}<span className="small muted">Removed by {i.updated_by_name ?? "someone"}</span></div>
+                <button className="small-btn" onClick={() => setState(i.id, "planned")}>Add back</button>
+              </li>
+            ))}
+          </ul>
         </details>
       )}
-      <div className="grid2">
-        <select value={kind} onChange={(e) => setKind(e.target.value)} aria-label="Kind">
-          {Object.entries(KINDS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        <input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} aria-label="When" />
-      </div>
+
+      <section>
+        <h3 className="ip-sub">Add a time</h3>
+        <div className="ip-add">
+          <select value={kind} onChange={(e) => setKind(e.target.value)} aria-label="Kind">
+            {Object.entries(KINDS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+          <input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} aria-label="When" />
+          <button className="primary" disabled={!at} onClick={add}>Add</button>
+        </div>
+      </section>
       {error && <p className="error small">{error}</p>}
-      <button disabled={!at} onClick={add}>Add inspection</button>
     </div>
   );
 }

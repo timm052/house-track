@@ -109,9 +109,9 @@ export default function PropertyDetail() {
           </>
         )}
         {tab === "inspections" && (
-          <div className="tab-grid">
-            <div><Inspections propertyId={p.id} inspections={p.inspections} toInspect={p.to_inspect} inspectedBy={p.inspected_by} opinions={p.opinions} /></div>
-            <div><ScoresCard propertyId={p.id} /><VerdictHistory p={p} /></div>
+          <div className="tab-grid insp-grid">
+            <div><Inspections propertyId={p.id} inspections={p.inspections} toInspect={p.to_inspect} inspected={p.inspected} inspectedBy={p.inspected_by} opinions={p.opinions} /></div>
+            <div><ScoresCard propertyId={p.id} /></div>
           </div>
         )}
         {tab === "files" && (
@@ -293,7 +293,7 @@ function Title({ p }: { p: Detail }) {
 }
 
 function Tabs({ tab, setTab, p }: { tab: Tab; setTab: (t: Tab) => void; p: Detail }) {
-  const counts: Partial<Record<Tab, number>> = { inspections: p.inspections.length, files: p.attachments.length };
+  const counts: Partial<Record<Tab, number>> = { inspections: p.inspections.filter((i) => i.state === "planned" && new Date(i.ends_at ?? i.starts_at).getTime() > Date.now()).length, files: p.attachments.length };
   return (
     <div className="tabs" role="tablist" aria-label="House sections">
       {TABS.map(([t, label]) => (
@@ -356,18 +356,8 @@ function Actions({ p, setTab }: { p: Detail; setTab: (t: Tab) => void }) {
       setError((e as Error).message);
     }
   }
-  const been = p.inspected;
-  async function tick(on: boolean) {
-    try {
-      await api(`/api/properties/${p.id}/inspected`, { method: on ? "PUT" : "DELETE" });
-      for (const key of [["property", p.id], ["overview"], ["inspections"]]) queryClient.invalidateQueries({ queryKey: key });
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
   return (
     <div className="card actions">
-      <label className="check"><input type="checkbox" checked={been} onChange={(e) => tick(e.target.checked)} /> We've been to this house</label>
       <button onClick={() => setTab("inspections")}><CalendarPlus /> Add inspection</button>
       <button onClick={() => setTab("files")}><ImagePlus /> Add photos</button>
       <Link to={`/compare?ids=${p.id}`}><button><Scale /> Compare</button></Link>
@@ -420,7 +410,7 @@ function AtAGlance({ p, c, setTab }: { p: Detail; c: Campaign | null; setTab: (t
   const guides = oldestFirst(c);
   const guide = guides[guides.length - 1];
   const median = [...guides].reverse().find((g) => g.statement_suburb_median_aud)?.statement_suburb_median_aud;
-  const next = p.inspections.filter((i) => new Date(i.starts_at).getTime() > Date.now()).sort((a, b) => a.starts_at.localeCompare(b.starts_at))[0];
+  const next = p.inspections.filter((i) => i.state === "planned" && new Date(i.starts_at).getTime() > Date.now()).sort((a, b) => a.starts_at.localeCompare(b.starts_at))[0];
   const items: { icon: React.ReactNode; text: React.ReactNode; tab: Tab }[] = [];
   if (station) items.push({ icon: <TrainFront />, tab: "location", text: <>
     {station.walk_s != null && <><span className={`tone-${minutesTone(station.walk_s / 60)}`}>{minutes(station.walk_s)}</span> walk</>}
@@ -481,7 +471,7 @@ function Timeline({ p }: { p: Detail }) {
     });
     if (c.outcome && c.outcome_on) ev.push({ at: c.outcome_on, icon: <Gavel />, text: <strong>{LABEL.outcome[c.outcome]}{c.sold_price_aud ? ` ${money(c.sold_price_aud)}` : ""}</strong> });
   }
-  for (const i of p.inspections) ev.push({ at: i.starts_at, icon: <CalendarDays />, text: <>Inspection{i.attendees.length ? ` · ${i.attendees.map((a) => who(a.person_id)).join(", ")} went` : ""}</> });
+  for (const i of p.inspections.filter((x) => x.state !== "skipped" && x.state !== "cancelled")) ev.push({ at: i.starts_at, icon: <CalendarDays />, text: <>Inspection{i.attendees.length ? ` · ${i.attendees.map((a) => who(a.person_id)).join(", ")} went` : ""}</> });
   const byDay = new Map<string, number>();
   for (const a of p.attachments) byDay.set(a.created_at.slice(0, 10), (byDay.get(a.created_at.slice(0, 10)) ?? 0) + 1);
   for (const [d, n] of byDay) ev.push({ at: `${d}T12:00:00`, icon: <Paperclip />, text: <>{n} {n === 1 ? "file" : "files"} added</> });
@@ -528,26 +518,6 @@ const countdown = (at: string | null) => {
 };
 
 // ─── inspections tab ──────────────────────────────────────────────────
-function VerdictHistory({ p }: { p: Detail }) {
-  const { byId } = usePeople();
-  const list = [...p.opinions].sort((a, b) => b.recorded_at.localeCompare(a.recorded_at));
-  return (
-    <div className="card">
-      <h2>Every verdict</h2>
-      {list.length === 0 && <p className="small muted">No verdicts yet.</p>}
-      <ul className="history small">
-        {list.map((o) => (
-          <li key={o.id}>
-            <span className="dot" style={{ background: byId.get(o.person_id)?.colour }} />{byId.get(o.person_id)?.display_name}{" "}
-            <span className={`pill ${o.stance}`}>{LABEL.stance[o.stance]}</span> <span className="muted">{LABEL.stage[o.stage].toLowerCase()} · {when(o.recorded_at)}</span>
-            {o.note && <div>“{o.note}”</div>}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 // ─── about: notes, tags, details ──────────────────────────────────────
 /** The way into each floor plan: opens it to look through the saved versions and measure, with Edit from there. */
 function FloorPlanButtons({ p }: { p: Detail }) {
@@ -699,7 +669,7 @@ function StatusCard({ p, bare = false }: { p: Detail; bare?: boolean }) {
       <button className={`inspect-toggle ${p.to_inspect ? "on" : ""}`} aria-pressed={p.to_inspect}
         title={p.to_inspect ? "Remove from To inspect" : "Add to To inspect"}
         onClick={() => write.mutate({ path: `/api/properties/${p.id}/inspect-list`, method: p.to_inspect ? "DELETE" : "PUT" })}>
-        <DoorOpen /> {p.to_inspect ? "On To inspect" : "Add to To inspect"}</button>
+        <DoorOpen /> {p.to_inspect ? "On To inspect" : p.inspected_by.length > 0 ? "Inspected · add again" : "Add to To inspect"}</button>
       {write.error && <p className="error small">{(write.error as Error).message}</p>}
       {ended && statusOutOfStep(ended.outcome, ended.bought_by_us, p.status) && (
         <p className="small tone-warn" style={{ margin: 0 }}>

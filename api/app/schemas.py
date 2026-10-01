@@ -113,6 +113,8 @@ class ListingUpdateIn(ListingExtras):
     listing_status: str | None = Field(default=None, max_length=40)
     listing_price_text: str | None = Field(default=None, max_length=300)
     sold_price_aud: Aud | None = None  # a sold listing's price line ("Sold for $1,250,000")
+    # Which site the capture came from. Domain leads: another site only fills gaps on a house with a Domain listing.
+    source: Literal["domain", "rea", "other"] | None = None
 
 
 class PropertyIn(BaseModel):

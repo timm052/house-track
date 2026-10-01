@@ -4,7 +4,9 @@ The bookmarklet runs in your own browser on the listing page, so nothing is bloc
 own structured data rather than the whole page:
   • `next_data`  Domain's __NEXT_DATA__ JSON (address parts, rooms, land, price text, sale method,
                  auction/EOI dates, inspections, agents, photos, map position, Statement of Information);
-  • `argonaut`   realestate.com.au's page data (read generically: untested against live pages);
+  • `argonaut`   realestate.com.au's page data (read generically: untested against live pages), and `page_state`,
+                 whatever other page-state object the page keeps (__INITIAL_STATE__ and the like), for sites we know
+                 less about. Either may hold JSON inside a string, which is unpacked before reading;
   • `html`       the page head (Open Graph tags) plus JSON-LD blocks;
   • `text`       the visible text, for the text fallbacks in listing_parse.
 
@@ -18,7 +20,9 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from . import listing_parse
+from urllib.parse import urlsplit
+
+from . import listing_parse, listing_text
 
 MELBOURNE = ZoneInfo("Australia/Melbourne")
 MAX_PHOTOS = 30
@@ -55,6 +59,98 @@ def _prune(obj: Any) -> Any:
     if isinstance(obj, list):
         return [_prune(v) for v in obj]
     return obj
+
+
+SCRIPT_BREAK = "\n/*--script--*/\n"   # what the bookmarklet puts between script tags it sends whole
+
+
+def _load(blob: str) -> list[Any]:
+    """The JSON in what the bookmarklet sent: plain JSON, or the text of a script tag (`window.ArgonautExchange={...};`),
+    where the first value after the `=` is read and whatever follows it is ignored. Several scripts come as several."""
+    out: list[Any] = []
+    for part in blob.split(SCRIPT_BREAK):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            out.append(json.loads(part))
+            continue
+        except ValueError:
+            pass
+        m = re.search(r"=\s*([{\[])", part)
+        start = m.start(1) if m else part.find("{")
+        if start < 0:
+            continue
+        try:
+            out.append(json.JSONDecoder().raw_decode(part[start:])[0])
+        except ValueError:
+            pass
+    return out
+
+
+def _unwrap(obj: Any, depth: int = 0) -> Any:
+    """Page data often keeps JSON inside a string (realestate.com.au's urqlClientCache is one, with more inside it).
+    Unpack those, a few levels down, so the rest of the reading sees the real structure."""
+    if depth > 4:
+        return obj
+    if isinstance(obj, dict):
+        return {k: _unwrap(v, depth) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_unwrap(v, depth) for v in obj]
+    if isinstance(obj, str) and len(obj) > 40 and obj.lstrip()[:1] in "{[":
+        try:
+            return _unwrap(json.loads(obj), depth + 1)
+        except ValueError:
+            return obj
+    return obj
+
+
+def _address_parts(tree: Any) -> dict | None:
+    """The address as parts from a node that has a street line, suburb and postcode (realestate.com.au's address):
+    {"streetAddress": "3/12 Smith Street", "suburb": "Box Hill", "postcode": "3128"}, or the street in display.shortAddress."""
+    from .address import parse
+    for _, n in _walk(tree):
+        suburb, postcode = n.get("suburb"), n.get("postcode")
+        display = n.get("display") if isinstance(n.get("display"), dict) else {}
+        street = n.get("streetAddress") or display.get("shortAddress")
+        if not (isinstance(suburb, str) and isinstance(street, str) and street.strip() and postcode and re.fullmatch(r"\d{4}", str(postcode))):
+            continue
+        a = parse(f"{street.strip()}, {suburb} {n.get('state') or 'VIC'} {postcode}")
+        if a and a.street and a.suburb:
+            return {"unit": a.unit, "street_number": a.street_number, "street": a.street, "suburb": a.suburb, "postcode": a.postcode}
+    return None
+
+
+def _rea_listing(tree: Any) -> dict | None:
+    """The listing in realestate.com.au's page data (details.listing): the node with generalFeatures and an address."""
+    for _, n in _walk(tree):
+        if isinstance(n.get("generalFeatures"), dict) and isinstance(n.get("address"), dict):
+            return n
+    return None
+
+
+def _val(v: Any) -> Any:
+    return v.get("value") if isinstance(v, dict) else v
+
+
+def _size_m2(size: Any) -> int | None:
+    """realestate.com.au's {"displayValue": "612", "sizeUnit": {"displayValue": "m²"}} (or just text), in square metres."""
+    if not isinstance(size, dict):
+        return _area_m2(size)
+    unit = size.get("sizeUnit")
+    unit = unit.get("displayValue") if isinstance(unit, dict) else unit
+    shown = size.get("displayValue") if size.get("displayValue") is not None else size.get("value")
+    if shown is None:
+        return None
+    return (_area_m2(f"{shown} {unit}") if unit else None) or _area_m2(shown)
+
+
+def _plain(html_text: str) -> str:
+    """A description's HTML as plain text: line breaks kept, tags dropped, entities decoded."""
+    import html
+    text = re.sub(r"(?i)<br\s*/?>|</p>|</li>|</div>", "\n", html_text)
+    text = html.unescape(re.sub(r"<[^>]+>", " ", text))
+    return re.sub(r"[ \t]*\n[ \t]*", "\n", re.sub(r"[ \t]+", " ", text)).strip()
 
 
 def _walk(obj: Any, path: tuple = ()):
@@ -130,6 +226,7 @@ def _method(v: Any) -> str | None:
 
 
 BUCKET = "https://bucket-api.domain.com.au/v1/bucket/image/"
+REA_CDN = re.compile(r"^https://i\d?\.(?:au\.reastatic\.net|realestate\.com\.au)/")   # realestate.com.au's images
 
 
 def _bucket(url: str) -> str | None:
@@ -177,13 +274,18 @@ def _media(tree: Any, raw: str, listing_id: str | None) -> tuple[list[str], list
                 seen.setdefault(int(m[2]), m[0])
     if seen or plans:
         return [seen[k] for k in sorted(seen)][:MAX_PHOTOS], plans[:5]
-    # realestate.com.au and others: templated or plain image URLs under a media/images key
-    urls = re.findall(r'"(?:templatedUrl|url|uri|src)"\s*:\s*"(https://i\d?\.realestate\.com\.au/[^"]+?)"', raw)
-    for u in urls:
-        u = u.replace("{size}", "1144x888-format=webp")
-        if u not in photos:
-            photos.append(u)
-    return photos[:MAX_PHOTOS], []
+    # realestate.com.au: images on its own CDN, usually as a template with a {size} to fill in; anything under a
+    # floor plan key is a plan, the rest are photos (in the order the page lists them).
+    for path, n in _walk(tree):
+        for key in ("templatedUrl", "url", "uri", "src"):
+            u = n.get(key)
+            if isinstance(u, str) and (REA_CDN.match(u) or (key == "templatedUrl" and u.startswith("https://"))):
+                u = u.replace("{size}", "1144x888-format=webp")
+                target = plans if any("floor" in str(k).lower() for k in path) else photos
+                if u not in target:
+                    target.append(u)
+                break
+    return photos[:MAX_PHOTOS], plans[:5]
 
 
 def _agents(tree: Any) -> list[dict]:
@@ -238,17 +340,37 @@ def _tags(text: str, known: list[str]) -> list[str]:
     return out[:12]
 
 
+TEXT_FIELDS = ("beds", "baths", "car_spaces", "land_m2", "building_m2", "property_type", "headline", "description", "listed_on",
+               "listing_status", "sale_method", "auction_at", "price_text", "guide_low_aud", "guide_high_aud")
+
+
+def _apply_text(out: dict, got: dict, structured: bool) -> None:
+    """What the text readers found goes over the generic readers' guesses. When the page's own structured data was read,
+    it wins: the text only fills in what that left empty."""
+    if got.get("price_known") is False and not structured:
+        for k in ("guide_low_aud", "guide_high_aud", "price_text"):
+            out.pop(k, None)   # a page that shows no price: the generic readers' guess ("mid $800,000s") isn't one
+    for k in TEXT_FIELDS:
+        if got.get(k) is not None and (not structured or out.get(k) is None):
+            out[k] = got[k]
+    for k in ("agents", "inspections", "features"):
+        if got.get(k) and not out.get(k):
+            out[k] = got[k]
+    if got.get("building_m2") and out.get("land_m2") == out.get("building_m2") and got.get("land_m2") is None:
+        out["land_m2"] = None   # an apartment's one area is the building, not a lot the generic reader guessed
+    if got.get("sale_method") is None and not structured:
+        out.pop("sale_method", None)   # no sale method on the page: the generic guess ("private sale") isn't one
+
+
 def extract(url: str, html: str = "", next_data: str | None = None, argonaut: str | None = None,
-            text: str | None = None, image: str | None = None, known_tags: list[str] | None = None) -> dict:
+            text: str | None = None, image: str | None = None, known_tags: list[str] | None = None,
+            page_state: str | None = None) -> dict:
     """All the suggested quick-add fields, plus extras (agents, inspections, photos, map position, tags)."""
     out = listing_parse.parse(html + (f"<body>{text}</body>" if text else ""), url)
     trees: list[Any] = []
-    for blob in (next_data, argonaut):
-        if blob:
-            try:
-                trees.append(_prune(json.loads(blob)))
-            except ValueError:
-                pass
+    for blob in (next_data, argonaut, page_state):
+        for data in _load(blob) if blob else []:
+            trees.append(_prune(_unwrap(data)))
     tree: Any = trees
     raw = json.dumps(trees)  # only this listing's data, after pruning
     listing_id = (re.search(r"-(\d{7,12})(?:[/?#]|$)", url) or [None, None])[1]
@@ -259,6 +381,8 @@ def extract(url: str, html: str = "", next_data: str | None = None, argonaut: st
         out["address_parts"] = {"unit": props.get("unitNumber") or None, "street_number": props.get("streetNumber") or None,
                                 "street": props.get("street") or None, "suburb": props.get("suburb") or None,
                                 "postcode": props.get("postcode") or None}
+    if not props and (found := _address_parts(tree)):
+        out["address_parts"] = found
     for field, keys in (("beds", ("beds", "bedrooms")), ("baths", ("baths", "bathrooms")),
                         ("car_spaces", ("parking", "parkingSpaces", "carspaces", "garages"))):
         v = _first(tree, *keys, kind=(int, float, str))
@@ -275,9 +399,25 @@ def extract(url: str, html: str = "", next_data: str | None = None, argonaut: st
         out["building_m2"] = n
     ptype = _first(tree, "primaryPropertyType", "propertyType", kind=str)
     out["property_type"] = PROPERTY_TYPES.get(ptype.strip().lower()) if isinstance(ptype, str) else None
+    # realestate.com.au keeps its figures in nested objects (generalFeatures.bedrooms.value, propertySizes.land...).
+    rea = _rea_listing(tree)
+    if rea:
+        for field, key in (("beds", "bedrooms"), ("baths", "bathrooms"), ("car_spaces", "parkingSpaces")):
+            if (n := _int(_val(rea["generalFeatures"].get(key)))) is not None and n <= 50:
+                out[field] = n
+        sizes = rea.get("propertySizes") if isinstance(rea.get("propertySizes"), dict) else {}
+        if (n := _size_m2(sizes.get("land"))) and 20 <= n <= 5_000_000:
+            out["land_m2"] = n
+        if (n := _size_m2(sizes.get("building"))) and 10 <= n <= 100_000:
+            out["building_m2"] = n
+        kind = rea.get("propertyType")
+        kind = kind.get("display") if isinstance(kind, dict) else kind
+        if isinstance(kind, str) and (mapped := PROPERTY_TYPES.get(kind.strip().lower())):
+            out["property_type"] = mapped
 
     # Domain's listing summary title ("EOI $1,050,000 - $1,155,000"), else a display price.
     price_text = next((n.get("title") for _, n in _walk(tree) if "stats" in n and isinstance(n.get("title"), str)), None) \
+        or next((p["display"] for _, n in _walk(tree) if isinstance(p := n.get("price"), dict) and isinstance(p.get("display"), str)), None) \
         or _first(tree, "displayPrice", "price", kind=str)
     if isinstance(price_text, str) and "$" in price_text:
         lo, hi = listing_parse.price_range(price_text)
@@ -286,6 +426,8 @@ def extract(url: str, html: str = "", next_data: str | None = None, argonaut: st
         out["price_text"] = price_text.replace("|", " · ")
     method = _method(next((n.get("method") for _, n in _walk(tree) if "stats" in n and n.get("method")), None)
                      or _first(tree, "saleMethod", "method", kind=str))
+    if not method and rea and isinstance(rea.get("auction"), dict) and rea["auction"]:
+        method = "auction"   # realestate.com.au: an auction object on the listing
     if isinstance(price_text, str) and re.search(r"\bEOI\b|expressions? of interest", price_text, re.I):
         method = "eoi"
     if method:
@@ -297,6 +439,8 @@ def extract(url: str, html: str = "", next_data: str | None = None, argonaut: st
     description = _first(tree, "description", kind=(str, list))
     if isinstance(description, list):
         description = "\n".join(str(x) for x in description)
+    if isinstance(description, str) and "<" in description:
+        description = _plain(description)
     headline = _first(tree, "headline", kind=str)
     words = " ".join(x for x in (headline, description, text or "") if x)
     out["auction_at"] = auction if out.get("sale_method") == "auction" else None
@@ -308,7 +452,8 @@ def extract(url: str, html: str = "", next_data: str | None = None, argonaut: st
     lat, lon = _first(tree, "latitude", "lat", kind=(int, float)), _first(tree, "longitude", "lng", "lon", kind=(int, float))
     out["lat"], out["lon"] = (lat, lon) if lat and lon and -45 < lat < -9 and 110 < lon < 155 else (None, None)
     out["agents"] = _agents(tree)
-    agency = _first(tree, "agencyName", kind=str)
+    company = rea.get("listingCompany") if rea and isinstance(rea.get("listingCompany"), dict) else {}
+    agency = _first(tree, "agencyName", kind=str) or (company.get("name") if isinstance(company.get("name"), str) else None)
     for a in out["agents"]:
         a["agency_name"] = agency
     out["inspections"] = _inspections(tree)
@@ -333,4 +478,13 @@ def extract(url: str, html: str = "", next_data: str | None = None, argonaut: st
         out["sold_price_aud"] = out.pop("guide_low_aud", None) if out.get("guide_low_aud") == out.get("guide_high_aud") else None
         out.pop("guide_low_aud", None)
         out.pop("guide_high_aud", None)
+    # The two REA Group sites keep their listing out of the bookmarklet's reach, so what is on screen is read instead.
+    host = (urlsplit(url).hostname or "").removeprefix("www.")
+    reader = {"realestate.com.au": listing_text.realestate, "property.com.au": listing_text.property_com_au}.get(host)
+    if host == "realestate.com.au" and not out.get("address_parts") and (found := listing_text.ld_address(html)):
+        out["address_parts"] = found
+    if reader and text:
+        _apply_text(out, reader(text, html), structured=bool(rea))
+        # Tags from the listing's own words, not the whole page (its menus and boilerplate say "heritage" and "pool" too).
+        out["suggested_tags"] = _tags(" ".join(x for x in (out.get("headline"), out.get("description"), *(out.get("features") or [])) if x), known_tags or [])
     return out

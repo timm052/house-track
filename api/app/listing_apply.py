@@ -88,6 +88,9 @@ def refresh(conn: psycopg.Connection, property_id: UUID, body: ListingUpdateIn) 
     people, which the + House Track panel (as a preview) and the weekly refresh both show."""
     live = conn.execute("""SELECT id, sale_method, listed_on, auction_at, eoi_closes_at, listing_status FROM campaign
                            WHERE property_id = %s AND outcome IS NULL""", (property_id,)).fetchone()
+    fallback = is_fallback(conn, property_id, body)
+    if fallback:
+        body = body.model_copy(update={"apply_details": False, "fill_missing": True})
     added = apply(conn, property_id, live and live["id"], body)
     added.update(guide=False, date=False, method=None, listed=False, details=[], differs=[])
     changes: list[str] = []
@@ -110,12 +113,16 @@ def refresh(conn: psycopg.Connection, property_id: UUID, body: ListingUpdateIn) 
     if live is not None and (body.listing_status or body.listing_price_text):
         if listing_state(body.listing_status) == "underoffer" and was_status != "underoffer":
             changes.append("Now under offer")
-        conn.execute("""UPDATE campaign SET listing_status = %s, listing_price_text = %s, listing_checked_at = now()
-                        WHERE id = %s""", (body.listing_status, body.listing_price_text, live["id"]))
+        text = body.listing_price_text
+        if fallback and live_has_text(conn, live["id"]):
+            text = None   # Domain's wording stays; another site only adds what's missing (status still updates)
+        conn.execute("""UPDATE campaign SET listing_status = coalesce(%s, listing_status),
+                            listing_price_text = coalesce(%s, listing_price_text), listing_checked_at = now()
+                        WHERE id = %s""", (body.listing_status, text, live["id"]))
 
     if live is not None:
         method = live["sale_method"]
-        if body.sale_method and body.sale_method != method:
+        if body.sale_method and body.sale_method != method and not (fallback and method):
             # The listing changed how it's selling: switch, dropping the date that belonged to the old method.
             method = body.sale_method
             set_sale_method(conn, live["id"], method)
@@ -132,7 +139,7 @@ def refresh(conn: psycopg.Connection, property_id: UUID, body: ListingUpdateIn) 
             latest = conn.execute("SELECT low_aud, high_aud FROM price_guide WHERE campaign_id = %s ORDER BY observed_at DESC, id DESC LIMIT 1",
                                   (live["id"],)).fetchone()
             high = body.guide_high_aud or body.guide_low_aud
-            if latest is None or (latest["low_aud"], latest["high_aud"]) != (body.guide_low_aud, high):
+            if latest is None or ((latest["low_aud"], latest["high_aud"]) != (body.guide_low_aud, high) and not fallback):
                 insert_price_guide(conn, live["id"], PriceGuideIn(source="advertised", low_aud=body.guide_low_aud, high_aud=high,
                                                                   note="From the listing"))
                 added["guide"] = True
@@ -140,7 +147,7 @@ def refresh(conn: psycopg.Connection, property_id: UUID, body: ListingUpdateIn) 
                                + (f" (was {money_range(latest['low_aud'], latest['high_aud'])})" if latest else ""))
         for col, needs, label in (("auction_at", "auction", "Auction"), ("eoi_closes_at", "eoi", "EOI closes")):
             value = getattr(body, col)
-            if value is not None and method == needs and live[col] != value:
+            if value is not None and method == needs and live[col] != value and not (fallback and live[col]):
                 conn.execute(f"UPDATE campaign SET {col} = %s WHERE id = %s", (value, live["id"]))
                 added["date"] = True
                 changes.append(f"{label} {when(value)}" + (f" (was {when(live[col])})" if live[col] else ""))
@@ -168,6 +175,20 @@ def refresh(conn: psycopg.Connection, property_id: UUID, body: ListingUpdateIn) 
             changes.append(f"Sold price: {money(body.sold_price_aud)}")
     added["changes"] = changes
     return added
+
+
+def is_fallback(conn: psycopg.Connection, property_id: UUID, body: ListingUpdateIn) -> bool:
+    """Domain first: a capture from another site (realestate.com.au, property.com.au) on a house that has a Domain
+    listing only fills gaps and adds new things. It never overwrites what Domain gave, and never rewrites the guide."""
+    if not body.source or body.source == "domain":
+        return False
+    return conn.execute("""SELECT 1 FROM campaign_link l JOIN campaign c ON c.id = l.campaign_id
+                           WHERE c.property_id = %s AND l.portal = 'domain' LIMIT 1""", (property_id,)).fetchone() is not None
+
+
+def live_has_text(conn: psycopg.Connection, campaign_id: UUID) -> bool:
+    row = conn.execute("SELECT listing_price_text FROM campaign WHERE id = %s", (campaign_id,)).fetchone()
+    return bool(row and row["listing_price_text"])
 
 
 def listing_state(s: str | None) -> str:

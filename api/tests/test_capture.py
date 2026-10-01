@@ -3,7 +3,7 @@
 import json
 from datetime import datetime, timedelta
 
-from app.listing_capture import MELBOURNE, extract
+from app.listing_capture import MELBOURNE, SCRIPT_BREAK, extract
 
 from .conftest import as_
 
@@ -333,3 +333,125 @@ def test_a_sold_price_that_comes_later(client, people):
     row = next(x for x in client.get("/api/overview").json()["rows"] if x["id"] == pid)
     assert (row["outcome"], row["sold_price_aud"]) == ("sold", 990_000)
     assert pid not in targets()
+
+
+def _rea_page(listing: dict) -> str:
+    """Shaped like realestate.com.au's page data: the interesting part is JSON inside a string, inside another one."""
+    inner = json.dumps({"details": {"listing": listing}})
+    cache = json.dumps({"-123456": {"data": inner}})
+    return json.dumps({"resi-property_listing-experience-web": {"urqlClientCache": cache}})
+
+
+def test_json_inside_strings_is_read(client):
+    """realestate.com.au keeps its listing as JSON inside a string; that's unpacked, and an address given as a street
+    line, suburb and postcode becomes address parts."""
+    page = _rea_page({
+        "address": {"streetAddress": "3/12 Smith Street", "suburb": "Box Hill", "state": "VIC", "postcode": "3128"},
+        "propertyType": "Townhouse", "bedrooms": 3, "bathrooms": 2, "parkingSpaces": 1, "landArea": 280,
+        "price": {"display": "$950,000 - $1,040,000"}})
+    got = extract("https://www.realestate.com.au/property-townhouse-vic-box+hill-145678901", "", argonaut=page)
+    assert got["address_parts"] == {"unit": "3", "street_number": "12", "street": "Smith Street", "suburb": "Box Hill", "postcode": "3128"}
+    assert (got["beds"], got["baths"], got["car_spaces"], got["land_m2"]) == (3, 2, 1, 280)
+    assert got["property_type"] == "townhouse" and (got["guide_low_aud"], got["guide_high_aud"]) == (950_000, 1_040_000)
+    # The same data as a page-state blob from some other site reads the same way, and a plain string is left alone.
+    other = extract("https://www.example.com.au/listing/1", "", page_state=page)
+    assert other["address_parts"]["street"] == "Smith Street"
+    assert extract("https://www.example.com.au/listing/2", "", page_state=json.dumps({"note": "not {json} at all, just a long sentence of words"}))["beds"] is None
+
+
+def test_what_a_realestate_link_says():
+    from app.listing import hints_from_link
+    assert hints_from_link("https://www.realestate.com.au/property-house-vic-box+hill+north-145678901") == {
+        "suburb": "Box Hill North", "state": "VIC", "property_type": "house"}
+    assert hints_from_link("https://www.realestate.com.au/property-unit-vic-mitcham-145678901?cid=x")["property_type"] == "unit"
+    assert hints_from_link("https://www.realestate.com.au/buy/in-mitcham,+vic+3132/list-1") is None
+    assert hints_from_link("https://www.domain.com.au/3-14-example-street-box-hill-north-vic-3129-2029990001") is None
+
+
+def test_from_link_gives_the_hints(client, people):
+    got = client.post("/api/listing/from-link", headers=as_(people["a"]),
+                      json={"url": "https://www.realestate.com.au/property-house-vic-mitcham-145678909"}).json()
+    assert got["address_parts"] is None and got["link_hint"]["suburb"] == "Mitcham" and got["property_type"] == "house"
+
+
+def test_captures_are_kept_only_when_asked(client, people, monkeypatch, tmp_path):
+    """A test copy keeps what each bookmarklet capture sent, so the readers can be checked against real pages."""
+    monkeypatch.setenv("BLOB_DIR", str(tmp_path / "blobs"))
+    body = {"url": "https://www.property.com.au/vic/mitcham-3132/1-example-st-pid-1/", "html": "<html><head><title>x</title></head></html>",
+            "page_state": json.dumps({"a": 1}), "text": "3 bed"}
+    monkeypatch.delenv("CAPTURE_SAMPLES", raising=False)
+    assert client.post("/api/listing/parse", headers=as_(people["a"]), json=body).status_code == 200
+    assert not (tmp_path / "blobs" / "_capture_samples").exists()
+    monkeypatch.setenv("CAPTURE_SAMPLES", "1")
+    assert client.post("/api/listing/parse", headers=as_(people["a"]), json=body).status_code == 200
+    [kept] = list((tmp_path / "blobs" / "_capture_samples").glob("property.com.au-*.json"))
+    assert json.loads(kept.read_text(encoding="utf-8"))["page_state"] == json.dumps({"a": 1})
+
+
+def test_realestate_photos_and_floor_plans():
+    """Its images are on reastatic.net, as templates with a {size}; floor plans sit under a floor plan key. They were
+    out of reach before (the JSON holding them was inside a string, and the host was wrong)."""
+    page = _rea_page({
+        "address": {"streetAddress": "5 Example Road", "suburb": "Mitcham", "postcode": "3132"},
+        "media": {"images": [{"templatedUrl": "https://i2.au.reastatic.net/{size}/aaa111/image.jpg"},
+                             {"templatedUrl": "https://i2.au.reastatic.net/{size}/bbb222/image.jpg"},
+                             {"templatedUrl": "https://i2.au.reastatic.net/{size}/aaa111/image.jpg"}],
+                  "floorplans": [{"url": "https://i2.au.reastatic.net/800x600/ccc333/floorplan.jpg"}]}})
+    got = extract("https://www.realestate.com.au/property-house-vic-mitcham-145678902", "", argonaut=page)
+    assert got["photos"] == ["https://i2.au.reastatic.net/1144x888-format=webp/aaa111/image.jpg",
+                             "https://i2.au.reastatic.net/1144x888-format=webp/bbb222/image.jpg"]
+    assert got["floorplans"] == ["https://i2.au.reastatic.net/800x600/ccc333/floorplan.jpg"]
+
+
+def test_realestate_script_text_and_field_names():
+    """What the bookmarklet sends from a real realestate.com.au page: the text of the script tag (the page deletes its
+    own global), with the listing's own field names: generalFeatures.bedrooms.value, propertySizes.land, listers..."""
+    listing = {
+        "id": "145678901",
+        "address": {"suburb": "Mitcham", "state": "VIC", "postcode": "3132",
+                    "display": {"shortAddress": "7 Example Road", "fullAddress": "7 Example Road, Mitcham, VIC 3132",
+                                "geocode": {"latitude": -37.82, "longitude": 145.19}}},
+        "propertyType": {"id": "house", "display": "House"},
+        "generalFeatures": {"bedrooms": {"value": 4}, "bathrooms": {"value": 2}, "parkingSpaces": {"value": 2}},
+        "propertySizes": {"land": {"displayValue": "612", "sizeUnit": {"displayValue": "m²"}},
+                          "building": {"displayValue": "180", "sizeUnit": {"displayValue": "m²"}}},
+        "price": {"display": "$1,050,000 - $1,150,000"}, "auction": {"dateTime": {"value": "2099-10-24T11:00:00"}},
+        "description": "Light-filled home.<br/>North-facing garden with a <b>pool</b> &amp; double garage.",
+        "listingCompany": {"name": "Example Realty Mitcham"},
+        "listers": [{"name": "Pat Agent", "phoneNumber": {"display": "0400 000 001"}}],
+        "media": {"images": [{"templatedUrl": "https://i2.au.reastatic.net/{size}/aaa111/image.jpg"}],
+                  "floorplans": [{"templatedUrl": "https://i2.au.reastatic.net/{size}/ccc333/floorplan.jpg"}]}}
+    other_script = 'window.something = {"unrelated": true};'
+    script = "window.ArgonautExchange=" + _rea_page(listing) + ";\nwindow.after = 1;"
+    got = extract("https://www.realestate.com.au/property-house-vic-mitcham-145678901", "<head></head>",
+                  argonaut=other_script + SCRIPT_BREAK + script)
+    assert got["address_parts"] == {"unit": None, "street_number": "7", "street": "Example Road", "suburb": "Mitcham", "postcode": "3132"}
+    assert (got["beds"], got["baths"], got["car_spaces"], got["land_m2"], got["building_m2"]) == (4, 2, 2, 612, 180)
+    assert got["property_type"] == "house" and (got["guide_low_aud"], got["guide_high_aud"]) == (1_050_000, 1_150_000)
+    assert got["sale_method"] == "auction" and got["auction_at"].startswith("2099-10-24T11:00")
+    assert got["agents"] == [{"name": "Pat Agent", "mobile": "0400 000 001", "email": None, "agency_name": "Example Realty Mitcham"}]
+    assert (got["lat"], got["lon"]) == (-37.82, 145.19)
+    assert got["photos"] == ["https://i2.au.reastatic.net/1144x888-format=webp/aaa111/image.jpg"]
+    assert got["floorplans"] == ["https://i2.au.reastatic.net/1144x888-format=webp/ccc333/floorplan.jpg"]
+    assert got["description"] == "Light-filled home.\nNorth-facing garden with a pool & double garage."
+    assert {"pool", "garage", "north-facing", "garden"} <= set(got["suggested_tags"])
+
+
+def test_domain_leads_other_sites_fill_gaps(client, people):
+    """A capture from realestate.com.au on a house with a Domain listing never overwrites what's there: it fills
+    missing rooms and areas and adds new things. The same capture from Domain does overwrite."""
+    a = as_(people["a"])
+    pid = client.post("/api/properties", headers=a, json={
+        "address": {"street_number": "9", "street": "Fallback Court", "suburb": "Woodend", "postcode": "3442"}, "land_m2": 600,
+        "campaign": {"sale_method": "private_sale", "url": "https://www.domain.com.au/9-fallback-court-woodend-vic-3442-2099990088",
+                     "guide_low_aud": 900000, "guide_high_aud": 950000}}).json()["id"]
+    body = {"land_m2": 640, "beds": 3, "guide_low_aud": 1_000_000, "guide_high_aud": 1_050_000, "sale_method": "auction",
+            "auction_at": "2099-11-01T11:00:00+11:00", "source": "rea"}
+    r = client.post(f"/api/properties/{pid}/listing-update", headers=a, json=body).json()
+    p = client.get(f"/api/properties/{pid}").json()
+    assert p["land_m2"] == 600 and p["beds"] == 3 and r["guide"] is False
+    assert p["campaigns"][0]["sale_method"] == "private_sale"
+    assert not any(c.startswith(("Land", "New price guide", "Now selling")) for c in r["changes"])
+
+    client.post(f"/api/properties/{pid}/listing-update", headers=a, json={**body, "source": "domain"})
+    assert client.get(f"/api/properties/{pid}").json()["land_m2"] == 640

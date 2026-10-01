@@ -4,6 +4,10 @@
 #
 #   docker compose -f compose.yaml -f compose.dev.yaml --env-file .env.dev up -d --build
 services:
+  api:
+    environment:
+      CAPTURE_SAMPLES: "1"   # keep each bookmarklet capture, to check the readers against real pages (see routes/decide.py)
+
   web:
     network_mode: !reset null
     depends_on: !override [api]

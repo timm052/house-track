@@ -14,6 +14,7 @@ export type Capture = {
   sale_method: SaleMethod | null; auction_at?: string | null; eoi_closes_at?: string | null; listed_on?: string | null;
   guide_low_aud: number | null; guide_high_aud: number | null; price_text?: string | null;
   listing_status?: string | null; sold_price_aud?: number | null;
+  link_hint?: { suburb: string; state: string; property_type: PropertyType | null } | null;   // what a realestate.com.au link says
   headline?: string | null; description?: string | null; features?: string[]; suggested_tags?: string[];
   lat?: number | null; lon?: number | null;
   agents?: { name: string; mobile: string | null; email: string | null; agency_name: string | null }[];
@@ -117,9 +118,12 @@ export function CaptureReview({ c, ch, set }: { c: Capture; ch: Choices; set: (c
 // ─── already tracked: refresh the house from its listing ───────────────
 /** A tracked house's update request: everything the listing says. The server skips what's already saved and
  *  works out what's new (see listing_apply.refresh), for the preview and the update alike. */
+const host = (u: string | null) => { try { return new URL(u ?? "").hostname; } catch { return ""; } };
+
 function updateBody(c: Capture, ch: Choices) {
   return {
     ...extrasFor(c, { ...ch, inspections: true, agents: true }),
+    source: /(^|\.)domain\.com\.au$/.test(host(c.url)) ? "domain" : /(^|\.)realestate\.com\.au$/.test(host(c.url)) ? "rea" : "other",
     guide_low_aud: c.guide_low_aud, guide_high_aud: c.guide_high_aud, sale_method: c.sale_method,
     auction_at: c.sale_method === "auction" ? c.auction_at ?? null : null,
     eoi_closes_at: c.sale_method === "eoi" ? c.eoi_closes_at ?? null : null, listed_on: c.listed_on ?? null,

@@ -155,18 +155,21 @@ function LayerSettings() {
 
 // ─── browser buttons (bookmarklets) ───────────────────────────────────
 // Bump when the code changes, so people know to drag the buttons again.
-const BOOKMARKLETS_UPDATED = "23 Sept 2026 (v3)";
+const BOOKMARKLETS_UPDATED = "1 Oct 2026 (v4)";
 
 /** + House Track: listing capture for pages the server can't fetch (PLAN.md D12). Runs in your own browser on the
  *  listing page, opens House Track's Add page and hands it the page's own data (Domain's __NEXT_DATA__,
- *  realestate.com.au's page data, the head's Open Graph tags, structured-data blocks and the visible text). */
+ *  realestate.com.au's page data, any other page-state object, the head's Open Graph tags, structured-data blocks and
+ *  the visible text). Works on property.com.au pages too, as far as they give up their data. */
 function captureCode(origin: string) {
   return `javascript:(()=>{const o=${JSON.stringify(origin)};const w=window.open(o+'/add?capture=1','housetrack');if(!w){alert('Your browser blocked the House Track window. Allow pop-ups for this site, then click + House Track again.');return}` +
-    `const q=s=>document.querySelector(s),m=q('meta[property="og:image"]'),n=q('#__NEXT_DATA__');let a=null;` +
+    `const q=s=>document.querySelector(s),m=q('meta[property="og:image"]'),n=q('#__NEXT_DATA__');let a=null,g=null;` +
     `try{a=window.ArgonautExchange?JSON.stringify(window.ArgonautExchange).slice(0,3900000):null}catch(e){}` +
+    `if(!a||a.length<200){try{a=[...document.scripts].map(s=>s.textContent).filter(t=>t&&t.includes('ArgonautExchange')).join('\\n/*--script--*/\\n').slice(0,3900000)||null}catch(e){}}` +
+    `try{const k=window.__INITIAL_STATE__||window.__PRELOADED_STATE__||window.__APOLLO_STATE__||window.__NUXT__||window.__remixContext;g=k?JSON.stringify(k).slice(0,3900000):null}catch(e){}` +
     `const ld=[...document.querySelectorAll('script[type="application/ld+json"]')].map(s=>s.outerHTML).join('');` +
-    `const d={type:'housetrack-capture',v:2,url:location.href,image:m&&m.content||null,next_data:n?n.textContent.slice(0,3900000):null,` +
-    `argonaut:a,html:(document.head.outerHTML+ld).slice(0,2900000),text:document.body.innerText.slice(0,390000)};` +
+    `const d={type:'housetrack-capture',v:3,url:location.href,image:m&&m.content||null,next_data:n?n.textContent.slice(0,3900000):null,` +
+    `argonaut:a,page_state:g,html:(document.head.outerHTML+ld).slice(0,2900000),text:document.body.innerText.slice(0,390000)};` +
     `const t=setInterval(()=>{try{w.postMessage(d,o)}catch(e){}},400);` +
     `addEventListener('message',e=>{if(e.origin===o&&e.data==='housetrack-got-it')clearInterval(t)});setTimeout(()=>clearInterval(t),20000)})()`;
 }
@@ -202,7 +205,7 @@ function BookmarkletButton({ code, label }: { code: string; label: string }) {
       <button className="small-btn" onClick={copy}>{copied === "yes" ? "Copied ✓" : copied === "no" ? "Couldn't copy" : "Copy code"}</button>
       {hint && <p className="small tone-warn" style={{ flexBasis: "100%", margin: 0 }}>
         Drag this to your bookmarks bar, then click it there on a
-        {label.includes("Refresh") ? " Domain page" : " Domain or realestate.com.au listing"}.</p>}
+        {label.includes("Refresh") ? " Domain page" : " Domain, realestate.com.au or property.com.au listing"}.</p>}
     </div>
   );
 }
@@ -303,7 +306,7 @@ function Bookmarklets() {
     <div className="card stack" id="bookmarklets">
       <h2>Browser buttons</h2>
       <p className="small" style={{ margin: 0 }}>
-        Add and update houses from Domain and realestate.com.au in a desktop browser.
+        Add and update houses from Domain, realestate.com.au and property.com.au in a desktop browser.
       </p>
       <ol className="small steps">
         <li>Show the bookmarks bar with <kbd>{mac ? "⌘" : "Ctrl"}</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd>.</li>

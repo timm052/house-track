@@ -8,6 +8,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, whilePending } from "../api";
 import { isSold, LABEL, landArea, listingState, money, moneyRange, saleEnded } from "../format";
 import SoldAgainst from "../SoldAgainst";
+import { describeLink } from "../listingLink";
 import { STATUSES } from "../api";
 import { catalogue, display, type Column, type OverviewPlace, type OverviewRow } from "../overview/columns";
 import { applyView, builtInDefault, describe, useViews, type Filter, type Sort } from "../overview/views";
@@ -564,7 +565,6 @@ function SharedLinks() {
   const { byId } = usePeople();
   const { data = [] } = useQuery({ queryKey: ["shared-links"], queryFn: () => api<SharedLink[]>("/api/shared-links") });
   if (!data.length) return null;
-  const where = (u: string) => { try { const x = new URL(u); return x.hostname.replace(/^www\./, "") + x.pathname; } catch { return u; } };
   async function dismiss(id: string) {
     await api(`/api/shared-links/${id}`, { method: "DELETE" });
     queryClient.invalidateQueries({ queryKey: ["shared-links"] });
@@ -575,7 +575,8 @@ function SharedLinks() {
       {data.map((l) => (
         <div key={l.id} className="row small">
           <span className="grow" style={{ minWidth: 0, overflowWrap: "anywhere" }}>
-            <a href={l.url} target="_blank" rel="noreferrer">{where(l.url)}</a>
+            <a href={l.url} target="_blank" rel="noreferrer">{describeLink(l.url).main}</a>
+            {describeLink(l.url).site && <span className="muted"> · {describeLink(l.url).site}</span>}
             {l.shared_by && <span className="muted"> · {byId.get(l.shared_by)?.display_name}</span>}</span>
           <button className="primary small-btn" onClick={() => navigate(`/add?url=${encodeURIComponent(l.url)}`)}>Add</button>
           <button className="small-btn" onClick={() => dismiss(l.id)}>Dismiss</button>

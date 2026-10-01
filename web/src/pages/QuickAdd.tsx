@@ -7,8 +7,8 @@ import { fromLocalInput, LABEL, parseMoney, toLocalInput } from "../format";
 import { CaptureReview, defaultChoices, ExistingUpdate, extrasFor, listingNotes, type Capture, type Choices } from "../listing/Capture";
 
 // The listing sites that block server reads; their listings come in through the + House Track bookmarklet.
-const PORTAL_ORIGIN = /^https:\/\/([a-z0-9-]+\.)*(domain|realestate)\.com\.au$/;
-const PORTAL_URL = /^https?:\/\/([a-z0-9-]+\.)*(domain|realestate)\.com\.au\//i;
+const PORTAL_ORIGIN = /^https:\/\/([a-z0-9-]+\.)*(domain|realestate|property)\.com\.au$/;
+const PORTAL_URL = /^https?:\/\/([a-z0-9-]+\.)*(domain|realestate|property)\.com\.au\//i;
 
 const EMPTY: Address = { unit: "", street_number: "", street: "", suburb: "", postcode: "", plan_number: "", lot_number: "" };
 const blankToNull = (v: string | null) => (v && v.trim() ? v.trim() : null);
@@ -65,6 +65,10 @@ export default function QuickAdd() {
       setAddr(next);
       setGnafPid(await gnafMatch(next));
       filled.push("address");
+    } else if (p.link_hint?.suburb && !p.address) {
+      // realestate.com.au's links name the suburb but not the street.
+      setAddr({ ...EMPTY, suburb: p.link_hint.suburb });
+      filled.push("suburb");
     } else if (p.address) {
       try {
         const parsed = await api<Address>(`/api/address/parse?text=${encodeURIComponent(p.address)}`);
@@ -123,7 +127,8 @@ export default function QuickAdd() {
         setCapture(null);  // nothing else to choose from a bare link (photos and agents come with the refresh)
         setChoices(null);
         setMethod((m) => m || "private_sale");
-        setImportMsg((p.address_parts ? "Address filled in from the link. " : "This link has no address, so type it below. ")
+        setImportMsg((p.address_parts ? "Address filled in from the link. " : p.link_hint ? `The link gives the suburb (${p.link_hint.suburb}) but not the street, so type that below. `
+          : "This link has no address, so type it below. ")
           + "Check the sale method. The rooms, price, photos and floor plan are added at the next weekly refresh, "
           + "or click + House Track on the listing from a computer.");
       } catch (e) {
@@ -145,7 +150,7 @@ export default function QuickAdd() {
         const str = (v: unknown) => (typeof v === "string" && v ? v : null);
         setImportMsg("Reading the listing…");
         await applyPrefill(await api<Capture>("/api/listing/parse", { method: "POST", body: {
-          url: d.url, html: str(d.html) ?? "", next_data: str(d.next_data), argonaut: str(d.argonaut), text: str(d.text),
+          url: d.url, html: str(d.html) ?? "", next_data: str(d.next_data), argonaut: str(d.argonaut), page_state: str(d.page_state), text: str(d.text),
           image: str(d.image) && /^https?:\/\//.test(d.image) ? d.image : null } }));
       } catch (err) {
         setImportMsg((err as Error).message);
@@ -250,7 +255,7 @@ export default function QuickAdd() {
       <div className="card stack">
         <h2>From a listing</h2>
         <p className="small" style={{ margin: 0 }}>
-          On <strong>Domain</strong> or <strong>realestate.com.au</strong>, open the listing and click <strong>+ House Track</strong> in
+          On <strong>Domain</strong>, <strong>realestate.com.au</strong> or <strong>property.com.au</strong>, open the listing and click <strong>+ House Track</strong> in
           your bookmarks bar. It fills in everything, including photos, agents and inspections.{" "}
           <Link to="/settings#bookmarklets">Set up the button</Link>
         </p>
@@ -262,7 +267,7 @@ export default function QuickAdd() {
           </div>
         </label>
         {PORTAL_URL.test(importUrl) && <p className="small tone-warn" style={{ margin: 0 }}>
-          Domain and realestate.com.au don't let House Track read their pages. Use the + House Track button on the listing instead.</p>}
+          Domain, realestate.com.au and property.com.au don't let House Track read their pages. Use the + House Track button on the listing instead.</p>}
         {importMsg && <p className="small muted">{importMsg}</p>}
       </div>
 

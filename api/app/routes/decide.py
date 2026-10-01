@@ -1,5 +1,6 @@
 """Milestone 6: weighted scoring and listing pre-fill."""
 
+import logging
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from uuid import UUID
@@ -13,6 +14,7 @@ from ..db import tx
 from ..deps import Person, not_found
 
 router = APIRouter(prefix="/api")
+log = logging.getLogger(__name__)
 
 
 # ─── criteria & scores ────────────────────────────────────────────────
@@ -101,6 +103,7 @@ class CaptureIn(BaseModel):
     image: str | None = Field(default=None, pattern=r"^https?://", max_length=2000)  # the page's og:image, read in the browser
     next_data: str | None = Field(default=None, max_length=4_000_000)  # Domain's __NEXT_DATA__
     argonaut: str | None = Field(default=None, max_length=4_000_000)   # realestate.com.au's page data
+    page_state: str | None = Field(default=None, max_length=4_000_000)  # another page-state object, for other sites
     text: str | None = Field(default=None, max_length=400_000)         # the visible text
 
 
@@ -126,9 +129,11 @@ class LinkIn(BaseModel):
 def from_link(body: LinkIn, _: Person) -> dict:
     """A listing link shared from a phone: the address, where the link spells it out (Domain's do), and whether the
     listing is already tracked. Nothing is fetched from the portal; the weekly refresh fills in the rest."""
-    from ..listing import address_from_link, clean_url
+    from ..listing import address_from_link, clean_url, hints_from_link
     url = clean_url(body.url)
-    return with_existing({"url": url, "address_parts": address_from_link(url)})
+    hints = hints_from_link(url)   # realestate.com.au: the suburb and kind of property, not the street
+    return with_existing({"url": url, "address_parts": address_from_link(url), "link_hint": hints,
+                          "property_type": hints["property_type"] if hints else None})
 
 
 class ShareIn(BaseModel):
@@ -193,11 +198,34 @@ def dismiss_shared_link(link_id: UUID, person: Person) -> None:
         conn.execute("UPDATE shared_link SET dismissed_at = now() WHERE id = %s", (link_id,))
 
 
+def record_sample(body: CaptureIn) -> None:
+    """With CAPTURE_SAMPLES=1 (a test copy), keep what each capture sent, so the readers can be checked against real pages
+    from sites we can't fetch ourselves. A few files in the blob directory, newest kept; never raises."""
+    import json
+    import os
+    from datetime import datetime, timezone
+    from pathlib import Path
+    from urllib.parse import urlsplit
+    if os.environ.get("CAPTURE_SAMPLES", "").lower() not in ("1", "true", "yes"):
+        return
+    try:
+        folder = Path(os.environ.get("BLOB_DIR", "/data/blobs")) / "_capture_samples"
+        folder.mkdir(parents=True, exist_ok=True)
+        host = (urlsplit(body.url).hostname or "page").removeprefix("www.")
+        name = f"{host}-{datetime.now(timezone.utc):%Y%m%dT%H%M%S}.json"
+        (folder / name).write_text(json.dumps(body.model_dump(), ensure_ascii=False), encoding="utf-8")
+        for old in sorted(folder.glob("*.json"))[:-20]:
+            old.unlink()
+    except Exception as e:  # a diagnostic aid, never a reason to fail the import
+        log.warning("Couldn't keep the capture sample: %s", e)
+
+
 @router.post("/listing/parse")
 def parse_capture(body: CaptureIn, _: Person) -> dict:
+    record_sample(body)
     with tx() as conn:
         known = [r["name"] for r in conn.execute("SELECT name FROM tag ORDER BY name").fetchall()]
-    out = listing_capture.extract(body.url, body.html, body.next_data, body.argonaut, body.text, body.image, known)
+    out = listing_capture.extract(body.url, body.html, body.next_data, body.argonaut, body.text, body.image, known, body.page_state)
     return with_existing(out)
 
 

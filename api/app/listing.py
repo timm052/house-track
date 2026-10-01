@@ -76,3 +76,26 @@ def address_from_link(url: str) -> dict | None:
     end = clear[0] if clear else other[-1]
     return {"unit": unit.upper() if unit else None, "street_number": number.upper(), "street": _title(" ".join(rest[:end + 1])),
             "suburb": _title(" ".join(rest[end + 1:])), "postcode": postcode}
+
+
+# ─── what a realestate.com.au link says ───────────────────────────────
+# Its links don't carry the address, but the slug names the kind of property and the suburb:
+# /property-house-vic-box+hill+north-145678901 is a house in Box Hill North, Victoria. Not enough to add a house,
+# enough to start the form (the street is typed in).
+_REA_SLUG = re.compile(r"^property-(?P<kind>[a-z]+)-(?P<state>[a-z]{2,3})-(?P<suburb>.+?)-\d{6,}$")
+_REA_KINDS = {"house": "house", "unit": "unit", "apartment": "apartment", "townhouse": "townhouse", "villa": "unit", "duplex": "townhouse",
+              "terrace": "townhouse", "semi": "townhouse", "land": "land", "acreage": "land", "rural": "land", "studio": "apartment"}
+
+
+def hints_from_link(url: str) -> dict | None:
+    """{suburb, state, property_type} from a realestate.com.au listing link, or None."""
+    if recognise(url)[0] != "rea":
+        return None
+    slug = urlsplit(url).path.strip("/").split("/")[-1].lower()
+    m = _REA_SLUG.match(slug.replace("%2b", "+"))
+    if not m:
+        return None
+    suburb = re.sub(r"[+\-]+", " ", m["suburb"]).strip()
+    if not suburb:
+        return None
+    return {"suburb": suburb.title(), "state": m["state"].upper(), "property_type": _REA_KINDS.get(m["kind"])}

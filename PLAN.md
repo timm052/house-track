@@ -716,6 +716,19 @@ Everything else derived (status, current opinion and price, flags, station acces
 | 16 | Distribution | One copy per household; multi-household hosting | **One copy per household** (D8), MIT, images on GitHub's container registry, `.env`-driven, no host-specific paths in the compose file. | Nothing plausible. Multi-household hosting would need accounts, which contradicts the design. |
 | 17 | Listing import | Manual; server fetch; bookmarklet; developer API | **Manual form first; bookmarklet/share sheet and server fetch pre-fill it** (D12). ⚠ Fragile: portal markup changes and bot blocking (REA especially) will break both, and scraping breaches portal terms. | By design, this is the fragile path. |
 
+**Portals, as found on 1 Oct 2026** (D12 stands: nothing here is load-bearing, and nothing works around a portal's protection):
+- **realestate.com.au** and **property.com.au** are both REA Group, and both sit behind Kasada bot protection (property.com.au's
+  page is a blank challenge shell in an embedded browser: a `KPSDK` script and no content). So neither can be read by the
+  server, and the claim that property.com.au has no protection is wrong. Both are read only through the bookmarklet, in the
+  person's own browser, on a page they're looking at.
+- realestate.com.au keeps its listing in a script tag, `window.ArgonautExchange={...};`, and deletes the global once it starts,
+  so the bookmarklet sends the script's text. Inside is `resi-property_listing-experience-web.urqlClientCache`, JSON inside a
+  string, holding `details.listing` with `generalFeatures.bedrooms.value`, `propertySizes.land`, `address.display.shortAddress`,
+  `listers[]`, `listingCompany`, `media.images[].templatedUrl` (a `{size}` template on reastatic.net) and an HTML `description`.
+  Field names are from public write-ups, not yet checked against a live page here: set `CAPTURE_SAMPLES=1` (the test copy
+  does) and each capture is kept in `<blobs>/_capture_samples/` so the readers can be checked and fixed against real pages.
+- property.com.au has no reader of its own yet; the bookmarklet works there as far as the generic readers get.
+
 ## 4. Deployment
 
 **Storage layout** (paths come from `.env`):

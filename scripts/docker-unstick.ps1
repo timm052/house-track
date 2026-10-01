@@ -8,7 +8,15 @@
 
 $ErrorActionPreference = "Stop"
 
-function Test-Docker { docker info *> $null; return $LASTEXITCODE -eq 0 }
+# Docker prints its error to stderr when it's down, which "Stop" would treat as fatal: look at the exit code only.
+function Test-Docker {
+    $saved = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    docker info 2>&1 | Out-Null
+    $ok = $LASTEXITCODE -eq 0
+    $ErrorActionPreference = $saved
+    return $ok
+}
 
 if (Test-Docker) { Write-Host "Docker is already running."; exit 0 }
 

@@ -214,3 +214,40 @@ def test_tag_rename_clash_offers_a_merge(client, people):
     assert r.status_code == 200 and r.json()["id"] == tags["north facing"]
     counts = {t["name"]: t["houses"] for t in client.get("/api/tags").json()}
     assert counts.get("north facing") == 2 and "north-facing" not in counts
+
+
+def test_latest_verdict_is_the_most_recent_response(client, people):
+    """Before or after inspecting, whichever was said last."""
+    a = people["a"]
+    pid = new_house(client, a, 152)
+    say = lambda stage, stance, when: client.post(f"/api/properties/{pid}/opinions", headers=as_(a), json={
+        "stage": stage, "stance": stance, "recorded_at": when})
+    say("pre_inspection", "yes", "2026-09-01T10:00:00+10:00")
+    say("post_inspection", "no", "2026-09-05T10:00:00+10:00")
+    assert row_for(client, a, pid)[f"latest_verdict:{a['id']}"] == "no"
+    say("pre_inspection", "maybe", "2026-09-20T10:00:00+10:00")  # changed their mind later, before a second look
+    assert row_for(client, a, pid)[f"latest_verdict:{a['id']}"] == "maybe"
+
+
+def test_updates_feed(client, people):
+    """What's happened lately: houses added, guide changes (with the guide before), statuses and sales (not verdicts)."""
+    a, b = people["a"], people["b"]
+    pid = new_house(client, a, 153)
+    cid = row_for(client, a, pid)["campaign_id"]
+    guide = lambda low, high, when: client.post(f"/api/campaigns/{cid}/price-guides", headers=as_(a), json={
+        "source": "advertised", "low_aud": low, "high_aud": high, "observed_at": when})
+    guide(900_000, 990_000, "2099-01-01T09:00:00+10:00")
+    guide(850_000, 935_000, "2099-01-02T09:00:00+10:00")
+    client.post(f"/api/properties/{pid}/opinions", headers=as_(b), json={"stage": "pre_inspection", "stance": "yes", "note": "Love the street"})
+    client.post(f"/api/properties/{pid}/status", headers=as_(a), json={"status": "shortlisted", "reason": "Both said yes"})
+    assert client.patch(f"/api/campaigns/{cid}", headers=as_(a), json={"outcome": "sold", "sold_price_aud": 910_000}).status_code == 200
+
+    feed = [e for e in client.get("/api/updates?days=120").json() if e["property_id"] == pid]
+    kinds = [e["kind"] for e in feed]
+    assert {"added", "guide", "status", "sale"} <= set(kinds) and "verdict" not in kinds
+    assert kinds.count("guide") == 1                      # the first guide isn't a change
+    g = next(e for e in feed if e["kind"] == "guide")
+    assert (g["data"]["prev_low"], g["data"]["prev_high"], g["data"]["low"], g["data"]["high"]) == (900_000, 990_000, 850_000, 935_000)
+    s = next(e for e in feed if e["kind"] == "sale")
+    assert s["data"]["outcome"] == "sold" and s["data"]["price"] == 910_000
+    assert client.get("/api/updates?days=0").status_code == 422

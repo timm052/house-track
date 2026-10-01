@@ -4,7 +4,8 @@ import ErrorBoundary from "./ErrorBoundary";
 import { getActingPerson, setActingPerson } from "./api";
 import { useOutbox } from "./outbox";
 import Auction from "./pages/Auction";
-import ThisWeek from "./pages/ThisWeek";
+import Inspections from "./pages/Inspections";
+import Updates from "./pages/Updates";
 import { Compare } from "./pages/Decide";
 import Driveway from "./pages/Driveway";
 import Outbox from "./pages/Outbox";
@@ -17,7 +18,7 @@ import Settings from "./pages/Settings";
 import Setup from "./pages/Setup";
 import Refresh from "./pages/Refresh";
 import { usePersons } from "./people";
-import { ArrowUpDown, CalendarDays, DoorOpen, Heart, House, Map as MapIcon, MapPin, Monitor, Moon, Settings as SettingsIcon, Sheet, Sun, TrendingUp } from "lucide-react";
+import { ArrowUpDown, CalendarDays, DoorOpen, Heart, House, Newspaper, Map as MapIcon, MapPin, Monitor, Moon, Settings as SettingsIcon, Sheet, Sun, TrendingUp } from "lucide-react";
 import { setTheme, useThemeChoice, type ThemeChoice } from "./theme";
 import Plan from "./pages/Plan";
 
@@ -28,13 +29,14 @@ const Trends = lazy(() => import("./pages/Trends"));
 const FloorplanEditor = lazy(() => import("./floorplan/FloorplanEditor"));
 
 // Lists, the house page and dashboards use the full width; forms and settings stay narrow.
-const WIDE = [/^\/$/, /^\/week/, /^\/p\//, /^\/trends/, /^\/compare/, /^\/plan/];
+const WIDE = [/^\/$/, /^\/updates/, /^\/inspections/, /^\/p\//, /^\/trends/, /^\/compare/, /^\/plan/];
 
 /** The tabs, in the order of a house hunt: the list, what's on, where things are, then the tools. */
 const NAV: { to: string; label: string; icon: React.ReactNode; desktopOnly?: boolean; end?: boolean }[] = [
   { to: "/", label: "Houses", icon: <House />, end: true },
   { to: "/rate", label: "Rate", icon: <Heart /> },
-  { to: "/week", label: "This week", icon: <CalendarDays /> },
+  { to: "/updates", label: "Updates", icon: <Newspaper /> },
+  { to: "/inspections", label: "Inspections", icon: <CalendarDays /> },
   { to: "/map", label: "Map", icon: <MapIcon /> },
   { to: "/overview", label: "Grid", icon: <Sheet />, desktopOnly: true },
   { to: "/trends", label: "Trends", icon: <TrendingUp />, desktopOnly: true },
@@ -110,14 +112,16 @@ export default function App() {
           <Route path="/places" element={<Places />} />
           <Route path="/on-site" element={<Driveway />} />
           <Route path="/drive" element={<Navigate to="/on-site" replace />} />
-          <Route path="/week" element={<ThisWeek />} />
-          <Route path="/calendar" element={<Navigate to="/week" replace />} />
+          <Route path="/updates" element={<Updates />} />
+          <Route path="/week" element={<Navigate to="/updates" replace />} />
+          <Route path="/inspections" element={<Inspections />} />
+          <Route path="/calendar" element={<Navigate to="/inspections" replace />} />
           <Route path="/plan" element={<Plan />} />
           <Route path="/outbox" element={<Outbox />} />
           <Route path="/auction/:campaignId" element={<Auction />} />
           <Route path="/compare" element={<Compare />} />
           <Route path="/trends" element={<Suspense fallback={<p className="muted">Loading…</p>}><Trends /></Suspense>} />
-          <Route path="/disagree" element={<Navigate to="/week" replace />} />
+          <Route path="/disagree" element={<Navigate to="/updates" replace />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/refresh" element={<Refresh />} />
           <Route path="*" element={<p>Page not found.</p>} />

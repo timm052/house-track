@@ -1,47 +1,68 @@
-// Inspection planner: pick a day, and the day's open-for-inspections and auctions become a route in time
-// order, with the drive between each (from the routing engine), when you'd arrive, and any you'd miss. When the
-// To inspect list has houses, the route is built from them by default, with the ones not open that day listed below.
+// Plan the route: pick a day from the week bar, and that day's inspections and auctions become a route in time order:
+// where to start, the drive between each stop (from the routing engine), when you'd arrive and whether you'd make it,
+// with the map beside it and a button that opens the whole route in Google Maps. Each stop can be skipped and the route
+// reworks itself. With houses on the To inspect list, the route is built from them (a switch turns that off), and the
+// ones not open that day are listed beside it. Same look as the Inspections page, which it opens from.
 import { useQuery } from "@tanstack/react-query";
-import { lazy, Suspense, useMemo, useState } from "react";
+import { ArrowLeft, Check, Clock, House, Map as MapIcon, Navigation, Plus, TriangleAlert } from "lucide-react";
+import { Fragment, lazy, Suspense, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api";
-import { EVENT_LABEL, minutes } from "../format";
+import { minutes } from "../format";
 import type { OverviewPlace, OverviewRow } from "../overview/columns";
 import type { PlanStop } from "../map/PlanMap";
+import { usePeople } from "../people";
+import { routeDrives, type Leg } from "../route";
+import { at, iso, useMedia, WeekBar, weekLabel, WeekNav } from "../WeekBar";
+import { sectionOf, StopCard, type Event } from "./Inspections";
 
 const PlanMap = lazy(() => import("../map/PlanMap"));
-type Event = { type: string; id: string; kind: string; state: string; starts_at: string; ends_at: string | null;
-               property_id: string; address: string; suburb: string };
 type Place = { id: string; kind: string; name: string; lon: number; lat: number };
-type Leg = { distance_m: number; duration_s: number } | null;
 
-const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const dayLabel = new Intl.DateTimeFormat("en-AU", { weekday: "short", day: "numeric", month: "short" });
-const time = new Intl.DateTimeFormat("en-AU", { hour: "numeric", minute: "2-digit" });
-const KIND = EVENT_LABEL;
+const DAYS = 90;
+const MAX_STOPS = 10;   // what Google Maps takes in one route (with the start and finish)
+const STAYS = [10, 15, 20, 30];
+const clockFmt = new Intl.DateTimeFormat("en-AU", { hour: "numeric", minute: "2-digit" });
+const longDay = new Intl.DateTimeFormat("en-AU", { weekday: "long", day: "numeric", month: "long" });
+const weekdayLong = new Intl.DateTimeFormat("en-AU", { weekday: "long" });
+const dayMonthLong = new Intl.DateTimeFormat("en-AU", { day: "numeric", month: "long" });
+const shortDay = new Intl.DateTimeFormat("en-AU", { weekday: "short", day: "numeric", month: "short" });
+const clock = (t: number | string) => clockFmt.format(new Date(t));
+const splitTime = (t: number | string) => { const [h, ap] = clock(t).split(/\s+/); return [h, (ap ?? "").toLowerCase()] as const; };
+const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
+const store = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* per-device nicety */ } };
 
 export default function Plan() {
   const [params, setParams] = useSearchParams();
-  const events = useQuery({ queryKey: ["inspections", 14], queryFn: () => api<Event[]>("/api/inspections?days=14") });
+  const { active } = usePeople();
+  const wide = useMedia("(min-width: 1000px)");
+  const events = useQuery({ queryKey: ["inspections", DAYS], queryFn: () => api<Event[]>(`/api/inspections?days=${DAYS}`) });
   const overview = useQuery({ queryKey: ["overview"], queryFn: () => api<{ rows: OverviewRow[]; places: OverviewPlace[] }>("/api/overview") });
   const places = useQuery({ queryKey: ["places"], queryFn: () => api<Place[]>("/api/places") });
   const [skip, setSkip] = useState<string[]>([]);
-  const [startId, setStartId] = useState("");
-  const [stay, setStay] = useState(15);
+  const [startId, setStartId] = useState(() => stored("housetrack.plan.start") ?? "");
+  const [stay, setStay] = useState(() => Number(stored("housetrack.plan.stay")) || 15);
+  const [onlyList, setOnlyList] = useState(() => stored("housetrack.plan.onlyList") !== "0");
+  const [showMap, setShowMap] = useState(false);
 
-  const byId = new Map((overview.data?.rows ?? []).map((r) => [r.id, r]));
+  const rows = new Map((overview.data?.rows ?? []).map((r) => [r.id, r]));
   const listed = (overview.data?.rows ?? []).filter((r) => r.to_inspect);
-  const [onlyList, setOnlyList] = useState(() => { try { return localStorage.getItem("housetrack.plan.onlyList") !== "0"; } catch { return true; } });
   const useList = onlyList && listed.length > 0;
-  const flipList = () => { try { localStorage.setItem("housetrack.plan.onlyList", onlyList ? "0" : "1"); } catch { /* ignore */ } setOnlyList(!onlyList); setSkip([]); };
-  const allUpcoming = (events.data ?? []).filter((e) => e.type !== "eoi" && new Date(e.ends_at ?? e.starts_at).getTime() > Date.now());
-  const upcoming = useList ? allUpcoming.filter((e) => byId.get(e.property_id)?.to_inspect) : allUpcoming;
-  const days = [...new Set(upcoming.map((e) => dayKey(new Date(e.starts_at))))].sort();
+  // Still to come, and worth going to: not houses you've been to or passed on (unless they're on To inspect).
+  const everything = (events.data ?? []).filter((e) => e.type !== "eoi" && new Date(e.ends_at ?? e.starts_at).getTime() > Date.now()
+    && sectionOf(e, rows.get(e.property_id), active) === "main");
+  const upcoming = useList ? everything.filter((e) => rows.get(e.property_id)?.to_inspect) : everything;
+  const byDay = new Map<string, Event[]>();
+  for (const e of upcoming) { const k = iso(new Date(e.starts_at)); byDay.set(k, [...(byDay.get(k) ?? []), e]); }
+  const days = [...byDay.keys()].sort();
+  const today = iso(new Date());
   // Default: the next Saturday with something on, else the next day with anything.
-  const day = params.get("day") ?? days.find((d) => new Date(`${d}T12:00`).getDay() === 6) ?? days[0];
-  const onDay = upcoming.filter((e) => dayKey(new Date(e.starts_at)) === day).sort((a, b) => a.starts_at.localeCompare(b.starts_at));
-  const pinned = (e: Event) => { const r = byId.get(e.property_id); return r?.lat != null && r?.lon != null ? { lon: Number(r.lon), lat: Number(r.lat) } : null; };
-  const visits = onDay.filter((e) => !skip.includes(e.id) && pinned(e));
+  const day = params.get("day") ?? days.find((d) => at(d).getDay() === 6) ?? days[0] ?? today;
+  const pick = (d: string) => { setParams({ day: d }, { replace: true }); setSkip([]); };
+
+  const onDay = (byDay.get(day) ?? []).sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+  const pinned = (e: Event) => { const r = rows.get(e.property_id); return r?.lat != null && r?.lon != null ? { lon: Number(r.lon), lat: Number(r.lat) } : null; };
+  const visits = onDay.filter((e) => !skip.includes(e.id) && pinned(e)).slice(0, MAX_STOPS);
   const start = (places.data ?? []).find((p) => p.id === startId) ?? null;
   const points = [...(start ? [[start.lon, start.lat]] : []), ...visits.map((e) => { const p = pinned(e)!; return [p.lon, p.lat]; })];
   const legs = useQuery({
@@ -49,122 +70,192 @@ export default function Plan() {
     queryFn: () => api<{ legs: Leg[] }>("/api/plan/legs", { method: "POST", body: { points, mode: "drive" } }),
     enabled: points.length >= 2, staleTime: Infinity, retry: false,
   });
-
   // Arrival times: leave the start in time for the first opening, then drive, stay, drive…
-  const timeline = useMemo(() => {
-    const out = new Map<string, { arrive: number; leg: Leg; late: "no" | "after-start" | "missed" }>();
-    const legList = legs.data?.legs ?? [];
-    let clock: number | null = null;
-    visits.forEach((e, i) => {
-      const opens = new Date(e.starts_at).getTime(), closes = new Date(e.ends_at ?? e.starts_at).getTime();
-      const leg = start ? legList[i] ?? null : i > 0 ? legList[i - 1] ?? null : null;
-      const drive = leg ? leg.duration_s * 1000 : 0;
-      const arrive: number = clock == null ? opens : clock + drive;
-      const late = arrive > closes ? "missed" : arrive > opens + 5 * 60_000 ? "after-start" : "no";
-      out.set(e.id, { arrive, leg: i === 0 && !start ? null : leg, late });
-      clock = Math.max(arrive, opens) + (e.type === "auction" ? 30 : stay) * 60_000;
-    });
-    return out;
-  }, [visits, legs.data, start, stay]);
+  const { stops: timing, drives, late, seconds: driving } = routeDrives(visits, legs.data?.legs ?? [], { hasStart: !!start, stay });
+  const stopNo = new Map(visits.map((e, i) => [e.id, i + 1]));
 
-  const stops: PlanStop[] = [
+  const first = visits[0], last = visits[visits.length - 1];
+  const leaveAt = start && first && timing.get(first.id)?.leg ? new Date(first.starts_at).getTime() - timing.get(first.id)!.leg!.duration_s * 1000 : null;
+  const doneAt = last && timing.get(last.id) ? Math.max(timing.get(last.id)!.arrive, new Date(last.starts_at).getTime()) + (last.type === "auction" ? 30 : stay) * 60_000 : null;
+  const missed = late.size;
+
+  const mapStops: PlanStop[] = [
     ...(start ? [{ lon: start.lon, lat: start.lat, label: start.name, start: true }] : []),
-    ...visits.map((e) => ({ ...pinned(e)!, label: e.address, clash: timeline.get(e.id)?.late === "missed" })),
+    ...visits.map((e) => ({ ...pinned(e)!, label: e.address, clash: late.has(e.id) })),
   ];
-  const mapsUrl = stops.length >= 2 ? (() => {
-    const at = (s: PlanStop) => `${s.lat},${s.lon}`;
+  const mapsUrl = mapStops.length >= 2 ? (() => {
+    const pt = (s: PlanStop) => `${s.lat},${s.lon}`;
     const u = new URL("https://www.google.com/maps/dir/");
     u.searchParams.set("api", "1");
-    u.searchParams.set("origin", at(stops[0]));
-    u.searchParams.set("destination", at(stops[stops.length - 1]));
-    if (stops.length > 2) u.searchParams.set("waypoints", stops.slice(1, -1).map(at).join("|"));
+    u.searchParams.set("origin", pt(mapStops[0]));
+    u.searchParams.set("destination", pt(mapStops[mapStops.length - 1]));
+    if (mapStops.length > 2) u.searchParams.set("waypoints", mapStops.slice(1, -1).map(pt).join("|"));
     u.searchParams.set("travelmode", "driving");
     return u.toString();
   })() : null;
-  const missed = [...timeline.values()].filter((t) => t.late === "missed").length;
   // On the list but not open this day: when they next are, if at all.
   const notToday = useList ? listed.filter((r) => !onDay.some((e) => e.property_id === r.id)).map((r) => ({
-    r, next: allUpcoming.find((e) => e.property_id === r.id && e.type === "inspection"),
+    r, next: everything.find((e) => e.property_id === r.id && e.type === "inspection"),
   })) : [];
 
-  return (
-    <div style={{ marginTop: 12 }}>
-      <h1>Plan the inspections</h1>
-      <p className="small muted">A day's inspections in order, with drive and arrival times. Drives assume no traffic.</p>
+  const mapBlock = mapStops.length > 0 && <Suspense fallback={<div className="plan-map" />}><PlanMap stops={mapStops} /></Suspense>;
+  const cta = mapsUrl && (
+    <a className="pl-maps" href={mapsUrl} target="_blank" rel="noreferrer"><Navigation /> Open in Google Maps</a>
+  );
+
+  const controls = (
+    <div className="pl-controls">
+      <label className="pl-field">
+        <span>Start</span>
+        <select value={start ? startId : ""} onChange={(e) => { setStartId(e.target.value); store("housetrack.plan.start", e.target.value); }}>
+          <option value="">The first house</option>
+          {(places.data ?? []).filter((p) => p.kind === "destination").map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </label>
+      <div className="pl-field">
+        <span>Time at each</span>
+        <div className="segmented" role="radiogroup" aria-label="Minutes at each stop">
+          {STAYS.map((m) => (
+            <button key={m} role="radio" aria-checked={stay === m} className={stay === m ? "on" : ""}
+              onClick={() => { setStay(m); store("housetrack.plan.stay", String(m)); }}>{m} min</button>
+          ))}
+        </div>
+      </div>
       {listed.length > 0 && (
-        <label className="check small plan-only"><input type="checkbox" checked={onlyList} onChange={flipList} />
-          Only houses on To inspect ({listed.length})</label>
+        <button className={`chip ${useList ? "on" : ""}`} aria-pressed={useList}
+          onClick={() => { setOnlyList(!onlyList); store("housetrack.plan.onlyList", onlyList ? "0" : "1"); setSkip([]); }}>
+          Only To inspect · {listed.length}</button>
       )}
-      {events.isPending ? <p className="muted">Loading…</p> : days.length === 0 ? (
-        <div className="card empty">{useList ? "None of the To inspect houses are open in the next two weeks." : "No inspections in the next two weeks."}</div>
-      ) : (
-        <>
-          <div className="chips" aria-label="Day">
-            {days.map((d) => {
-              const n = upcoming.filter((e) => dayKey(new Date(e.starts_at)) === d).length;
-              return <button key={d} className={`chip ${d === day ? "on" : ""}`} onClick={() => { setParams({ day: d }); setSkip([]); }}>
-                {dayLabel.format(new Date(`${d}T12:00`))} · {n}</button>;
-            })}
+    </div>
+  );
+
+  return (
+    <div className="inspections plan">
+      <header className="insp-head">
+        <div>
+          <Link to={`/inspections?day=${day}`} className="pl-back"><ArrowLeft /> Back to inspections</Link>
+          <h1>Plan the route</h1>
+          <p className="muted">{weekLabel(day)}</p>
+        </div>
+        <div className="insp-head-actions"><WeekNav day={day} today={today} onPick={pick} /></div>
+      </header>
+
+      <WeekBar day={day} today={today} count={(d) => byDay.get(d)?.length ?? 0} onPick={pick} noun="stop" />
+
+      {!wide && controls}
+
+      <div key={day} className="insp-fade">
+          <div className="insp-dayhero">
+            <div>
+              <div className="insp-dayname">{day === today ? "Today" : weekdayLong.format(at(day))}</div>
+              <div className="insp-daydate">{day === today ? longDay.format(at(day)) : dayMonthLong.format(at(day))}</div>
+            </div>
           </div>
-          <div className="filter-bar">
-            <select value={startId} onChange={(e) => setStartId(e.target.value)} aria-label="Start from">
-              <option value="">Start at the first house</option>
-              {(places.data ?? []).filter((p) => p.kind === "destination").map((p) => <option key={p.id} value={p.id}>Start from {p.name}</option>)}
-            </select>
-            <select value={stay} onChange={(e) => setStay(Number(e.target.value))} aria-label="Minutes at each">
-              {[10, 15, 20, 30].map((m) => <option key={m} value={m}>{m} min at each</option>)}
-            </select>
-            {mapsUrl && <a className="button-like small-btn" href={mapsUrl} target="_blank" rel="noreferrer">Open in Google Maps</a>}
-            <span className={`small grow ${missed ? "tone-bad" : "muted"}`} style={{ textAlign: "right" }}>
-              {visits.length} {visits.length === 1 ? "stop" : "stops"}{missed ? ` · you'd miss ${missed}` : ""}
-            </span>
-          </div>
-          <div className="plan-grid">
-            <ol className="plan-list">
-              {start && <li className="plan-start"><span className="plan-num">●</span><div><strong>{start.name}</strong><div className="small muted">Start</div></div></li>}
+          {visits.length > 0 && (
+            <div className="insp-stats">
+              <span className="insp-stat">{visits.length} {visits.length === 1 ? "stop" : "stops"}</span>
+              {leaveAt != null && <span className="insp-stat"><House />Leave {clock(leaveAt)}</span>}
+              {doneAt != null && <span className="insp-stat"><Clock />Done about {clock(doneAt)}</span>}
+              {driving > 0 && <span className="insp-stat">about {minutes(driving)} driving</span>}
+              {missed > 0 && <span className="insp-stat pl-bad">You'd miss {missed}</span>}
+            </div>
+          )}
+          {onDay.length > MAX_STOPS && <p className="small muted">Google Maps takes up to {MAX_STOPS} stops, so the route stops at the first {MAX_STOPS} you're going to.</p>}
+
+          <div className={`insp-layout ${wide && mapStops.length > 0 ? "" : "no-side"}`}>
+          <div>
+          {wide && controls}
+          {events.isPending ? <p className="muted">Loading…</p> : onDay.length === 0 ? (
+            <div className="card insp-empty">
+              <Navigation aria-hidden />
+              <p>{useList ? "None of the To inspect houses are open on this day." : `Nothing to plan on ${longDay.format(at(day))}.`}</p>
+              {days.find((d) => d > day) && <button className="small-btn" onClick={() => pick(days.find((d) => d > day)!)}>Next: {shortDay.format(at(days.find((d) => d > day)!))}</button>}
+            </div>
+          ) : (
+            <ol className="tl">
+              {start && (
+                <li className="tl-item pl-start">
+                  <div className="tl-rail">
+                    <span className="tl-time">{leaveAt != null ? <>{splitTime(leaveAt)[0]}<small>{splitTime(leaveAt)[1]}</small></> : ""}</span>
+                    <span className="tl-dot start"><House /></span>
+                  </div>
+                  <div className="pl-startcard"><strong>{start.name}</strong><span className="muted small">{leaveAt != null ? `Leave at ${clock(leaveAt)}` : "Start"}</span></div>
+                </li>
+              )}
               {onDay.map((e) => {
-                const t = timeline.get(e.id), off = skip.includes(e.id), where = pinned(e);
-                const n = visits.indexOf(e) + 1;
+                const n = stopNo.get(e.id), where = pinned(e), going = n != null, t = timing.get(e.id), drive = drives.get(e.id), r = rows.get(e.property_id);
                 return (
-                  <li key={e.id} className={`${off || !where ? "off" : ""} ${t?.late === "missed" ? "missed" : ""}`}>
-                    <span className="plan-num">{n > 0 ? n : "–"}</span>
-                    <div className="grow">
-                      {t?.leg && <div className="plan-leg small muted">{minutes(t.leg.duration_s)} drive · {(t.leg.distance_m / 1000).toFixed(1)} km</div>}
-                      {t?.leg === null && (n > 1 || start) && !off && legs.isFetched && <div className="plan-leg small muted">No drive time</div>}
-                      <div><strong>{time.format(new Date(e.starts_at))}{e.ends_at && `–${time.format(new Date(e.ends_at))}`}</strong> {KIND[e.kind] ?? "Inspection"}</div>
-                      <div><Link to={`/p/${e.property_id}`}>{e.address.split(",")[0]}</Link> <span className="muted small">{e.suburb}</span></div>
-                      {!where && <div className="small tone-warn">Not on the map, so it's not in the route. <Link to={`/map?pin=${e.property_id}`}>Set the pin</Link></div>}
-                      {t && !off && (
-                        <div className={`small ${t.late === "missed" ? "tone-bad" : t.late === "after-start" ? "tone-warn" : "tone-good"}`}>
-                          {t.late === "missed" ? `You'd get there at ${time.format(t.arrive)}, after it closes` : `Arrive ${time.format(t.arrive)}`}
-                        </div>
-                      )}
-                    </div>
-                    {where && <label className="check small"><input type="checkbox" checked={!off}
-                      onChange={() => setSkip(off ? skip.filter((x) => x !== e.id) : [...skip, e.id])} /> Go</label>}
-                  </li>
+                  <Fragment key={e.id}>
+                    {drive && going && (
+                      <li className={`tl-gap ${drive.level ?? ""}`}>
+                        <div className="tl-rail" />
+                        <div className="tl-gapbody"><span className="chip">{drive.level ? <TriangleAlert /> : <Navigation />}{drive.text}</span></div>
+                      </li>
+                    )}
+                    <li className={`tl-item ${e.type === "auction" ? "sale" : ""}`}>
+                      <div className="tl-rail">
+                        <span className="tl-time">{splitTime(e.starts_at)[0]}<small>{splitTime(e.starts_at)[1]}</small></span>
+                        <span className={`tl-dot ${going ? "" : "plain"}`} aria-label={going ? `Stop ${n}` : undefined}>{n ?? ""}</span>
+                      </div>
+                      <StopCard e={e} r={r} people={active} dim={!going}
+                        foot={
+                          <div className="ic-foot plan">
+                            {going && t && (
+                              <span className={`pl-arrive ${t.late}`}><Clock />Arrive {clock(Math.max(t.arrive, new Date(e.starts_at).getTime()))}
+                                {t.late === "missed" ? ", after it closes" : t.late === "after-start" ? ", after it starts" : ""}</span>
+                            )}
+                            {!where && <span className="pl-note">Not on the map, so it's left out. <Link to={`/map?pin=${e.property_id}`}>Set the pin</Link></span>}
+                            {where && (
+                              <button className={`pl-go ${going ? "on" : ""}`} aria-pressed={going}
+                                onClick={() => setSkip(going ? [...skip, e.id] : skip.filter((x) => x !== e.id))}>
+                                {going ? <><Check />Going</> : <><Plus />Skipped</>}</button>
+                            )}
+                          </div>
+                        } />
+                    </li>
+                  </Fragment>
                 );
               })}
             </ol>
-            <div>
-              {legs.isError && <p className="error small">{(legs.error as Error).message}</p>}
-              {stops.length > 0 && <Suspense fallback={<div className="plan-map" />}><PlanMap stops={stops} /></Suspense>}
-              {notToday.length > 0 && (
-                <div className="card plan-not-today">
-                  <h3>To inspect, not open this day</h3>
-                  <ul className="history small">
-                    {notToday.map(({ r, next }) => (
-                      <li key={r.id}><Link to={`/p/${r.id}`}>{String(r.address)}</Link> <span className="muted">{String(r.suburb)}</span>
-                        <div className="muted">{next ? `Next: ${dayLabel.format(new Date(next.starts_at))}, ${time.format(new Date(next.starts_at))}`
-                          : "No inspection scheduled"}</div></li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+          )}
+          {legs.isError && <p className="error small">{(legs.error as Error).message}</p>}
+          {!wide && mapStops.length > 0 && (
+            <div className="insp-mapphone">
+              {showMap ? <div className="insp-map">{mapBlock}</div>
+                : <button className="small-btn" onClick={() => setShowMap(true)}><MapIcon /> Show the route on a map</button>}
             </div>
+          )}
+
+          <div className="insp-after">
+            {notToday.length > 0 && (
+              <details className="card insp-fold">
+                <summary>To inspect, not open this day <span className="muted">· {notToday.length}</span></summary>
+                <ul className="insp-pass-list">
+                  {notToday.map(({ r, next }) => (
+                    <li key={r.id}>
+                      <div className="grow" style={{ minWidth: 0 }}>
+                        <Link to={`/p/${r.id}`}>{String(r.address)}</Link> <span className="muted small">{String(r.suburb)}</span>
+                        <div className="small muted">{next ? `Next: ${shortDay.format(new Date(next.starts_at))}, ${clock(next.starts_at)}` : "No inspection scheduled"}</div>
+                      </div>
+                      {next && <button className="small-btn" onClick={() => pick(iso(new Date(next.starts_at)))}>Plan that day</button>}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
           </div>
-        </>
-      )}
+        </div>
+
+        {wide && mapStops.length > 0 && (
+          <aside className="insp-side">
+            <div className="card insp-mapcard"><h3>Route</h3><div className="insp-map">{mapBlock}</div></div>
+            {cta}
+          </aside>
+        )}
+        </div>
+      </div>
+
+      {!wide && cta && <div className="pl-cta">{cta}</div>}
     </div>
   );
 }

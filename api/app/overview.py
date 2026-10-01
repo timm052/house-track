@@ -220,6 +220,7 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
         for k in JUDGEMENTS:
             v[k] = str(cj[k]["id"]) if k in cj else None
         latest_by_person: dict = {}
+        latest_at: dict = {}
         for o in opinions.get(pid, []):
             short = "pre" if o["stage"] == "pre_inspection" else "post"
             key = f"v:{o['person_id']}:{short}"
@@ -228,6 +229,10 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
             row[f"{key}:by"] = persons.get(o["created_by"])
             v[key] = str(o["id"])
             latest_by_person[o["person_id"]] = max(latest_by_person.get(o["person_id"], o["recorded_at"]), o["recorded_at"])
+            # Their most recent response, whether it was before or after inspecting.
+            if f"latest_verdict:{o['person_id']}" not in row or o["recorded_at"] > latest_at[o["person_id"]]:
+                row[f"latest_verdict:{o['person_id']}"] = o["stance"]
+                latest_at[o["person_id"]] = o["recorded_at"]
         for person_id, when in latest_by_person.items():
             row[f"last_verdict:{person_id}"] = _day(when)
         person_scores = [s for s in scores.get(pid, []) if s["score"] is not None]

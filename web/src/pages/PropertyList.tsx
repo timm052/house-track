@@ -16,7 +16,7 @@ import { usePeople } from "../people";
 import { CLOSED, STATUS_COLOUR, budgetTone, changeTone, minutesTone, soonTone, suburbClass, suburbSlots, tagStyle, useTagColours } from "../colour";
 import { ArrowDown, ArrowUp, Bath, BedDouble, CalendarDays, Camera, Car, ChevronDown, ChevronRight, Footprints, GraduationCap, LandPlot, MapPin,
   PencilRuler, Plus, Scale, Search, SlidersHorizontal, TrainFront, TramFront, TriangleAlert } from "lucide-react";
-import { useNeeds } from "./ThisWeek";
+import { useNeeds } from "./Updates";
 import { statusOutOfStep } from "../Outcome";
 import type { Outcome, Status } from "../api";
 
@@ -217,12 +217,12 @@ export default function PropertyList() {
     <>
       <SharedLinks />
       {needs.count > 0 && (
-        <Link to="/week" className="week-nudge">
+        <Link to="/updates" className="week-nudge">
           <span className="count-badge">{needs.count}</span>
           {needs.count === 1 ? "thing needs" : "things need"} you: {[needs.needsOutcome.length && `${needs.needsOutcome.length} to record how the sale ended`,
             needs.outOfStep.length && `${needs.outOfStep.length} ${needs.outOfStep.length === 1 ? "status" : "statuses"} to update`,
             needs.needsVerdict.length && `${needs.needsVerdict.length} ${needs.needsVerdict.length === 1 ? "verdict" : "verdicts"} to give`].filter(Boolean).join(", ")}
-          <span className="grow" /><span>This week →</span>
+          <span className="grow" /><span>Updates →</span>
         </Link>
       )}
       <div className="houses-head">

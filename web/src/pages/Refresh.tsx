@@ -98,7 +98,7 @@ export default function Refresh() {
             <li>Keep the Domain tab open until it finishes.</li>
           </ol>
           <div>{refreshBookmarklet()}</div>
-          <p className="small muted" style={{ margin: 0 }}>Checks up to 40 houses a run, least recently checked first. May stop working if Domain changes its site.</p>
+          <p className="small muted" style={{ margin: 0 }}>Checks up to 150 houses a run, one every few seconds, least recently checked first. May stop working if Domain changes its site.</p>
         </div>
       )}
 

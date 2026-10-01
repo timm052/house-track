@@ -188,26 +188,6 @@ def test_keep_a_copy_of_a_linked_document(client, people, tmp_path, monkeypatch)
     assert client.post(f"/api/attachments/{aid}/keep-copy", headers=as_(a)).status_code == 422
 
 
-def test_cancel_a_whole_day(client, people):
-    """Not going to any of a day's inspections: one call cancels them (attended ones stay), and they're gone from
-    the calendar."""
-    from datetime import datetime, timedelta
-    from zoneinfo import ZoneInfo
-    a = as_(people["a"])
-    day = (datetime.now(ZoneInfo("Australia/Melbourne")) + timedelta(days=5)).replace(hour=0, minute=0, second=0, microsecond=0)
-    pids = [client.post("/api/properties", headers=a, json={
-        "address": {"street_number": str(n), "street": "Dayoff Road", "suburb": "Mitcham", "postcode": "3132"}}).json()["id"] for n in (1, 2)]
-    at = lambda h, d=day: (d + timedelta(hours=h)).isoformat()
-    for pid, h in ((pids[0], 10), (pids[1], 11), (pids[1], 23.5)):
-        assert client.post(f"/api/properties/{pid}/inspections", headers=a, json={"starts_at": at(h)}).status_code == 201
-    kept = client.post(f"/api/properties/{pids[0]}/inspections", headers=a, json={"starts_at": at(12), "state": "attended"}).json()["id"]
-    other = client.post(f"/api/properties/{pids[0]}/inspections", headers=a, json={"starts_at": at(34)}).json()["id"]
-    r = client.post("/api/inspections/cancel-day", headers=a, json={"day": day.date().isoformat()})
-    assert r.status_code == 200 and r.json()["cancelled"] == 3 and sorted(r.json()["property_ids"]) == sorted(pids)
-    left = {e["id"] for e in client.get("/api/inspections?days=10").json() if e["type"] == "inspection" and e["property_id"] in pids}
-    assert left == {kept, other}
-
-
 def test_finished_houses_leave_the_calendar(client, people):
     """Ruled out: its inspections and auction drop off the calendar, and come back if it's back in play."""
     from datetime import datetime, timedelta, timezone

@@ -97,6 +97,16 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.8
+
+- **Updates** replaces This week. Four numbers at the top (houses to rate, what's coming up, price changes, sales), then a feed of what's happened: guides that moved (with the old range), sales and how they compared to the guide, houses going under offer, houses added, status changes and new inspection times. Unseen items are marked, and your own changes are hidden unless you ask. Beside it: what needs you, what's coming up, the houses you both said yes to, where you disagree, and recent sale results.
+- **Inspections**, redesigned: pick a day from the week bar and see it as a timeline with each house's photo, price, rooms and what each of you said. The drive between two inspections is shown between them, with a warning when it's long or you'd be late. Stops are numbered to match a route map. Houses you've already been to, or someone said No to, are set aside in their own lists with **Add again** and **Add back**. **Add to your phone's calendar** is a button at the bottom.
+- **Plan the route**, redesigned the same way: a start place, minutes at each stop, when to leave and when you'd be done, a Going / Skipped switch on each stop, and **Open in Google Maps** under the map (fixed at the bottom of the screen on a phone).
+- **Clear the day** has been removed.
+- The weekly refresh now checks up to 150 houses a run (it was 40).
+- Tab names no longer wrap onto two lines.
+- No database changes.
+
 ### 0.4.7
 
 - **Rate** is its own tab, next to Houses, with a count of the houses you haven't rated yet.

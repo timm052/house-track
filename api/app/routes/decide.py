@@ -227,7 +227,7 @@ def fetch_page(url: str) -> str:
 # page data to House Track's /refresh page, which posts each one here. Changes are applied automatically.
 OFF_MARKET = {"sold": "Sold", "underoffer": "Under offer", "under offer": "Under offer", "archived": "No longer listed",
               "offmarket": "Off the market", "withdrawn": "Withdrawn", "leased": "No longer listed"}
-MAX_TARGETS = 40
+MAX_TARGETS = 150  # a run is about ten minutes at the page's pace of one listing every four seconds
 
 
 @router.get("/listing/targets")

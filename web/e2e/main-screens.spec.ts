@@ -1,4 +1,4 @@
-// The main screens open without errors and their key controls work: Houses, a house page, Rate, This week, the
+// The main screens open without errors and their key controls work: Houses, a house page, Rate, Updates, the
 // map and Settings. Uses a test house of its own, deleted at the end.
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
@@ -60,9 +60,56 @@ test("Rate shows the newest house first and records a verdict", async ({ page, r
   await api(request, "DELETE", `/api/properties/${house}/opinions?person_id=${person}&stage=pre_inspection`);
 });
 
-test("This week, the map and Settings open", async ({ page }) => {
-  await open(page, "/week");
-  await expect(page.getByRole("heading", { name: "Calendar", exact: true })).toBeVisible();
+test("Inspections: the day's list, and a house with a No goes to Passed on and can be added back", async ({ page, request }) => {
+  const when = new Date();
+  when.setDate(when.getDate() + 1);
+  when.setHours(10, 0, 0, 0);
+  const day = `${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, "0")}-${String(when.getDate()).padStart(2, "0")}`;
+  await api(request, "POST", `/api/properties/${house}/inspections`, { starts_at: when.toISOString() });
+  const row = page.locator(".tl .ic-address", { hasText: `1 ${street}` });
+
+  await open(page, `/inspections?day=${day}`);
+  await expect(page.getByRole("heading", { name: "Inspections", exact: true })).toBeVisible();
+  await expect(row).toBeVisible();
+
+  // Someone says No: it moves to Passed on.
+  await api(request, "POST", `/api/properties/${house}/opinions`, { person_id: person, stage: "pre_inspection", stance: "no" });
+  await page.reload();
+  await expect(row).toHaveCount(0);
+  const passedList = page.locator(".insp-fold", { hasText: "Passed on" });
+  await passedList.getByText("Passed on").click();
+  await expect(passedList).toContainText(`1 ${street}`);
+
+  // Added back: it's in the main list again.
+  await page.getByRole("button", { name: "Add back" }).click();
+  await expect(row).toBeVisible();
+  await expect(passedList).toHaveCount(0);
+
+  // Been to one of them: a later inspection of the same house goes to Already inspected, and Add again brings it back.
+  const later = new Date(when);
+  later.setHours(14, 0, 0, 0);
+  const second = (await api(request, "POST", `/api/properties/${house}/inspections`, { starts_at: later.toISOString() })).id;
+  const first = (await api(request, "GET", `/api/properties/${house}`)).inspections.find((i: { id: string }) => i.id !== second).id;
+  await api(request, "PUT", `/api/inspections/${first}/attendees/${person}`, {});
+  await page.reload();
+  await expect(row).toHaveCount(1);   // the one attended stays; the repeat is set aside
+  await page.locator(".insp-fold", { hasText: "Already inspected" }).getByText("Already inspected").click();
+  await page.getByRole("button", { name: "Add again" }).click();
+  await expect(row).toHaveCount(2);
+
+  // With two stops on the day, "Plan route" opens the planner on that day; the (unpinned) test house is left out of the route.
+  await page.getByRole("link", { name: "Plan route" }).click();
+  await expect(page.getByRole("heading", { name: "Plan the route" })).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`day=${day}`));
+  await expect(page.locator(".tl .ic-address", { hasText: `1 ${street}` })).toHaveCount(2);
+  await expect(page.getByText("Not on the map").first()).toBeVisible();
+  await api(request, "DELETE", `/api/properties/${house}/opinions?person_id=${person}&stage=pre_inspection`);
+});
+
+test("Updates, the map and Settings open", async ({ page }) => {
+  await open(page, "/updates");
+  await expect(page.getByRole("heading", { name: "Updates", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
   await open(page, "/map");
   await expect(page.locator(".map canvas")).toBeVisible({ timeout: 20_000 });
   await open(page, "/settings");

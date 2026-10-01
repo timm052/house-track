@@ -116,6 +116,28 @@ def upcoming(days: int = 14) -> list[dict]:
         return _events(conn, days)
 
 
+@router.get("/inspections/removed")
+def removed(days: int = 90) -> list[dict]:
+    """Inspections someone marked Not going, with who and when, so they can be put back."""
+    with tx() as conn:
+        rows = conn.execute(
+            """SELECT 'inspection' AS type, i.id, i.kind, i.state, i.starts_at, i.ends_at, p.id AS property_id,
+                      p.unit, p.street_number, p.street, p.suburb, p.postcode, p.plan_number, p.lot_number,
+                      i.updated_by AS removed_by, pe.display_name AS removed_by_name, i.updated_at AS removed_at
+               FROM inspection i JOIN property p ON p.id = i.property_id
+               JOIN property_status s ON s.property_id = p.id
+               LEFT JOIN person pe ON pe.id = i.updated_by
+               WHERE i.state = 'skipped' AND i.starts_at >= now() - interval '1 day'
+                 AND i.starts_at < now() + %(days)s * interval '1 day' AND s.status NOT IN ('ruled_out', 'missed_out')
+               ORDER BY i.starts_at""", {"days": days}).fetchall()
+    for r in rows:
+        suburb = r["suburb"]
+        r["address"] = display(Address(**{k: r.pop(k) for k in ("unit", "street_number", "street", "suburb", "postcode",
+                                                                   "plan_number", "lot_number")}))
+        r["suburb"] = suburb
+    return rows
+
+
 def _events(conn, days: int) -> list[dict]:
     """What's coming up. Houses we're finished with (ruled out, or sold to someone else) are left out, without
     touching their inspections, so they come back if the house does; a house we bought keeps its own."""
@@ -126,7 +148,7 @@ def _events(conn, days: int) -> list[dict]:
            JOIN property_status s ON s.property_id = p.id
            LEFT JOIN campaign c ON c.id = i.campaign_id
            WHERE i.starts_at >= now() - interval '1 day' AND i.starts_at < now() + %(days)s * interval '1 day'
-             AND i.state <> 'cancelled' AND s.status NOT IN ('ruled_out', 'missed_out')
+             AND i.state NOT IN ('cancelled', 'skipped') AND s.status NOT IN ('ruled_out', 'missed_out')
              AND (c.outcome IS NULL OR c.bought_by_us)
            UNION ALL
            SELECT c.sale_method, c.id, c.sale_method, 'planned', coalesce(c.auction_at, c.eoi_closes_at),

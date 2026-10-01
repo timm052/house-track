@@ -97,6 +97,12 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.10
+
+- **Not going** no longer removes an inspection. It's kept in a **Not going** list under each day on the Inspections page, with who removed it and an **Add back** button.
+- **We've been to this house**: a tick on each house's page for houses you've seen without a recorded inspection. The house moves to Already inspected and comes off the To inspect list.
+- **Database:** one small new table (added automatically on start-up).
+
 ### 0.4.9
 
 - **Better imports from realestate.com.au.** + House Track now reads the address, rooms, price, inspections and agents from the page. **property.com.au** works too, as far as its pages give up their data (rooms, areas, price, listed date, agent, estimate and past sales). Re-drag the + House Track button from Settings (it's version 4).

@@ -200,6 +200,10 @@ def get_property(property_id: UUID) -> dict:
         prop["campaigns"] = campaigns
         prop["travel"] = travel_for(conn, property_id)
         prop["inspections"] = inspections_for(conn, property_id)
+        prop["inspected_by"] = [str(r["person_id"]) for r in conn.execute(
+            """SELECT pe.id AS person_id FROM property_inspected x CROSS JOIN person pe WHERE pe.active AND x.property_id = %s
+               UNION SELECT a.person_id FROM inspection_attendee a JOIN inspection i ON i.id = a.inspection_id WHERE i.property_id = %s""",
+            (property_id, property_id)).fetchall()]
         prop["attachments"] = attachments_for(conn, property_id)
         cover = conn.execute("SELECT attachment_id FROM property_cover WHERE property_id = %s", (property_id,)).fetchone()
         prop["cover_id"] = cover and cover["attachment_id"]
@@ -316,6 +320,24 @@ def add_to_inspect(property_id: UUID, person: Person) -> dict:
 def remove_from_inspect(property_id: UUID, person: Person) -> None:
     with tx(person) as conn:
         conn.execute("DELETE FROM inspect_list WHERE property_id = %s", (property_id,))
+
+
+@router.put("/properties/{property_id}/inspected")
+def set_inspected(property_id: UUID, person: Person) -> dict:
+    """"We've been to this house": counts as both of you going to an inspection, and takes it off the To inspect list."""
+    with tx(person) as conn:
+        if conn.execute("SELECT 1 FROM property WHERE id = %s", (property_id,)).fetchone() is None:
+            raise not_found("Property")
+        conn.execute("INSERT INTO property_inspected (property_id) VALUES (%s) ON CONFLICT DO NOTHING", (property_id,))
+        conn.execute("DELETE FROM inspect_list WHERE property_id = %s", (property_id,))
+    return {"id": property_id, "inspected": True}
+
+
+@router.delete("/properties/{property_id}/inspected", status_code=204)
+def clear_inspected(property_id: UUID, person: Person) -> None:
+    """Untick it. Inspections that were recorded still count."""
+    with tx(person) as conn:
+        conn.execute("DELETE FROM property_inspected WHERE property_id = %s", (property_id,))
 
 
 @router.post("/properties/{property_id}/shortlist")

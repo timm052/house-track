@@ -92,9 +92,9 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
     if not ids:
         return []
 
-    def by_property(sql: str) -> dict:
+    def by_property(sql: str, n: int = 1) -> dict:
         out = defaultdict(list)
-        for r in conn.execute(sql, (ids,)).fetchall():
+        for r in conn.execute(sql, (ids,) * n).fetchall():
             out[r["property_id"]].append(r)
         return out
 
@@ -118,8 +118,10 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
     hits = by_property("SELECT property_id, owner_id, kind, name FROM property_area_hit WHERE property_id = ANY(%s)")
     context = by_property("SELECT DISTINCT property_id, code, label FROM property_overlay_hit WHERE property_id = ANY(%s)")
     scores = by_property("SELECT property_id, person_id, score FROM property_score WHERE property_id = ANY(%s)")
-    attended = by_property("""SELECT DISTINCT i.property_id, a.person_id FROM inspection_attendee a
-                              JOIN inspection i ON i.id = a.inspection_id WHERE i.property_id = ANY(%s)""")
+    attended = by_property("""SELECT i.property_id, a.person_id FROM inspection_attendee a
+                              JOIN inspection i ON i.id = a.inspection_id WHERE i.property_id = ANY(%s)
+                              UNION SELECT x.property_id, pe.id FROM property_inspected x CROSS JOIN person pe
+                              WHERE pe.active AND x.property_id = ANY(%s)""", 2)
     to_inspect = {r["property_id"]: r for r in conn.execute(
         "SELECT property_id, created_at FROM inspect_list WHERE property_id = ANY(%s)", (ids,)).fetchall()}
     covers = {r["property_id"]: str(r["attachment_id"]) for r in conn.execute(

@@ -356,8 +356,18 @@ function Actions({ p, setTab }: { p: Detail; setTab: (t: Tab) => void }) {
       setError((e as Error).message);
     }
   }
+  const been = p.inspected_by.length > 0;
+  async function tick(on: boolean) {
+    try {
+      await api(`/api/properties/${p.id}/inspected`, { method: on ? "PUT" : "DELETE" });
+      for (const key of [["property", p.id], ["overview"], ["inspections"]]) queryClient.invalidateQueries({ queryKey: key });
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
   return (
     <div className="card actions">
+      <label className="check"><input type="checkbox" checked={been} onChange={(e) => tick(e.target.checked)} /> We've been to this house</label>
       <button onClick={() => setTab("inspections")}><CalendarPlus /> Add inspection</button>
       <button onClick={() => setTab("files")}><ImagePlus /> Add photos</button>
       <Link to={`/compare?ids=${p.id}`}><button><Scale /> Compare</button></Link>

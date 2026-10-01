@@ -105,6 +105,7 @@ export type PropertyDetail = PropertyBase & {
   opinions: Opinion[];
   campaigns: Campaign[];
   travel: Travel;
+  inspected_by: string[];   // who has been (a ticked "I've been" or an inspection they went to)
   inspections: import("./pages/PropertyExtras").Inspection[];
   attachments: import("./pages/PropertyExtras").Attachment[];
   overlays: { code: string; title: string; effect: "info" | "soft_warn" | "hard_exclude"; label: string }[];

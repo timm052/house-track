@@ -22,6 +22,7 @@ const PlanMap = lazy(() => import("../map/PlanMap"));
 
 export type Event = { type: string; id: string; kind: string; state: string; starts_at: string; ends_at: string | null;
                       property_id: string; address: string; suburb: string };
+type Removed = Event & { removed_by_name: string | null; removed_at: string };
 type Person = { id: string; display_name: string; colour: string };
 
 const DAYS = 90;
@@ -59,6 +60,7 @@ export default function Inspections() {
   const [params, setParams] = useSearchParams();
   const events = useQuery({ queryKey: ["inspections", DAYS], queryFn: () => api<Event[]>(`/api/inspections?days=${DAYS}`) });
   const overview = useQuery({ queryKey: ["overview"], queryFn: () => api<{ rows: OverviewRow[]; places: OverviewPlace[] }>("/api/overview") });
+  const removed = useQuery({ queryKey: ["inspections", "removed", DAYS], queryFn: () => api<Removed[]>(`/api/inspections/removed?days=${DAYS}`) });
   const [error, setError] = useState<string | null>(null);
   const [showMap, setShowMap] = useState(false);   // on a phone, the map is there when asked for
   const rows = new Map((overview.data?.rows ?? []).map((r) => [r.id, r]));
@@ -75,6 +77,7 @@ export default function Inspections() {
 
   const onDay = (byDay.get(day) ?? []).sort((a, b) => a.starts_at.localeCompare(b.starts_at));
   const section = (e: Event) => sectionOf(e, rows.get(e.property_id), active);
+  const notGoing = (removed.data ?? []).filter((e) => iso(new Date(e.starts_at)) === day);
   const passed = onDay.filter((e) => section(e) === "passed");
   const seen = onDay.filter((e) => section(e) === "seen");
   const main = onDay.filter((e) => section(e) === "main");
@@ -107,8 +110,9 @@ export default function Inspections() {
       setError((err as Error).message);
     }
   }
-  /** Not going: cancelled (kept on the house's page), not deleted. */
-  const cancel = (e: Event) => call(() => api(`/api/inspections/${e.id}`, { method: "PATCH", body: { state: "cancelled" } }), [["property", e.property_id]]);
+  /** Not going: marked skipped (kept on the house's page, and in "Not going" below), not deleted. */
+  const cancel = (e: Event) => call(() => api(`/api/inspections/${e.id}`, { method: "PATCH", body: { state: "skipped" } }), [["property", e.property_id]]);
+  const restore = (e: Event) => call(() => api(`/api/inspections/${e.id}`, { method: "PATCH", body: { state: "planned" } }), [["property", e.property_id]]);
   const addBack = (e: Event) => call(() => api(`/api/properties/${e.property_id}/inspect-list`, { method: "PUT" }));
 
   const feed = `${location.host}/api/calendar.ics`;
@@ -204,6 +208,14 @@ export default function Inspections() {
                   note={(r) => `Inspected${(r?.attended_by as string[] | undefined)?.length === 1 ? ` by ${active.find((p) => p.id === (r?.attended_by as string[])[0])?.display_name ?? "one of you"}` : ""}`} />
               </details>
             )}
+            {notGoing.length > 0 && (
+              <details className="card insp-fold">
+                <summary>Not going <span className="muted">· {notGoing.length}</span></summary>
+                <p className="small muted">Taken off the day. Add one back to put it in the list.</p>
+                <SideList events={notGoing} rows={rows} action="Add back" onAdd={restore}
+                  who={(e) => `Removed by ${(e as Removed).removed_by_name ?? "someone"}`} />
+              </details>
+            )}
             {passed.length > 0 && (
               <details className="card insp-fold">
                 <summary>Passed on <span className="muted">· {passed.length}</span></summary>
@@ -232,9 +244,9 @@ export default function Inspections() {
 }
 
 /** The compact rows of a side list: photo, address, the time, a note about why it's here, and the button to add it back. */
-function SideList({ events, rows, action, onAdd, note }: {
+function SideList({ events, rows, action, onAdd, note, who }: {
   events: Event[]; rows: Map<string, OverviewRow>; action: string; onAdd: (e: Event) => void;
-  note: (r: OverviewRow | undefined) => string;
+  note?: (r: OverviewRow | undefined) => string; who?: (e: Event) => string;
 }) {
   return (
     <ul className="insp-pass-list">
@@ -245,7 +257,7 @@ function SideList({ events, rows, action, onAdd, note }: {
             <Thumb r={r} />
             <div className="grow" style={{ minWidth: 0 }}>
               <Link to={`/p/${e.property_id}`}>{e.address.split(",")[0]}</Link>
-              <div className="small muted">{clock(e.starts_at)} · {note(r)}</div>
+              <div className="small muted">{clock(e.starts_at)} · {who ? who(e) : note?.(r)}</div>
             </div>
             <button className="small-btn" onClick={() => onAdd(e)}>{action}</button>
           </li>

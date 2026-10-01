@@ -472,3 +472,35 @@ def test_domain_capture_of_a_house_tracked_from_another_site(client, people):
     assert any("weekly refresh" in c for c in r["changes"])
     links = [l["portal"] for c in client.get(f"/api/properties/{pid}").json()["campaigns"] for l in c["links"]]
     assert sorted(links) == ["domain", "rea"]
+
+
+def test_not_going_is_kept_and_can_be_restored(client, people):
+    """Marking an inspection Not going takes it off the calendar but keeps it, with who did it, until it's added back."""
+    a, b = as_(people["a"]), as_(people["b"])
+    pid = client.post("/api/properties", headers=a, json={
+        "address": {"street_number": "5", "street": "Skip Road", "suburb": "Woodend", "postcode": "3442"},
+        "campaign": {"sale_method": "private_sale"}}).json()["id"]
+    when = (datetime.now(MELBOURNE) + timedelta(days=3)).isoformat()
+    iid = client.post(f"/api/properties/{pid}/inspections", headers=a, json={"kind": "open", "starts_at": when}).json()["id"]
+    client.patch(f"/api/inspections/{iid}", headers=b, json={"state": "skipped"})
+    assert iid not in [str(e["id"]) for e in client.get("/api/inspections?days=14").json()]
+    gone = [e for e in client.get("/api/inspections/removed").json() if str(e["id"]) == iid]
+    assert gone and gone[0]["removed_by_name"] == people["b"]["display_name"]
+    client.patch(f"/api/inspections/{iid}", headers=a, json={"state": "planned"})
+    assert iid in [str(e["id"]) for e in client.get("/api/inspections?days=14").json()]
+    assert not [e for e in client.get("/api/inspections/removed").json() if str(e["id"]) == iid]
+
+
+def test_ticking_already_inspected(client, people):
+    """"We've been to this house" counts as inspected for both of you, and takes it off the To inspect list."""
+    a = as_(people["a"])
+    pid = client.post("/api/properties", headers=a, json={
+        "address": {"street_number": "6", "street": "Tick Road", "suburb": "Woodend", "postcode": "3442"},
+        "campaign": {"sale_method": "private_sale"}}).json()["id"]
+    client.put(f"/api/properties/{pid}/inspect-list", headers=a)
+    assert client.put(f"/api/properties/{pid}/inspected", headers=a).status_code == 200
+    row = next(r for r in client.get("/api/overview", headers=a).json()["rows"] if r["id"] == pid)
+    assert sorted(row["attended_by"]) == sorted(str(people[k]["id"]) for k in ("a", "b")) and not row["to_inspect"]
+    assert len(client.get(f"/api/properties/{pid}").json()["inspected_by"]) == 2
+    client.delete(f"/api/properties/{pid}/inspected", headers=a)
+    assert client.get(f"/api/properties/{pid}").json()["inspected_by"] == []

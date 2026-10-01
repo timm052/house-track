@@ -51,7 +51,8 @@ class AttendeeIn(BaseModel):
 
 INSPECTION_SELECT = """
     SELECT i.id, i.property_id, i.campaign_id, i.kind, i.starts_at, i.ends_at, i.state, i.inspector, i.notes,
-           i.created_by,
+           i.created_by, i.updated_at,
+           (SELECT display_name FROM person WHERE id = i.updated_by) AS updated_by_name,
            coalesce((SELECT jsonb_agg(jsonb_build_object('person_id', a.person_id, 'note', a.note))
                      FROM inspection_attendee a WHERE a.inspection_id = i.id), '[]') AS attendees
     FROM inspection i

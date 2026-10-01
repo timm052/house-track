@@ -1210,6 +1210,7 @@ a.plan-open:active { transform: scale(0.98); transition-duration: 0ms; }
 .property-card .pc-link { display: inline-flex; align-items: center; gap: 4px; min-height: 26px; padding: 0 10px; border-radius: 999px;
   border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font-size: 0.78rem; font-weight: 600; }
 .property-card .pc-link:hover { border-color: var(--accent); color: var(--accent); }
+.property-card .pc-link.on { border-color: var(--accent); color: var(--accent); }
 .pc-link .lucide { width: 13px; height: 13px; }
 @media (max-width: 480px) {
   .property-card { grid-template-columns: 84px minmax(0, 1fr); gap: 11px; }

@@ -200,6 +200,7 @@ def get_property(property_id: UUID) -> dict:
         prop["campaigns"] = campaigns
         prop["travel"] = travel_for(conn, property_id)
         prop["inspections"] = inspections_for(conn, property_id)
+        prop["inspected"] = conn.execute("SELECT 1 FROM property_inspected WHERE property_id = %s", (property_id,)).fetchone() is not None
         prop["inspected_by"] = [str(r["person_id"]) for r in conn.execute(
             """SELECT pe.id AS person_id FROM property_inspected x CROSS JOIN person pe WHERE pe.active AND x.property_id = %s
                UNION SELECT a.person_id FROM inspection_attendee a JOIN inspection i ON i.id = a.inspection_id WHERE i.property_id = %s""",

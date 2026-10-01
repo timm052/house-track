@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useState } from "react";
 import { FileText, PencilRuler } from "lucide-react";
 import { Link } from "react-router-dom";
-import { api } from "../api";
+import { api, type Opinion } from "../api";
 import { fromLocalInput, INSPECTION_KINDS, when } from "../format";
 import { newId, sendOrQueue, uploadFiles, uploadMessage } from "../outbox";
 import { usePeople } from "../people";
@@ -16,6 +16,7 @@ const PhotoViewer = lazy(() => import("../PhotoViewer"));
 export type Inspection = {
   id: string; kind: string; starts_at: string; ends_at: string | null; state: string; inspector: string | null;
   notes: string | null; attendees: { person_id: string; note: string | null }[];
+  updated_by_name?: string | null;   // who last changed it: who took it off with Not going
 };
 export type Attachment = {
   id: string; kind: string; sha256: string | null; mime_type: string | null; original_name: string | null;
@@ -42,7 +43,33 @@ function useRefresh(propertyId: string) {
   };
 }
 
-export function Inspections({ propertyId, inspections }: { propertyId: string; inspections: Inspection[] }) {
+/** Where this house stands on the Inspections page, by the same rules as that page: on the To inspect list it's in
+ *  the day's list; otherwise a house someone has been to is under "Already inspected", and one someone said No to is
+ *  under "Passed on". Anything else is in the list. The button puts it in the list, or takes it out. */
+function ListStanding({ propertyId, toInspect, inspectedBy, opinions, onDone }: {
+  propertyId: string; toInspect: boolean; inspectedBy: string[]; opinions: Opinion[]; onDone: () => void;
+}) {
+  const { active } = usePeople();
+  const latest = new Map<string, Opinion>();
+  for (const o of opinions) if (!latest.has(o.person_id) || o.recorded_at > latest.get(o.person_id)!.recorded_at) latest.set(o.person_id, o);
+  const no = active.filter((p) => latest.get(p.id)?.stance === "no").map((p) => p.display_name);
+  const call = (method: "PUT" | "DELETE") => api(`/api/properties/${propertyId}/inspect-list`, { method }).then(onDone);
+  let text: string, button: [string, "PUT" | "DELETE"] | null;
+  if (toInspect) { text = "On your To inspect list. It shows on the Inspections page."; button = ["Remove from list", "DELETE"]; }
+  else if (inspectedBy.length > 0) { text = "Already inspected, so it's kept out of the Inspections list."; button = ["Add again", "PUT"]; }
+  else if (no.length > 0) { text = `${no.join(" and ")} said No, so it's kept out of the Inspections list.`; button = ["Add back", "PUT"]; }
+  else { text = "Shows on the Inspections page."; button = ["Add to To inspect", "PUT"]; }
+  return (
+    <div className="row small">
+      <span className="grow">{text}</span>
+      {button && <button className="small-btn" onClick={() => call(button![1])}>{button[0]}</button>}
+    </div>
+  );
+}
+
+export function Inspections({ propertyId, inspections, toInspect, inspectedBy, opinions }: {
+  propertyId: string; inspections: Inspection[]; toInspect: boolean; inspectedBy: string[]; opinions: Opinion[];
+}) {
   const refresh = useRefresh(propertyId);
   const { me, byId } = usePeople();
   const [kind, setKind] = useState("open");
@@ -61,12 +88,16 @@ export function Inspections({ propertyId, inspections }: { propertyId: string; i
   }
   const setState = (id: string, state: string) =>
     api(`/api/inspections/${id}`, { method: "PATCH", body: { state } }).then(refresh);
+  // Not going is kept (and shown on the Inspections page under Not going), with who took it off. Add back restores it.
+  const notGoing = inspections.filter((i) => i.state === "skipped");
+  const shown = inspections.filter((i) => i.state !== "skipped");
 
   return (
     <div className="card stack">
       <h2>Inspections</h2>
-      {inspections.length === 0 && <p className="small muted">None yet.</p>}
-      {inspections.map((i) => {
+      <ListStanding propertyId={propertyId} toInspect={toInspect} inspectedBy={inspectedBy} opinions={opinions} onDone={refresh} />
+      {shown.length === 0 && <p className="small muted">None yet.</p>}
+      {shown.map((i) => {
         const mine = i.attendees.find((a) => a.person_id === me?.id);
         return (
           <div key={i.id} className="inspection">
@@ -85,13 +116,25 @@ export function Inspections({ propertyId, inspections }: { propertyId: string; i
             <AttendeeNote inspectionId={i.id} initial={mine?.note ?? ""} attended={!!mine} onDone={refresh} />
             {i.state === "planned" && (
               <div className="row">
-                <button className="link" onClick={() => setState(i.id, "skipped")}>Didn't go</button>
-                <button className="link" onClick={() => setState(i.id, "cancelled")}>Cancelled</button>
+                <ConfirmButton className="link" label="Not going" question="Not going?" yes="Remove" onConfirm={() => setState(i.id, "skipped")} />
+                <button className="link" onClick={() => setState(i.id, "cancelled")}>Cancelled by the agent</button>
               </div>
             )}
           </div>
         );
       })}
+      {notGoing.length > 0 && (
+        <details>
+          <summary className="small"><strong>Not going</strong> <span className="muted">· {notGoing.length}</span></summary>
+          {notGoing.map((i) => (
+            <div key={i.id} className="row small" style={{ marginTop: 6 }}>
+              <span className="grow">{when(i.starts_at)} · {KINDS[i.kind] ?? i.kind}
+                <span className="muted"> · Removed by {i.updated_by_name ?? "someone"}</span></span>
+              <button className="small-btn" onClick={() => setState(i.id, "planned")}>Add back</button>
+            </div>
+          ))}
+        </details>
+      )}
       <div className="grid2">
         <select value={kind} onChange={(e) => setKind(e.target.value)} aria-label="Kind">
           {Object.entries(KINDS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}

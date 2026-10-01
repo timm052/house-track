@@ -110,7 +110,7 @@ export default function PropertyDetail() {
         )}
         {tab === "inspections" && (
           <div className="tab-grid">
-            <div><Inspections propertyId={p.id} inspections={p.inspections} /></div>
+            <div><Inspections propertyId={p.id} inspections={p.inspections} toInspect={p.to_inspect} inspectedBy={p.inspected_by} opinions={p.opinions} /></div>
             <div><ScoresCard propertyId={p.id} /><VerdictHistory p={p} /></div>
           </div>
         )}
@@ -356,7 +356,7 @@ function Actions({ p, setTab }: { p: Detail; setTab: (t: Tab) => void }) {
       setError((e as Error).message);
     }
   }
-  const been = p.inspected_by.length > 0;
+  const been = p.inspected;
   async function tick(on: boolean) {
     try {
       await api(`/api/properties/${p.id}/inspected`, { method: on ? "PUT" : "DELETE" });

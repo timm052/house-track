@@ -97,6 +97,13 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.11
+
+- **Houses:** each house card has a **To inspect** button to put it on, or take it off, the Inspections list. Cards also show an **Inspected** badge once someone has been.
+- **A house's Inspections tab** now says where it stands on the Inspections page (on the list, already inspected, or passed on) with a button to add or remove it. **Not going** keeps the inspection in a **Not going** list, with who removed it and **Add back**.
+- **We've been to this house** shows only the tick itself; recorded inspections still count.
+- No database changes.
+
 ### 0.4.10
 
 - **Not going** no longer removes an inspection. It's kept in a **Not going** list under each day on the Inspections page, with who removed it and an **Add back** button.

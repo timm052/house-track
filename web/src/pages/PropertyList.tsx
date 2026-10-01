@@ -15,7 +15,7 @@ import { applyView, builtInDefault, describe, useViews, type Filter, type Sort }
 import FieldFilter, { fieldOffers } from "../overview/FieldFilter";
 import { usePeople } from "../people";
 import { CLOSED, STATUS_COLOUR, budgetTone, changeTone, minutesTone, soonTone, suburbClass, suburbSlots, tagStyle, useTagColours } from "../colour";
-import { ArrowDown, ArrowUp, Bath, BedDouble, CalendarDays, Camera, Car, ChevronDown, ChevronRight, Footprints, GraduationCap, LandPlot, MapPin,
+import { ArrowDown, ArrowUp, Bath, BedDouble, CalendarDays, Camera, Car, ChevronDown, DoorOpen, ChevronRight, Footprints, GraduationCap, LandPlot, MapPin,
   PencilRuler, Plus, Scale, Search, SlidersHorizontal, TrainFront, TramFront, TriangleAlert } from "lucide-react";
 import { useNeeds } from "./Updates";
 import { statusOutOfStep } from "../Outcome";
@@ -462,6 +462,14 @@ function Card({ r, people, favourites, cols, slots, tagColours, picked, onPick }
     Boolean(r.days_on_market != null && r.sale_method && !r.outcome) && <span key="d" className="pill quiet">{String(r.days_on_market)} {r.days_on_market === 1 ? "day" : "days"} listed</span>,
   ].filter(Boolean) as ReactNode[];
   const go = (e: React.MouseEvent, to: string) => { e.preventDefault(); e.stopPropagation(); navigate(to); };
+  // On the To inspect list or not, from the card. A finished sale or a ruled-out house has nothing left to inspect.
+  const queryClient = useQueryClient();
+  const finished = r.excluded || CLOSED.includes(r.status as never) || saleEnded(r.outcome, r.bought_by_us);
+  const toggleInspect = async (e: React.MouseEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    await api(`/api/properties/${r.id}/inspect-list`, { method: r.to_inspect ? "DELETE" : "PUT" });
+    for (const key of [["overview"], ["inspections"], ["property", r.id]]) queryClient.invalidateQueries({ queryKey: key });
+  };
 
   return (
     <Link to={`/p/${r.id}`} className={`card property-card tint ${suburbClass(slots, r.suburb)} ${r.excluded || CLOSED.includes(r.status as never) || saleEnded(r.outcome, r.bought_by_us) ? "dim" : ""} ${picked ? "picked" : ""}`}
@@ -491,7 +499,12 @@ function Card({ r, people, favourites, cols, slots, tagColours, picked, onPick }
         <div className="pc-badges">
           <span className="pill status-pill"><span className="status-dot" style={{ background: STATUS_COLOUR[r.status as never] }} />{display(col("status"), r.status)}</span>
           {!r.outcome && listingState(r.listing_status) === "underoffer" && <span className="pill maybe">Under offer</span>}
-          {Boolean(r.to_inspect) && <span className="pill" title="On the To inspect list">To inspect</span>}
+          {((r.attended_by as string[] | undefined)?.length ?? 0) > 0 && <span className="pill" title="Someone has been to see it">Inspected</span>}
+          {!finished && (
+            <button className={`pc-link ${r.to_inspect ? "on" : ""}`} onClick={toggleInspect} aria-pressed={Boolean(r.to_inspect)}
+              title={r.to_inspect ? "Take it off the To inspect list" : "Put it on the To inspect list"}>
+              {r.to_inspect ? <><DoorOpen /> To inspect ✕</> : <><DoorOpen /> To inspect</>}</button>
+          )}
           {soon && <span className={`pill tone-${soonTone(r.sale_at)}`}><CalendarDays /> {r.sale_method === "eoi" ? "Closes" : "Auction"} {soon}</span>}
           {Boolean(r.excluded) && <span className="pill no">Excluded</span>}
           {Boolean(r.floorplan_id) && (

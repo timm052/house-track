@@ -115,3 +115,32 @@ test("Updates, the map and Settings open", async ({ page }) => {
   await open(page, "/settings");
   await expect(page.getByRole("heading", { name: "Notifications" })).toBeVisible();
 });
+
+test("The Houses card and the house's Inspections tab share the To inspect list, Not going and Already inspected", async ({ page, request }) => {
+  await api(request, "DELETE", `/api/properties/${house}/inspect-list`);   // earlier tests may have left it on
+  await api(request, "DELETE", `/api/properties/${house}/inspected`);
+  for (const i of (await api(request, "GET", `/api/properties/${house}`)).inspections) await api(request, "PATCH", `/api/inspections/${i.id}`, { state: "cancelled" });
+  await open(page, "/");
+  await page.getByRole("searchbox").fill(street);
+  const card = page.locator(".property-card", { hasText: street }).first();
+  await card.getByRole("button", { name: /To inspect/ }).click();
+  await expect.poll(async () => (await api(request, "GET", `/api/properties/${house}`)).to_inspect).toBe(true);
+
+  const start = new Date(Date.now() + 2 * 86_400_000).toISOString();
+  const id = (await api(request, "POST", `/api/properties/${house}/inspections`, { kind: "open", starts_at: start })).id;
+  await open(page, `/p/${house}`);
+  await page.getByRole("tab", { name: /Inspections/ }).click();
+  await expect(page.getByText("On your To inspect list")).toBeVisible();
+  await page.getByRole("button", { name: "Not going" }).click();
+  await page.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(page.getByText(/Removed by/)).toBeHidden();   // folded away
+  await page.getByText("Not going", { exact: false }).first().click();
+  await expect(page.getByText(/Removed by/)).toBeVisible();
+  await page.getByRole("button", { name: "Add back" }).click();
+  await expect.poll(async () => (await api(request, "GET", `/api/properties/${house}`)).inspections.find((i: { id: string }) => i.id === id).state).toBe("planned");
+
+  await page.getByLabel("We've been to this house").click();
+  await expect(page.getByText(/Already inspected/)).toBeVisible();
+  await api(request, "DELETE", `/api/properties/${house}/inspected`);
+  await api(request, "DELETE", `/api/properties/${house}/inspect-list`);
+});

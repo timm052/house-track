@@ -235,6 +235,17 @@ def with_existing(out: dict) -> dict:
         row = conn.execute("""SELECT c.property_id, p.unit, p.street_number, p.street, p.suburb, p.postcode, p.plan_number, p.lot_number
                               FROM campaign_link l JOIN campaign c ON c.id = l.campaign_id JOIN property p ON p.id = c.property_id
                               WHERE l.url = %s LIMIT 1""", (out.get("url"),)).fetchone()
+        if row is None and out.get("address_parts"):
+            # Not by link: the same house listed on another site (a Domain capture of a realestate.com.au house).
+            from .properties import find_duplicate
+            parts = {k: v for k, v in out["address_parts"].items() if k in Address.__dataclass_fields__}
+            try:
+                dup = find_duplicate(conn, Address(**parts))
+            except TypeError:
+                dup = None
+            if dup:
+                row = conn.execute("""SELECT id AS property_id, unit, street_number, street, suburb, postcode, plan_number, lot_number
+                                      FROM property WHERE id = %s""", (dup,)).fetchone()
     out["existing_property_id"] = row and str(row.pop("property_id"))
     out["existing_address"] = row and display(Address(**row))
     return out

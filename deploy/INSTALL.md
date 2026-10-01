@@ -97,6 +97,15 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.9
+
+- **Better imports from realestate.com.au.** + House Track now reads the address, rooms, price, inspections and agents from the page. **property.com.au** works too, as far as its pages give up their data (rooms, areas, price, listed date, agent, estimate and past sales). Re-drag the + House Track button from Settings (it's version 4).
+- **Domain comes first when updating a house.** A capture from realestate.com.au or property.com.au on a house that has a Domain listing only fills gaps and adds new things (inspections, agents, sold). It never overwrites what Domain gave.
+- **Not in the weekly refresh?** A house added from another site now says so on its About tab, with **Find it on Domain** and a place to paste the Domain link.
+- Capturing a house from Domain that you already have from another site is recognised by its address. Update adds the Domain link.
+- Shared realestate.com.au links fill in the suburb and kind of property.
+- No database changes.
+
 ### 0.4.8
 
 - **Updates** replaces This week. Four numbers at the top (houses to rate, what's coming up, price changes, sales), then a feed of what's happened: guides that moved (with the old range), sales and how they compared to the guide, houses going under offer, houses added, status changes and new inspection times. Unseen items are marked, and your own changes are hidden unless you ask. Beside it: what needs you, what's coming up, the houses you both said yes to, where you disagree, and recent sale results.

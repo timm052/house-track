@@ -78,6 +78,7 @@ export default function PropertyDetail() {
       </aside>
 
       <div className="listing-body" role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
+        {tab === "about" && live && <DomainLink p={p} campaignId={live.id} />}
         {tab === "about" && (
           <div className="tab-grid">
             <div><FloorPlanButtons p={p} /><About p={p} /><DetailsTable p={p} /></div>
@@ -1077,6 +1078,31 @@ function CampaignDates({ propertyId, c }: { propertyId: string; c: Campaign }) {
         <button disabled={write.isPending || !Object.keys(edits).length} onClick={save}>Save dates</button>
       </div>
     </details>
+  );
+}
+
+/** A house from another site (realestate.com.au, property.com.au) isn't in the weekly refresh, which reads Domain.
+ *  Most are on Domain too: find it there and add that link. */
+function DomainLink({ p, campaignId }: { p: Detail; campaignId: string }) {
+  const write = useWrite(p.id);
+  const [url, setUrl] = useState("");
+  const links = p.campaigns.flatMap((c) => c.links);
+  if (links.length === 0 || links.some((l) => l.portal === "domain")) return null;
+  const search = `https://www.domain.com.au/sale/?terms=${encodeURIComponent(p.address)}`;
+  const isDomain = /^https?:\/\/([a-z0-9-]+\.)*domain\.com\.au\//i.test(url.trim());
+  return (
+    <div className="card stack" style={{ marginBottom: 12 }}>
+      <strong>Not in the weekly refresh</strong>
+      <p className="small muted" style={{ margin: 0 }}>The refresh reads Domain. If this house is on Domain too, add its link and the price, status and inspections will update by themselves.</p>
+      <div className="row">
+        <a href={search} target="_blank" rel="noreferrer"><button>Find it on Domain</button></a>
+        <input className="grow" type="url" placeholder="Paste the Domain link" value={url} onChange={(e) => setUrl(e.target.value)} />
+        <button className="primary" disabled={!isDomain || write.isPending}
+          onClick={() => write.mutate({ path: `/api/campaigns/${campaignId}/links`, body: { url: url.trim() } }, { onSuccess: () => setUrl("") })}>Add</button>
+      </div>
+      {url.trim() && !isDomain && <p className="small muted" style={{ margin: 0 }}>That isn't a Domain listing link.</p>}
+      {write.error && <p className="error small">{(write.error as Error).message}</p>}
+    </div>
   );
 }
 

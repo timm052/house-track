@@ -455,3 +455,20 @@ def test_domain_leads_other_sites_fill_gaps(client, people):
 
     client.post(f"/api/properties/{pid}/listing-update", headers=a, json={**body, "source": "domain"})
     assert client.get(f"/api/properties/{pid}").json()["land_m2"] == 640
+
+
+def test_domain_capture_of_a_house_tracked_from_another_site(client, people):
+    """A Domain capture whose address matches a house added from realestate.com.au is that house, and updating
+    adds the Domain link so it joins the weekly refresh."""
+    a = as_(people["a"])
+    addr = {"street_number": "11", "street": "Match Street", "suburb": "Woodend", "postcode": "3442"}
+    pid = client.post("/api/properties", headers=a, json={
+        "address": addr, "campaign": {"sale_method": "private_sale", "url": "https://www.realestate.com.au/property-house-vic-woodend-145678999"}}).json()["id"]
+    domain = "https://www.domain.com.au/11-match-street-woodend-vic-3442-2099990111"
+    got = client.post("/api/listing/parse", headers=a, json={"url": domain, "html": "<head></head>", "text": "11 Match Street, Woodend VIC 3442"}).json()
+    if got.get("address_parts"):
+        assert got["existing_property_id"] == pid
+    r = client.post(f"/api/properties/{pid}/listing-update", headers=a, json={"url": domain, "source": "domain"}).json()
+    assert any("weekly refresh" in c for c in r["changes"])
+    links = [l["portal"] for c in client.get(f"/api/properties/{pid}").json()["campaigns"] for l in c["links"]]
+    assert sorted(links) == ["domain", "rea"]

@@ -115,6 +115,7 @@ class ListingUpdateIn(ListingExtras):
     sold_price_aud: Aud | None = None  # a sold listing's price line ("Sold for $1,250,000")
     # Which site the capture came from. Domain leads: another site only fills gaps on a house with a Domain listing.
     source: Literal["domain", "rea", "other"] | None = None
+    url: Annotated[str, Field(pattern=r"^https?://", max_length=2000)] | None = None  # the listing, kept as a link on the house
 
 
 class PropertyIn(BaseModel):

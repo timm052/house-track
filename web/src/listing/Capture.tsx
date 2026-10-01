@@ -123,6 +123,7 @@ const host = (u: string | null) => { try { return new URL(u ?? "").hostname; } c
 function updateBody(c: Capture, ch: Choices) {
   return {
     ...extrasFor(c, { ...ch, inspections: true, agents: true }),
+    url: c.url,
     source: /(^|\.)domain\.com\.au$/.test(host(c.url)) ? "domain" : /(^|\.)realestate\.com\.au$/.test(host(c.url)) ? "rea" : "other",
     guide_low_aud: c.guide_low_aud, guide_high_aud: c.guide_high_aud, sale_method: c.sale_method,
     auction_at: c.sale_method === "auction" ? c.auction_at ?? null : null,

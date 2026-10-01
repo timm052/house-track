@@ -11,7 +11,10 @@ from zoneinfo import ZoneInfo
 
 import psycopg
 
-from .routes.campaigns import attach_agent, insert_price_guide, set_sale_method
+from fastapi import HTTPException
+
+from .listing import clean_url, recognise
+from .routes.campaigns import attach_agent, insert_link, insert_price_guide, set_sale_method
 from .routes.tags import ensure_tags
 from .deps import update_columns
 from .schemas import AgentIn, ListingExtras, ListingUpdateIn, PriceGuideIn
@@ -92,8 +95,19 @@ def refresh(conn: psycopg.Connection, property_id: UUID, body: ListingUpdateIn) 
     if fallback:
         body = body.model_copy(update={"apply_details": False, "fill_missing": True})
     added = apply(conn, property_id, live and live["id"], body)
+    if body.url and live is not None and not conn.execute("SELECT 1 FROM campaign_link WHERE url = %s", (clean_url(body.url),)).fetchone():
+        try:
+            with conn.transaction():
+                insert_link(conn, live["id"], body.url)
+            portal = recognise(clean_url(body.url))[0]
+            added["linked"] = portal
+        except HTTPException:
+            pass
     added.update(guide=False, date=False, method=None, listed=False, details=[], differs=[])
     changes: list[str] = []
+    if added.get("linked"):
+        changes.append({"domain": "Domain listing linked: it's now in the weekly refresh", "rea": "realestate.com.au listing linked"}
+                       .get(added["linked"], "Listing linked"))
 
     prop = conn.execute("SELECT " + ", ".join(f for f, _ in DETAILS) + " FROM property WHERE id = %s", (property_id,)).fetchone()
     for field, label in DETAILS:

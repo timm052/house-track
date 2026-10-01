@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 import psycopg
 from fastapi import HTTPException
 
+from . import blocks
 from .address import Address, display
 
 STAGES = {"pre": "pre_inspection", "post": "post_inspection"}
@@ -131,6 +132,12 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
         """SELECT property_id, count(*) FILTER (WHERE kind = 'photo' AND sha256 IS NOT NULL) AS photos,
                   (array_agg(id ORDER BY created_at) FILTER (WHERE kind = 'floorplan' AND sha256 IS NOT NULL))[1] AS plan
            FROM attachment WHERE property_id = ANY(%s) GROUP BY property_id""", (ids,)).fetchall()}
+    # The block each house sits on, where its suburb has been analysed (map's Blocks mode), and what the household's
+    # block preferences make of it.
+    block_prefs = blocks.prefs(conn)
+    on_block = {r["property_id"]: blocks.summary(r, block_prefs) for r in conn.execute(
+        """SELECT DISTINCT ON (p.id) p.id AS property_id, b.* FROM property p JOIN block b ON ST_Intersects(b.geom, p.location)
+           WHERE p.id = ANY(%s) ORDER BY p.id, b.is_unit""", (ids,)).fetchall()}
     tag_rows = by_property("SELECT pt.property_id, t.name FROM property_tag pt JOIN tag t ON t.id = pt.tag_id"
                            " WHERE pt.property_id = ANY(%s) ORDER BY lower(t.name)")
     travel = by_property(
@@ -217,6 +224,7 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
             "nearest_station_walk": _mins(nearest.get(pid, {}).get("walk_s")),
             "nearest_station_drive": _mins(nearest.get(pid, {}).get("drive_s")),
             "nearest_station_km": round(nearest[pid]["walk_m"] / 1000, 1) if nearest.get(pid, {}).get("walk_m") else None,
+            **_block_fields(on_block.get(pid)),
         }
         v: dict[str, Any] = {"status": str(p["status_id"]), "guide": latest_guide and str(latest_guide["id"])}
         for k in JUDGEMENTS:
@@ -441,3 +449,16 @@ def apply_cell(conn: psycopg.Connection, person: UUID, property_id: UUID, column
         return
 
     raise HTTPException(422, f"{column} can't be edited here.")
+
+
+def _block_fields(b: dict | None) -> dict:
+    """A house's block for the grid, cards and filters (empty where its suburb isn't analysed)."""
+    if b is None:
+        return {"block_m2": None, "block_incline": None, "block_falls": None, "block_fall_m": None, "block_frontage": None,
+                "block_depth": None, "block_shape": None, "block_rear": None, "block_split": None, "block_fits": None}
+    shape = ("Battle-axe" if b["battleaxe"] else "Regular" if (b["regularity"] or 0) >= 0.9
+             else "Slightly irregular" if (b["regularity"] or 0) >= 0.75 else "Irregular")
+    return {"block_m2": b["area_m2"], "block_incline": b["incline_pct"], "block_falls": b["direction"], "block_fall_m": b["fall_m"],
+            "block_frontage": b["frontage_m"], "block_depth": b["depth_m"], "block_shape": shape, "block_rear": b["rear_facing"],
+            "block_split": b["split_lots"] if b["split_lots"] >= 2 else None, "block_fits": b["fits"]}
+

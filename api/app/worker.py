@@ -17,7 +17,7 @@ from uuid import UUID
 
 from psycopg.types.json import Jsonb
 
-from . import blobs, gnaf, statement
+from . import blobs, blocks, gnaf, statement
 from .setup import overlays
 from .address import Address, address_key, normalise
 from .db import tx
@@ -372,6 +372,8 @@ class Worker(threading.Thread):
         try:
             with tx() as conn:
                 overlays.ensure_streamed_layers(conn)
+                # A suburb the last run was part-way through starts again.
+                conn.execute("UPDATE block_suburb SET status = 'pending' WHERE status = 'running'")
         except Exception as e:
             log.warning("worker: couldn't register streamed layers: %s", e)
         backoff = 0
@@ -388,6 +390,7 @@ class Worker(threading.Thread):
                     busy += route_transit(self.transitous)
                 if self.lookups:
                     busy += lookup_overlays()
+                    busy += blocks.analyse_pending()
                 busy += read_statements()
                 backoff = 0
             except Exception as e:  # routing engine still building tiles, database restarting, ...

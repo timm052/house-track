@@ -97,6 +97,11 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.15
+
+- **Map → Blocks, coloured by Fits your preferences**, now shows the near misses in their own colours instead of greying them out: **blue** for a block whose slope and fall suit but is under your smallest size, and **purple** for a block in your size range that's too steep or falls a way you don't want. Fits (green) and slope unknown (amber) are unchanged; everything else stays faint grey.
+- No database changes.
+
 ### 0.4.14
 
 - **Ruled-out houses stay in the weekly refresh, for prices only.** Their price guide changes, sale method and date, and what they sell for are still picked up (marked **prices only** on the Refresh page), so you learn what they went for. Their inspections, agents, documents, photos and room counts aren't. They're checked after the houses you're still considering.

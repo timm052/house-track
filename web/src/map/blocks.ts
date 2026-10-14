@@ -23,7 +23,7 @@ const HEX_ONLY = ["block-hex-fill", "block-hex-line", "block-hex-label"];
 // Colours chosen to read on the light and dark street maps and on the photo; categories differ in lightness as well as
 // hue, so they can be told apart without full colour vision.
 const C = {
-  fit: "#12b886", miss: "#868e96", unknown: "#f59f00",
+  fit: "#12b886", miss: "#868e96", unknown: "#f59f00", small: "#4dabf7", steep: "#cc5de8",
   size: ["#d3f9d8", "#8ce99a", "#40c057", "#2b8a3e", "#1864ab", "#5f3dc4"],
   slope: { flat: "#37b24d", gentle: "#a9e34b", moderate: "#f59f00", steep: "#e03131" },
   falls: { level: "#adb5bd", down: "#1c7ed6", up: "#e8590c", across: "#ae3ec9" },
@@ -35,7 +35,9 @@ export const SIZE_STEPS = [400, 600, 800, 1000, 1500];
 /** The key for a colouring: [colour, words] each. */
 export function blockKey(colour: BlockColour, prefs: BlockPrefs): [string, string][] {
   switch (colour) {
-    case "fit": return [[C.fit, "Fits"], [C.unknown, "Right size, slope unknown"], [C.miss, "Doesn't fit"]];
+    case "fit": return [[C.fit, "Fits"], [C.small, `Right slope, under ${prefs.min_m2.toLocaleString()} m²`],
+      [C.steep, `Right size, steeper than ${prefs.max_incline}% or falls the wrong way`],
+      [C.unknown, "Right size, slope unknown"], [C.miss, "Doesn't fit"]];
     case "size": return C.size.map((c, i) => [c, i === 0 ? `Under ${SIZE_STEPS[0]} m²` : i === C.size.length - 1
       ? `${SIZE_STEPS[i - 1].toLocaleString()} m² and over` : `${SIZE_STEPS[i - 1]}–${SIZE_STEPS[i].toLocaleString()} m²`]);
     case "slope": return [[C.slope.flat, "Flat, under 3%"], [C.slope.gentle, "Gentle, 3–8%"], [C.slope.moderate, "Moderate, 8–15%"],
@@ -71,13 +73,16 @@ export function prepare(fc: GeoJSON.FeatureCollection, suburb: string, prefs: Bl
   });
 }
 
+/** 1 fits, 2 the slope suits but it's too small, 3 the right size but the slope doesn't suit (too steep, or falls a way
+ *  you don't want), -1 the right size but its slope isn't known, 0 doesn't fit. */
 function fitExpression(p: BlockPrefs): ExpressionSpecification {
+  const small = ["<", ["coalesce", ["get", "a"], 0], p.min_m2];
   return ["case",
     ...(p.include_units ? [] : [["==", ["coalesce", ["get", "u"], 0], 1], 0]),
-    ["any", ["<", ["coalesce", ["get", "a"], 0], p.min_m2], [">", ["coalesce", ["get", "a"], 0], p.max_m2]], 0,
-    ["!", ["has", "i"]], -1,
-    ["all", ["<=", ["get", "i"], p.max_incline], ["in", ["coalesce", ["get", "d"], ""], ["literal", p.directions]]], 1,
-    0] as unknown as ExpressionSpecification;
+    [">", ["coalesce", ["get", "a"], 0], p.max_m2], 0,
+    ["!", ["has", "i"]], ["case", small, 0, -1],
+    ["all", ["<=", ["get", "i"], p.max_incline], ["in", ["coalesce", ["get", "d"], ""], ["literal", p.directions]]], ["case", small, 2, 1],
+    ["case", small, 0, 3]] as unknown as ExpressionSpecification;
 }
 
 /** Each colouring's fill colour and how strongly it's filled (the blocks that matter stand out; the rest stay faint). */
@@ -86,8 +91,8 @@ function paintFor(colour: BlockColour, p: BlockPrefs, photo: boolean): { color: 
   switch (colour) {
     case "fit": {
       const fit = fitExpression(p);
-      return { color: ["match", fit, 1, C.fit, -1, C.unknown, C.miss] as ExpressionSpecification,
-               opacity: ["match", fit, 1, strong, -1, strong * 0.7, faint] as ExpressionSpecification };
+      return { color: ["match", fit, 1, C.fit, 2, C.small, 3, C.steep, -1, C.unknown, C.miss] as ExpressionSpecification,
+               opacity: ["match", fit, 1, strong, 2, strong * 0.7, 3, strong * 0.7, -1, strong * 0.7, faint] as ExpressionSpecification };
     }
     case "size": return {
       color: ["step", ["coalesce", ["get", "a"], 0], C.size[0], ...SIZE_STEPS.flatMap((s, i) => [s, C.size[i + 1]])] as ExpressionSpecification,

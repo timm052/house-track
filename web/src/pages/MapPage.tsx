@@ -497,12 +497,19 @@ export default function MapPage() {
     map.on("mouseleave", "props-circle", onLeave);
     map.on("mousemove", "stations-circle", onStation);
     map.on("mouseleave", "stations-circle", onLeave);
+    // Blocks can be tapped for their card.
+    const onBlock = () => { if (!modeRef.current.drawing) map.getCanvas().style.cursor = "pointer"; };
+    const offBlock = () => { map.getCanvas().style.cursor = ""; };
+    map.on("mousemove", "blocks-fill", onBlock);
+    map.on("mouseleave", "blocks-fill", offBlock);
     return () => {
       map.off("click", onClick);
       map.off("mousemove", "props-circle", onEnter);
       map.off("mouseleave", "props-circle", onLeave);
       map.off("mousemove", "stations-circle", onStation);
       map.off("mouseleave", "stations-circle", onLeave);
+      map.off("mousemove", "blocks-fill", onBlock);
+      map.off("mouseleave", "blocks-fill", offBlock);
       hover.remove();
     };
   }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps

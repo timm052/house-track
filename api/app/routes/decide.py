@@ -271,24 +271,25 @@ MAX_TARGETS = 150  # a run is about ten minutes at the page's pace of one listin
 
 @router.get("/listing/targets")
 def refresh_targets() -> list[dict]:
-    """Houses with a Domain link, least recently checked first: active ones with a live campaign, and ones sold in
-    the last two weeks whose price we don't have yet (agents often add it a few days after the sale)."""
+    """Houses with a Domain link: active ones with a live campaign, ones sold in the last two weeks whose price we
+    don't have yet (agents often add it a few days after the sale), and ruled-out ones still on the market, for their
+    price guide and what they sell for only (`prices_only`). Least recently checked first, ruled-out ones after the rest."""
     with tx() as conn:
         rows = conn.execute(
             """SELECT DISTINCT ON (p.id) p.id, l.url, l.last_checked_at, p.unit, p.street_number, p.street, p.suburb, p.postcode,
-                      p.plan_number, p.lot_number
+                      p.plan_number, p.lot_number, s.status = 'ruled_out' AS prices_only
                FROM campaign_link l
                JOIN campaign c ON c.id = l.campaign_id
                JOIN property p ON p.id = c.property_id
                JOIN property_status s ON s.property_id = p.id
                WHERE l.portal = 'domain'
-                 AND ((c.outcome IS NULL AND s.status NOT IN ('ruled_out', 'missed_out', 'bought'))
+                 AND ((c.outcome IS NULL AND s.status NOT IN ('missed_out', 'bought'))
                       OR (c.outcome LIKE 'sold%%' AND c.sold_price_aud IS NULL AND NOT c.bought_by_us
                           AND c.outcome_on >= current_date - 14))
                ORDER BY p.id, (c.outcome IS NULL) DESC, c.created_at DESC, l.created_at DESC""").fetchall()
-    out = [{"id": str(r.pop("id")), "url": r.pop("url"), "last_checked_at": r.pop("last_checked_at"), "address": display(Address(**r))}
-           for r in rows]
-    out.sort(key=lambda t: (t["last_checked_at"] is not None, t["last_checked_at"] or ""))
+    out = [{"id": str(r.pop("id")), "url": r.pop("url"), "last_checked_at": r.pop("last_checked_at"),
+            "prices_only": bool(r.pop("prices_only")), "address": display(Address(**r))} for r in rows]
+    out.sort(key=lambda t: (t["prices_only"], t["last_checked_at"] is not None, t["last_checked_at"] or ""))
     return out[:MAX_TARGETS]
 
 
@@ -316,21 +317,26 @@ def refresh_one(body: RefreshIn, person: Person) -> dict:
                 "error": f"Couldn't read the listing (HTTP {body.status_code or '?'}). Try it again later, or open it and use + House Track."}
     got = listing_capture.extract(body.url, "", body.next_data, image=body.image if (body.image or "").startswith("http") else None)
     method = got.get("sale_method")
+    # A house we've ruled out: we still want its price guide, how and when it's selling and what it sells for, but not
+    # its inspections, agents, documents, photos or room counts.
+    with tx() as conn:
+        status = conn.execute("SELECT status FROM property_status WHERE property_id = %s", (body.property_id,)).fetchone()
+    prices_only = bool(status and status["status"] == "ruled_out")
     update = ListingUpdateIn(
         guide_low_aud=got.get("guide_low_aud"), guide_high_aud=got.get("guide_high_aud"), sale_method=method,
         auction_at=got.get("auction_at") if method == "auction" else None,
         eoi_closes_at=got.get("eoi_closes_at") if method == "eoi" else None,
-        inspections=got.get("inspections") or [], agents=got.get("agents") or [], soi_url=got.get("soi_url"),
-        listed_on=got.get("listed_on"),
-        **{f: got.get(f) for f, _ in listing_apply.DETAILS}, apply_details=False,  # unattended: report, don't overwrite
-        fill_missing=body.fill_missing,
+        inspections=[] if prices_only else got.get("inspections") or [], agents=[] if prices_only else got.get("agents") or [],
+        soi_url=None if prices_only else got.get("soi_url"), listed_on=got.get("listed_on"),
+        **({} if prices_only else {f: got.get(f) for f, _ in listing_apply.DETAILS}), apply_details=False,  # unattended: report, don't overwrite
+        fill_missing=body.fill_missing and not prices_only,
         listing_status=got.get("listing_status"), listing_price_text=got.get("price_text"), sold_price_aud=got.get("sold_price_aud"),
     )
     with tx(person) as conn:
         added = listing_apply.refresh(conn, body.property_id, update)
         have = conn.execute("""SELECT count(*) FILTER (WHERE kind = 'photo') AS photos, count(*) FILTER (WHERE kind = 'floorplan') AS plans
                                FROM attachment WHERE property_id = %s AND sha256 IS NOT NULL""", (body.property_id,)).fetchone()
-    if body.fill_missing:
+    if body.fill_missing and not prices_only:
         from .driveway import save_photos_later
         photos = got.get("photos") or [] if not have["photos"] else []
         plans = got.get("floorplans") or [] if not have["plans"] else []
@@ -345,6 +351,6 @@ def refresh_one(body: RefreshIn, person: Person) -> dict:
     # Sold and under offer are recorded above; taken down or withdrawn still need a person to say how it ended.
     status = listing_apply.listing_state(got.get("listing_status"))
     flag = OFF_MARKET.get(status) if status not in ("sold", "underoffer") else None
-    return {"property_id": str(body.property_id), "changes": added["changes"], "differs": added["differs"],
+    return {"property_id": str(body.property_id), "changes": added["changes"], "differs": added["differs"], "prices_only": prices_only,
             "price_text": got.get("price_text"),
             "flag": f"{flag}: check the outcome and update the status." if flag else None}

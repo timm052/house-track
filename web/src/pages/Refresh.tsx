@@ -11,7 +11,7 @@ import { api } from "../api";
 import { when } from "../format";
 import { refreshBookmarklet } from "./Settings";
 
-type Target = { id: string; url: string; address: string; last_checked_at: string | null };
+type Target = { id: string; url: string; address: string; last_checked_at: string | null; prices_only?: boolean };
 type Result = { changes: string[]; differs?: string[]; flag?: string | null; error?: string; price_text?: string | null };
 type Row = Target & { state: "waiting" | "checking" | "done"; result?: Result };
 
@@ -117,10 +117,11 @@ export default function Refresh() {
       {rows == null && (
         <div className="card">
           <h2>{opened ? "Connecting to the Domain tab…" : "Houses it will check"}</h2>
-          {targets.data?.length === 0 && <p className="small muted">No active houses with a Domain link.</p>}
+          {targets.data?.length === 0 && <p className="small muted">No houses with a Domain link still on the market.</p>}
           <ul className="history small">
             {targets.data?.map((t) => (
               <li key={t.id}><Link to={`/p/${t.id}`}>{t.address}</Link>
+                {t.prices_only && <span className="pill quiet" title="Ruled out: only its price guide and what it sells for are kept up to date"> prices only</span>}
                 <span className="muted"> · {t.last_checked_at ? `checked ${when(t.last_checked_at)}` : "never checked"}</span></li>
             ))}
           </ul>
@@ -144,6 +145,7 @@ export default function Refresh() {
                   <span className="refresh-state" aria-hidden>{r.state === "waiting" ? "○" : r.state === "checking" ? "◌" : r.result?.error ? "✕" : r.result?.flag ? "!" : r.result?.changes.length ? "●" : "✓"}</span>
                   <div className="grow">
                     <Link to={`/p/${r.id}`}>{r.address}</Link>
+                    {r.prices_only && <span className="muted small"> · ruled out, prices only</span>}
                     {r.state === "checking" && <span className="muted small"> · reading…</span>}
                     {r.result && (
                       <div className="small">

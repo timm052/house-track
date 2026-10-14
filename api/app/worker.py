@@ -390,12 +390,18 @@ class Worker(threading.Thread):
                     busy += route_transit(self.transitous)
                 if self.lookups:
                     busy += lookup_overlays()
-                    busy += blocks.analyse_pending()
                 busy += read_statements()
                 backoff = 0
             except Exception as e:  # routing engine still building tiles, database restarting, ...
                 backoff = min(backoff + 10, 120)
                 log.warning("worker: %s (retrying in %ss)", e, backoff)
+            # Block analysis on its own: a routing engine or planning-layer service that's down (above) mustn't keep a
+            # suburb waiting. It records its own failures against the suburb (blocks.analyse_pending).
+            if self.lookups:
+                try:
+                    busy += blocks.analyse_pending()
+                except Exception as e:  # database restarting
+                    log.warning("worker: blocks: %s", e)
             self.stop_event.wait(backoff or (0.5 if busy else 3))
 
     def stop(self) -> None:

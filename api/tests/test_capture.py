@@ -152,6 +152,47 @@ def test_weekly_refresh_targets_and_updates(client, people, monkeypatch):
     assert gone["flag"] == "The listing has been taken down."
 
 
+def test_ruled_out_houses_are_refreshed_for_prices_only(client, people, monkeypatch):
+    """A ruled-out house still on the market stays in the weekly refresh, after the others: its price guide and sale
+    are kept up to date, but not its inspections, agents, rooms or photos."""
+    fetched: list[str] = []
+    monkeypatch.setattr("app.routes.driveway.save_photos_later", lambda pid, person, urls, plans=(): fetched.extend(urls))
+    a = as_(people["a"])
+    url = "https://www.domain.com.au/4-gone-grove-mitcham-vic-3132-2029990044"
+    pid = client.post("/api/properties", headers=a, json={
+        "address": {"street_number": "4", "street": "Gone Grove", "suburb": "Mitcham", "postcode": "3132"},
+        "campaign": {"sale_method": "eoi", "url": url, "guide_low_aud": 1_050_000, "guide_high_aud": 1_150_000}}).json()["id"]
+    active = client.post("/api/properties", headers=a, json={
+        "address": {"street_number": "6", "street": "Gone Grove", "suburb": "Mitcham", "postcode": "3132"},
+        "campaign": {"sale_method": "eoi", "url": url.replace("4-gone", "6-gone").replace("44", "46")}}).json()["id"]
+    assert client.post(f"/api/properties/{pid}/status", headers=a, json={"status": "ruled_out"}).status_code == 201
+    targets = client.get("/api/listing/targets").json()
+    ids = [t["id"] for t in targets]
+    assert pid in ids and ids.index(active) < ids.index(pid)
+    assert next(t for t in targets if t["id"] == pid)["prices_only"] is True
+    assert next(t for t in targets if t["id"] == active)["prices_only"] is False
+
+    data = json.loads(NEXT_DATA)
+    data["props"]["pageProps"]["componentProps"]["listingSummary"].update(title="EOI $1,100,000 - $1,155,000")
+    r = client.post("/api/listing/refresh", headers=a, json={"property_id": pid, "url": url, "status_code": 200,
+                                                              "next_data": json.dumps(data)}).json()
+    assert r["prices_only"] is True
+    assert any(ch.startswith("New price guide $1.1m–$1.155m (was ") for ch in r["changes"])
+    assert not any(ch.startswith(("1 new inspection", "Agents:", "Bedrooms", "Land")) or "photo" in ch for ch in r["changes"])
+    assert r["differs"] == [] and fetched == []
+    p = client.get(f"/api/properties/{pid}").json()
+    assert p["inspections"] == [] and p["campaigns"][0]["agents"] == [] and p["beds"] is None
+    # When it sells, the price is recorded, and it leaves the refresh once the price is known.
+    data["props"]["pageProps"]["componentProps"]["listingSummary"].update(status="sold", title="Sold for $1,180,000")
+    sold = client.post("/api/listing/refresh", headers=a, json={"property_id": pid, "url": url, "status_code": 200,
+                                                                 "next_data": json.dumps(data)}).json()
+    # (The sold page's generic "private treaty" doesn't switch the method: it sold by EOI.)
+    assert sold["changes"] == ["Sold for $1.18m: recorded"]
+    c = client.get(f"/api/properties/{pid}").json()["campaigns"][0]
+    assert (c["outcome"], c["sold_price_aud"], c["sale_method"]) == ("sold", 1_180_000, "eoi")
+    assert pid not in [t["id"] for t in client.get("/api/listing/targets").json()]
+
+
 def test_update_switches_sale_method(client, people):
     """A house saved as an auction whose listing is an EOI: the update switches it rather than failing."""
     a = as_(people["a"])
@@ -248,6 +289,25 @@ def test_sold_listing_records_the_outcome(client, people):
     assert client.post(f"/api/properties/{pid}/listing-update", headers=as_(a), json={"listing_status": "sold"}).status_code == 200
     got = row()
     assert (got["outcome"], got["sold_price_aud"], got["status"]) == ("sold_prior", None, "watching")
+
+
+def test_a_sold_page_keeps_the_auction(client, people):
+    """Domain's sold page can say "private treaty" for a house that was going to auction: the refresh records the sale
+    as sold prior (the auction was still to come) and keeps the auction and its date."""
+    a = as_(people["a"])
+    url = "https://www.domain.com.au/12-sold-street-mitcham-vic-3132-2029990012"
+    later = (datetime.now(MELBOURNE) + timedelta(days=10)).replace(microsecond=0)
+    pid = client.post("/api/properties", headers=a, json={
+        "address": {"street_number": "12", "street": "Sold Street", "suburb": "Mitcham", "postcode": "3132"},
+        "campaign": {"sale_method": "auction", "auction_at": later.isoformat(), "url": url}}).json()["id"]
+    data = json.loads(NEXT_DATA)
+    data["props"]["pageProps"]["componentProps"]["listingSummary"].update(status="sold", title="Sold for $1,300,000", method="privateTreaty")
+    r = client.post("/api/listing/refresh", headers=a, json={"property_id": pid, "url": url, "status_code": 200,
+                                                              "next_data": json.dumps(data)}).json()
+    assert not any(ch.startswith("Now selling by") for ch in r["changes"])
+    c = client.get(f"/api/properties/{pid}").json()["campaigns"][0]
+    assert (c["outcome"], c["sold_price_aud"], c["sale_method"]) == ("sold_prior", 1_300_000, "auction")
+    assert c["auction_at"] is not None
 
 
 def test_address_from_a_shared_domain_link(monkeypatch):

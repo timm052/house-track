@@ -97,6 +97,16 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.14
+
+- **Ruled-out houses stay in the weekly refresh, for prices only.** Their price guide changes, sale method and date, and what they sell for are still picked up (marked **prices only** on the Refresh page), so you learn what they went for. Their inspections, agents, documents, photos and room counts aren't. They're checked after the houses you're still considering.
+- **Fixed: an auction recorded as a plain sale.** When a listing turned to Sold, Domain's page often says "private treaty", and the refresh switched the house to private sale before recording the sale: an auction then showed as plain "Sold" instead of sold at auction or sold prior, and lost its auction date. A sold listing no longer changes the sale method or dates.
+- **Fixed: the Blocks Areas view could time out** with several suburbs spread across Melbourne (the hexagon grid covered the whole area between them). It's now worked out block by block: 81 s down to under a second in testing.
+- **Fixed: a suburb could wait for analysis indefinitely** while the planning-layer service was failing; block analysis now runs on its own.
+- Units and apartments no longer show their strata block's size and slope on the Houses list and Grid.
+- Links to a section of Settings (Settings → Blocks, the browser buttons) now scroll to it. Re-adding a suburb works at the 25-suburb limit. Blocks show a pointer on the map.
+- No database changes.
+
 ### 0.4.13
 
 - **Blocks.** Add the suburbs you're searching in **Settings → Blocks** (or from the map), and House Track downloads every property boundary there from Victoria's open map data, with the 1 m contours, roads and planning zones around them, and measures each block: size, frontage, depth, shape (including battle-axe blocks), the fall front to back and side to side, how steep it is, whether it slopes up or down from the street or across, which way the back faces, and how many lots it could be split into under your rules for its zone. A suburb takes about a minute; re-run it now and then for new subdivisions.

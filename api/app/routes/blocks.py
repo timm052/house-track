@@ -37,7 +37,7 @@ def add_suburb(body: SuburbIn, person: Person) -> dict:
     """Queue a suburb for analysis (the worker downloads and measures it, about a minute)."""
     name = " ".join(body.suburb.upper().split())
     with tx(person) as conn:
-        if conn.execute("SELECT count(*) AS n FROM block_suburb").fetchone()["n"] >= 25:
+        if conn.execute("SELECT count(*) FILTER (WHERE suburb <> %s) AS n FROM block_suburb", (name,)).fetchone()["n"] >= 25:
             raise HTTPException(422, "That's 25 suburbs already. Remove one first.")
         conn.execute("""INSERT INTO block_suburb (suburb) VALUES (%s)
                         ON CONFLICT (suburb) DO UPDATE SET status = 'pending', error = NULL""", (name,))
@@ -129,14 +129,17 @@ def areas(q: AreaQuery) -> dict:
     fit = """(b.area_m2 BETWEEN %(min)s AND %(max)s AND b.incline_pct <= %(inc)s AND b.direction = ANY(%(dirs)s)
               AND (%(units)s OR NOT b.is_unit))"""
     with tx() as conn:
+        # Each block's own hexagon, found from its point (the grid is anchored at the origin, so every block's lookup
+        # agrees): the work grows with the blocks, not with the area the suburbs span.
         hexes = conn.execute(
             f"""WITH b AS (SELECT *, ST_Transform(ST_PointOnSurface(geom), 7855) AS pt FROM block
                            WHERE %(units)s OR NOT is_unit),
-                    grid AS (SELECT h.geom FROM ST_HexagonGrid(%(size)s, (SELECT ST_Extent(pt) FROM b)::geometry) h)
-               SELECT ST_AsGeoJSON(ST_Transform(ST_SetSRID(g.geom, 7855), 4326), 6)::json AS geometry,
-                      count(*) AS total, count(*) FILTER (WHERE {fit}) AS fit
-               FROM grid g JOIN b ON ST_Intersects(ST_SetSRID(g.geom, 7855), b.pt)
-               GROUP BY g.geom HAVING count(*) >= 3""", params).fetchall()
+                    h AS (SELECT DISTINCT ON (b.pfi) b.*, g.i, g.j, g.geom AS hex
+                          FROM b, LATERAL ST_HexagonGrid(%(size)s, b.pt) g WHERE ST_Intersects(g.geom, b.pt)
+                          ORDER BY b.pfi, g.i, g.j)
+               SELECT ST_AsGeoJSON(ST_Transform(ST_SetSRID((array_agg(hex))[1], 7855), 4326), 6)::json AS geometry,
+                      count(*) AS total, count(*) FILTER (WHERE {fit.replace("b.", "")}) AS fit
+               FROM h GROUP BY i, j HAVING count(*) >= 3""", params).fetchall()
         streets = conn.execute(
             f"""SELECT initcap(b.street) AS street, initcap(b.suburb) AS suburb, count(*) AS total,
                        count(*) FILTER (WHERE {fit}) AS fit

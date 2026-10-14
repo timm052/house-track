@@ -136,7 +136,10 @@ def refresh(conn: psycopg.Connection, property_id: UUID, body: ListingUpdateIn) 
 
     if live is not None:
         method = live["sale_method"]
-        if body.sale_method and body.sale_method != method and not (fallback and method):
+        # A sold listing isn't selling a new way: its page often shows a generic method ("private treaty") once the
+        # sale is over, and switching to it would record an auction sale as a plain one and drop the auction date.
+        sold_now = listing_state(body.listing_status) == "sold"
+        if body.sale_method and body.sale_method != method and not (fallback and method) and not sold_now:
             # The listing changed how it's selling: switch, dropping the date that belonged to the old method.
             method = body.sale_method
             set_sale_method(conn, live["id"], method)
@@ -161,7 +164,7 @@ def refresh(conn: psycopg.Connection, property_id: UUID, body: ListingUpdateIn) 
                                + (f" (was {money_range(latest['low_aud'], latest['high_aud'])})" if latest else ""))
         for col, needs, label in (("auction_at", "auction", "Auction"), ("eoi_closes_at", "eoi", "EOI closes")):
             value = getattr(body, col)
-            if value is not None and method == needs and live[col] != value and not (fallback and live[col]):
+            if value is not None and method == needs and live[col] != value and not (fallback and live[col]) and not sold_now:
                 conn.execute(f"UPDATE campaign SET {col} = %s WHERE id = %s", (value, live["id"]))
                 added["date"] = True
                 changes.append(f"{label} {when(value)}" + (f" (was {when(live[col])})" if live[col] else ""))

@@ -224,7 +224,8 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
             "nearest_station_walk": _mins(nearest.get(pid, {}).get("walk_s")),
             "nearest_station_drive": _mins(nearest.get(pid, {}).get("drive_s")),
             "nearest_station_km": round(nearest[pid]["walk_m"] / 1000, 1) if nearest.get(pid, {}).get("walk_m") else None,
-            **_block_fields(on_block.get(pid)),
+            # Units and apartments share a strata block: its size and slope aren't theirs, so they're left out.
+            **_block_fields(None if p["property_type"] in ("unit", "apartment") else on_block.get(pid)),
         }
         v: dict[str, Any] = {"status": str(p["status_id"]), "guide": latest_guide and str(latest_guide["id"])}
         for k in JUDGEMENTS:

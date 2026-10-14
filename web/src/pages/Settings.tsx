@@ -1,7 +1,7 @@
 import Notifications from "../Notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { api, ApiError, type Person } from "../api";
 import { usePeople, usePersons } from "../people";
 import { money, parseMoney } from "../format";
@@ -32,6 +32,14 @@ export default function Settings() {
     // Their verdicts and areas are gone, and credits changed hands: refresh everything that shows them.
     onSuccess: () => queryClient.invalidateQueries(),
   });
+
+  // A link to a section (Settings → Blocks, the browser buttons): go to it once the page has drawn.
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (!hash) return;
+    const t = window.setTimeout(() => document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView({ block: "start" }), 250);
+    return () => window.clearTimeout(t);
+  }, [hash]);
 
   return (
     <div style={{ marginTop: 12 }}>

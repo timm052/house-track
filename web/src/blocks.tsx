@@ -251,7 +251,7 @@ export function PrefsEditor({ value, onChange, full = false }: { value: BlockPre
         </div>
       </div>
       <label className="bp-check"><input type="checkbox" checked={value.include_units} onChange={(e) => set({ include_units: e.target.checked })} />
-        Include unit lots <span className="muted small">(a unit's shared strata block)</span></label>
+        <span>Include unit lots <span className="muted small">(a unit's shared strata block)</span></span></label>
       {full && (
         <div className="bp-row">
           <span className="bp-label">Could be split</span>
@@ -275,11 +275,21 @@ export function PrefsEditor({ value, onChange, full = false }: { value: BlockPre
 
 export const samePrefs = (a: BlockPrefs | null | undefined, b: BlockPrefs | null | undefined) => JSON.stringify(a) === JSON.stringify(b);
 
-/** Add a suburb to analyse: typed, or one of the suburbs your houses are in. */
+/** Add a suburb to analyse: typed (Victoria's suburbs offered as you type, from the address data), or one of the
+ *  suburbs your houses are in. */
 export function AddSuburb({ have, suggestions }: { have: string[]; suggestions: string[] }) {
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
+  const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const typed = name.trim();
+  const matches = useQuery({
+    queryKey: ["localities", typed.toLowerCase()], enabled: typed.length >= 2, staleTime: Infinity, placeholderData: (prev) => prev,
+    queryFn: () => api<{ suburb: string; postcode: string }[]>(`/api/address/localities?q=${encodeURIComponent(typed)}`),
+  });
+  // One row per suburb (a suburb can have more than one postcode), leaving out ones already analysed.
+  const hits = [...new Map((typed.length >= 2 ? matches.data ?? [] : []).map((r) => [r.suburb.toUpperCase(), r])).entries()]
+    .filter(([key]) => !have.includes(key)).slice(0, 6);
   const add = async (s: string) => {
     setError(null);
     try {
@@ -292,10 +302,26 @@ export function AddSuburb({ have, suggestions }: { have: string[]; suggestions: 
   };
   const offer = [...new Set(suggestions.map((s) => s.toUpperCase()))].filter((s) => !have.includes(s)).slice(0, 6);
   return (
-    <div className="stack" style={{ gap: 8 }}>
-      <form className="row" onSubmit={(e) => { e.preventDefault(); if (name.trim()) add(name); }}>
-        <input className="grow" placeholder="Suburb, e.g. Rosanna" aria-label="Suburb to analyse" value={name} onChange={(e) => setName(e.target.value)} />
-        <button className="primary" disabled={name.trim().length < 2}>Add</button>
+    <div className="stack bk-add" style={{ gap: 8 }}>
+      <form className="row bk-add-form" onSubmit={(e) => { e.preventDefault(); if (typed) { add(hits[0] && hits[0][0].toLowerCase().startsWith(typed.toLowerCase()) ? hits[0][0] : typed); setOpen(false); } }}>
+        <div className="grow bk-add-field">
+          <input placeholder="Suburb, e.g. Rosanna" aria-label="Suburb to analyse" value={name} autoComplete="off"
+            role="combobox" aria-expanded={open && hits.length > 0} aria-autocomplete="list"
+            onFocus={() => setOpen(true)} onBlur={() => window.setTimeout(() => setOpen(false), 150)}
+            onChange={(e) => { setName(e.target.value); setOpen(true); }}
+            onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }} />
+          {open && hits.length > 0 && (
+            <ul className="bk-add-hits" role="listbox">
+              {hits.map(([key, r]) => (
+                <li key={key} role="option" aria-selected={false}>
+                  <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => { add(key); setOpen(false); }}>
+                    {suburbName(r.suburb)} <span className="muted">{r.postcode}</span></button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <button className="primary" disabled={typed.length < 2}>Add</button>
       </form>
       {offer.length > 0 && (
         <div className="chips">

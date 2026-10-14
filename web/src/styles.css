@@ -1808,3 +1808,25 @@ a.plan-open:active { transform: scale(0.98); transition-duration: 0ms; }
 .chip.on .muted { color: inherit; opacity: 0.8; }
 .fall-diagram { max-width: 440px; }
 .chip .muted { margin-left: 4px; }
+/* Block preferences and suburb suggestions wrap onto more lines on a phone rather than scrolling off the side. */
+.block-prefs .chips, .bk-add .chips { flex-wrap: wrap; overflow: visible; }
+.bp-range input { min-width: 0; flex: 1 1 0; max-width: 110px; }
+.bk-add .row input { min-width: 0; }
+/* Very small phones (iPhone SE and the like): the top bar's icons tighten up so the bar fits, rather than stretching
+   every page wider than the screen. */
+@media (max-width: 374px) {
+  .topbar { gap: 2px; padding: 8px 6px; }
+  .topbar nav { gap: 0; }
+  .topbar nav a { padding: 6px 4px; }
+  .topbar nav a.active::after { left: 4px; right: 4px; }
+  .topbar .brand { display: none; }
+}
+/* Adding a suburb: the suburbs matching what's typed, listed under the box. */
+.bk-add-field { position: relative; min-width: 0; }
+.bk-add-field input { width: 100%; }
+.bk-add-hits { position: absolute; z-index: 10; left: 0; right: 0; top: calc(100% + 4px); margin: 0; padding: 4px; list-style: none;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-lift); }
+.bk-add-hits button { display: flex; width: 100%; align-items: baseline; gap: 8px; min-height: 40px; padding: 0 10px; border: 0; border-radius: 8px;
+  background: none; box-shadow: none; text-align: left; font-weight: 560; color: var(--text); }
+.bk-add-hits button:hover, .bk-add-hits button:focus-visible { background: var(--surface-2); }
+.bk-add-hits .muted { font-size: 0.82rem; font-weight: 500; }

@@ -97,6 +97,13 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.16
+
+- **Blocks on a phone:** the incline and "which way it may fall" choices wrap onto more lines instead of running off the side of the screen, and the size boxes and unit-lots tick fit narrow screens. Checked at Pixel 7 and iPhone SE widths, on the map's Blocks panel, a block's card and Settings → Blocks.
+- **Adding a suburb suggests Victoria's suburbs as you type** (from the address data, with postcodes), on the map and in Settings. Enter adds the first match.
+- On very small phones (under 375 px wide, like an iPhone SE) the top bar's icons tighten up so every page fits the screen; it used to stretch pages wider than the screen.
+- No database changes.
+
 ### 0.4.15
 
 - **Map → Blocks, coloured by Fits your preferences**, now shows the near misses in their own colours instead of greying them out: **blue** for a block whose slope and fall suit but is under your smallest size, and **purple** for a block in your size range that's too steep or falls a way you don't want. Fits (green) and slope unknown (amber) are unchanged; everything else stays faint grey.

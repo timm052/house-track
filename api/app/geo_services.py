@@ -109,6 +109,29 @@ class Valhalla:
         path = [p for leg in trip["legs"] for p in decode_polyline6(leg["shape"])]
         return Route(round(trip["summary"]["length"] * 1000), round(trip["summary"]["time"])), path
 
+    def walk_routes(self, origin: tuple[float, float], target: tuple[float, float]) -> list[list[list[float]]]:
+        """Ways to walk from one point to another, the usual one first: the routing engine's alternatives, and its
+        route when told to avoid hills. Paths as [lon, lat] points; repeats are left out."""
+        paths: list[list[list[float]]] = []
+        seen: set[tuple] = set()
+        for extra in ({"alternates": 2}, {"alternates": 1, "costing_options": {"pedestrian": {"use_hills": 0.0}}}):
+            body = {"locations": [{"lon": origin[0], "lat": origin[1]}, {"lon": target[0], "lat": target[1]}],
+                    "costing": "pedestrian", "units": "kilometers", "directions_type": "none", **extra}
+            try:
+                got = self._post("route", body)
+            except HTTPError as e:
+                if e.code != 400:
+                    raise
+                continue
+            for trip in [got["trip"]] + [a["trip"] for a in got.get("alternates", [])]:
+                path = [p for leg in trip["legs"] for p in decode_polyline6(leg["shape"])]
+                middle = path[len(path) // 2] if path else None
+                same = (round(trip["summary"]["length"], 2), middle and (round(middle[0], 4), round(middle[1], 4)))
+                if path and same not in seen:
+                    seen.add(same)
+                    paths.append(path)
+        return paths
+
     def drive_peak(self, origin: tuple[float, float], target: tuple[float, float]) -> int | None:
         """The drive in peak hour, in seconds: the route's own time, slowed by the road types it uses."""
         body = {"locations": [{"lon": origin[0], "lat": origin[1]}, {"lon": target[0], "lat": target[1]}],

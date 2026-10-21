@@ -21,7 +21,10 @@ def station_walk(property_id: UUID) -> dict:
         near = conn.execute("SELECT name FROM property_nearest_station WHERE property_id = %s", (property_id,)).fetchone()
         row = conn.execute("SELECT * FROM property_station_walk WHERE property_id = %s", (property_id,)).fetchone()
         marks = walks.benchmarks(conn)
-    return {"station": near and near["name"], "walk": walks.summary(row), "pending": near is not None and row is None,
+        walk = walks.summary(row)
+        if walk and "heights" in walk:
+            walk["points"] = walks.points(conn, row["key"], len(walk["heights"]))
+    return {"station": near and near["name"], "walk": walk, "pending": near is not None and row is None,
             "benchmarks": marks}
 
 

@@ -33,6 +33,10 @@ class FakeValhalla:
         assert mode == "walk"
         return Route(600, 450), [pt(0, y) for y in range(0, 601, 50)]
 
+    def walk_routes(self, origin, target):
+        # The usual way, and a longer way round over the same hill (no less climbing, so not offered).
+        return [[pt(0, y) for y in range(0, 601, 50)], [pt(0, 0), pt(150, 0), pt(150, 600), pt(0, 600)]]
+
 
 def test_rating_and_numbers():
     assert walks.rating(0, 1000, 2) == "Flat"
@@ -41,6 +45,13 @@ def test_rating_and_numbers():
     assert walks.rating(80, 1000, 20) == "Steep"
     s = walks.stats([0, 1, 2, 3, 2, 1, 1, 1, 1, 1, 1, 1], 110)
     assert s["climb_to"] > 1 and s["climb_home"] > 1
+    main = {"climb_to": 30, "climb_home": 60, "distance_m": 1600}
+    ways = walks.better_ways(main, [
+        {"climb_to": 20, "climb_home": 40, "distance_m": 1800, "steepest_up": 5, "steepest_down": 8},   # 30 m less, 200 m more
+        {"climb_to": 29, "climb_home": 60, "distance_m": 1650, "steepest_up": 5, "steepest_down": 8},   # hardly less
+        {"climb_to": 0, "climb_home": 0, "distance_m": 4000, "steepest_up": 0, "steepest_down": 0},     # far too long
+    ])
+    assert [(w["saves_m"], w["extra_m"]) for w in ways] == [(30, 200)] and ways[0]["rating_home"] == "Rolling"
 
 
 def test_a_house_walk_is_profiled_and_compared(client, people, monkeypatch):
@@ -68,6 +79,8 @@ def test_a_house_walk_is_profiled_and_compared(client, people, monkeypatch):
     assert 4 <= w["steepest_up"] <= 6.5 and 8 <= w["steepest_down"] <= 11, w
     assert w["rating_to"] == "Rolling" and w["rating_home"] == "Gentle" and w["flat_m_to"] > 600
     assert 60 <= len(w["heights"]) <= 62   # every 10 m, and the end
+    assert len(w["points"]) == len(w["heights"]) and abs(w["points"][-1][1] - slat) < 1e-4
+    assert w["alternatives"] == []   # the way round climbs the same hill
 
     # Benchmarks: the seeded one (profiled on the same made-up ground here), and one added beside the house.
     marks = got["benchmarks"]

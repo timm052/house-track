@@ -97,6 +97,12 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.19
+
+- **The walk to the station on a street map**, coloured by its climbs and drops on the way there (warm for climbing, cool for dropping, darker for steeper), with the height profile above it. Pointing at either marks the same spot on the other, with the height and slope there.
+- **Ways with less climbing**: other walking routes to the station, including the routing engine's "avoid hills" route, are measured too. Any with at least 3 m less climbing, and not much further, are offered beside the usual way ("12 m less climbing, 110 m further"); picking one shows its profile, map and ratings.
+- **Database:** one new column for the other ways (added automatically). Walks already measured are measured again in the background to find them.
+
 ### 0.4.18
 
 - Fixed "e.trim is not a function" when adding a house from a listing (sold listings among them) that gives the street number or postcode as a number.

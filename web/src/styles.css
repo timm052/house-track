@@ -1852,3 +1852,26 @@ a.plan-open:active { transform: scale(0.98); transition-duration: 0ms; }
 .bench-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .bench-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 0; border-top: 1px solid var(--border); }
 .bench-list li:first-child { border-top: 0; }
+
+.walk-profile { touch-action: pan-y; }
+.walk-profile .wp-hover line { stroke: var(--text); stroke-width: 1; stroke-dasharray: 3 3; }
+.walk-profile .wp-hover circle { fill: var(--surface); stroke: var(--text); stroke-width: 2; }
+.walk-profile .wp-hover text { font-size: 12px; font-weight: 650; fill: var(--text); paint-order: stroke; stroke: var(--surface); stroke-width: 4px; }
+.walk-map { height: 300px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
+.walk-pin { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 800;
+  background: var(--text); color: var(--surface); border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
+.walk-pin.station { background: var(--accent); color: #fff; }
+.walk-dot { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 3px solid var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+.walk-key { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.walk-key span { display: inline-flex; align-items: center; gap: 5px; }
+.walk-key i { width: 16px; height: 6px; border-radius: 3px; display: inline-block; }
+.walk-ways { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }
+.walk-way { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 8px 12px;
+  border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); }
+.walk-way.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+@media (max-width: 560px) {
+  .walk-ways { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(150px, 72%); overflow-x: auto; padding-bottom: 4px; }
+  .walk-profile .wp-label { font-size: 20px; }
+  .walk-profile .wp-hover text { font-size: 21px; }
+  .walk-map { height: 260px; }
+}

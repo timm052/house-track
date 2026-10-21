@@ -2,6 +2,7 @@
 // on the house card), rooms, commute times (the nearest station's routes are drawn on the map), verdicts with their
 // notes, the next inspection, the agent and any flags. A side bar on wide screens; on phones a sheet over the bottom
 // of the map that shows just its summary at first, so the map stays in view, and drags up for the rest.
+import { WalkHillsLine } from "../walks";
 import { useQuery } from "@tanstack/react-query";
 import { Bath, BedDouble, Building2, Car, ExternalLink, LandPlot, MapPin, Mountain, Timer, UserRound, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
@@ -287,6 +288,7 @@ export default function HouseSidePanel({ p, route, routeError, onClose, onTravel
               station={p.nearest_station ? { name: route?.station.name ?? p.nearest_station, walk_s: walkS ?? null, drive_s: driveS } : null}
               stationNote={<>
                 {route?.walk.distance_m != null && <div className="tiny muted">{km(route.walk.distance_m)} walk to the station, drawn on the map</div>}
+                <WalkHillsLine propertyId={p.id} />
                 {routeError && <div className="tiny muted">Couldn't draw the route: {routeError.message}</div>}
               </>} />
           ) : <div className="small muted">…</div>}

@@ -7,6 +7,7 @@ import { usePeople, usePersons } from "../people";
 import { money, parseMoney } from "../format";
 import { CriteriaSettings } from "./Decide";
 import ConfirmButton from "../ConfirmButton";
+import { WalkBenchmarkSettings } from "../walks";
 import { LIVE, Live, OfflineNote } from "../live";
 import { AddSuburb, PrefsEditor, samePrefs, suburbName, useBlockPrefs, useBlockSuburbs, type BlockPrefs } from "../blocks";
 import type { OverviewRow } from "../overview/columns";
@@ -79,6 +80,7 @@ export default function Settings() {
       <MoneySettings />
       <LayerSettings />
       <BlockSettings />
+      <WalkBenchmarkSettings />
       <CriteriaSettings />
       <TagSettings />
     </div>

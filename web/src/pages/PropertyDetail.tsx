@@ -17,6 +17,7 @@ import { Bath, BedDouble, Building2, CalendarDays, CalendarPlus, Camera, Car, Ch
 import Commute from "../Commute";
 import { HouseBlockCard } from "../blocks";
 import ConfirmButton from "../ConfirmButton";
+import { StationWalkCard } from "../walks";
 import { OutcomeForm, outcomeStatus, statusOutOfStep } from "../Outcome";
 
 const MiniMap = lazy(() => import("../map/MiniMap"));
@@ -106,6 +107,7 @@ export default function PropertyDetail() {
               </div>
             )}
             <HouseBlockCard propertyId={p.id} suburb={p.suburb} propertyType={p.property_type} />
+            <StationWalkCard propertyId={p.id} />
             <WhereAndGettingAround p={p} />
             <SchoolsAndPlanning p={p} />
           </>

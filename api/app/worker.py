@@ -17,7 +17,7 @@ from uuid import UUID
 
 from psycopg.types.json import Jsonb
 
-from . import blobs, blocks, gnaf, statement
+from . import blobs, blocks, walks, gnaf, statement
 from .setup import overlays
 from .address import Address, address_key, normalise
 from .db import tx
@@ -402,6 +402,12 @@ class Worker(threading.Thread):
                     busy += blocks.analyse_pending()
                 except Exception as e:  # database restarting
                     log.warning("worker: blocks: %s", e)
+            # The hills on each house's walk to the station: also on its own, for the same reason.
+            if self.lookups and self.valhalla and not backoff:
+                try:
+                    busy += walks.profile_pending(self.valhalla)
+                except Exception as e:  # routing engine or map service not answering: try again next pass
+                    log.warning("worker: walks: %s", e)
             self.stop_event.wait(backoff or (0.5 if busy else 3))
 
     def stop(self) -> None:

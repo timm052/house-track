@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 
 from . import db, gnaf
 from .geo_services import Nominatim, Transitous, Valhalla
-from .routes import blocks, campaigns, decide, driveway, geo, markup, money, overlays, overview, people, properties, push, tags, updates
+from .routes import blocks, campaigns, decide, driveway, geo, markup, money, overlays, overview, people, properties, push, tags, updates, walks
 from .worker import Worker
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -57,6 +57,7 @@ app.include_router(updates.router)
 app.include_router(tags.router)
 app.include_router(markup.router)
 app.include_router(blocks.router)
+app.include_router(walks.router)
 
 
 @app.get("/api/health")

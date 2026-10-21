@@ -97,6 +97,12 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.17
+
+- **The hills on the walk to the station.** Each house's walk to its nearest station is measured from Vicmap's 1 m contours (10 m contours outside Melbourne and the towns, marked as rough): the climbing there and back, the steepest 100 m each way, and how it feels on the flat. Each way is rated like a running route: Flat, Gentle, Rolling, Hilly or Steep. A house's Location tab draws the walk's profile, coloured by how steep each stretch is; the map's house panel and the grid (Getting around) show the rating and the climbing.
+- **Walk benchmarks** (Settings): walks you know, to compare with. It starts with 12 Example Street to Testvale station; add more from any address and pick the station. Houses are compared with the main one ("less hilly than…", and a % in the grid).
+- **Database:** new tables for walk profiles and benchmarks (added automatically on start-up).
+
 ### 0.4.16
 
 - **Blocks on a phone:** the incline and "which way it may fall" choices wrap onto more lines instead of running off the side of the screen, and the size boxes and unit-lots tick fit narrow screens. Checked at Pixel 7 and iPhone SE widths, on the map's Blocks panel, a block's card and Settings → Blocks.

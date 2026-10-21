@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 import psycopg
 from fastapi import HTTPException
 
-from . import blocks
+from . import blocks, walks
 from .address import Address, display
 
 STAGES = {"pre": "pre_inspection", "post": "post_inspection"}
@@ -135,6 +135,10 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
     # The block each house sits on, where its suburb has been analysed (map's Blocks mode), and what the household's
     # block preferences make of it.
     block_prefs = blocks.prefs(conn)
+    # The walk to the station: its hills, against the household's main benchmark walk.
+    station_walks = {r["property_id"]: walks.summary(r) for r in conn.execute(
+        "SELECT * FROM property_station_walk WHERE property_id = ANY(%s)", (ids,)).fetchall()}
+    main_mark = next((m["walk"] for m in walks.benchmarks(conn) if m["walk"] and "climb_per_km" in m["walk"]), None)
     on_block = {r["property_id"]: blocks.summary(r, block_prefs) for r in conn.execute(
         """SELECT DISTINCT ON (p.id) p.id AS property_id, b.* FROM property p JOIN block b ON ST_Intersects(b.geom, p.location)
            WHERE p.id = ANY(%s) ORDER BY p.id, b.is_unit""", (ids,)).fetchall()}
@@ -226,6 +230,7 @@ def build_rows(conn: psycopg.Connection, me: UUID | None, only: UUID | None = No
             "nearest_station_km": round(nearest[pid]["walk_m"] / 1000, 1) if nearest.get(pid, {}).get("walk_m") else None,
             # Units and apartments share a strata block: its size and slope aren't theirs, so they're left out.
             **_block_fields(None if p["property_type"] in ("unit", "apartment") else on_block.get(pid)),
+            **_walk_fields(station_walks.get(pid), main_mark),
         }
         v: dict[str, Any] = {"status": str(p["status_id"]), "guide": latest_guide and str(latest_guide["id"])}
         for k in JUDGEMENTS:
@@ -462,4 +467,14 @@ def _block_fields(b: dict | None) -> dict:
     return {"block_m2": b["area_m2"], "block_incline": b["incline_pct"], "block_falls": b["direction"], "block_fall_m": b["fall_m"],
             "block_frontage": b["frontage_m"], "block_depth": b["depth_m"], "block_shape": shape, "block_rear": b["rear_facing"],
             "block_split": b["split_lots"] if b["split_lots"] >= 2 else None, "block_fits": b["fits"]}
+
+
+def _walk_fields(w: dict | None, mark: dict | None) -> dict:
+    """The walk to the station's hills for the grid: climbing each way, the steepest stretch, the rating, and its
+    climbing per km as a % of the main benchmark walk's (100 = the same)."""
+    if not w or "climb_to" not in w:
+        return {"walk_climb_to": None, "walk_climb_home": None, "walk_steepest": None, "walk_hills": None, "walk_vs_benchmark": None}
+    vs = round(w["climb_per_km"] / mark["climb_per_km"] * 100) if mark and mark["climb_per_km"] else None
+    return {"walk_climb_to": round(w["climb_to"]), "walk_climb_home": round(w["climb_home"]),
+            "walk_steepest": max(w["steepest_up"], w["steepest_down"]), "walk_hills": w["rating"], "walk_vs_benchmark": vs}
 

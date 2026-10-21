@@ -125,6 +125,12 @@ export function catalogue(persons: Person[], places: OverviewPlace[]): Column[] 
     { key: "nearest_station_drive", label: "Drive to station", group: "Getting around", kind: "minutes", byDefault: true, width: 90 },
     { key: "nearest_station_km", label: "Station km", group: "Getting around", kind: "text", width: 80 },
     { key: "nearest_station_walk", label: "Walk to station", group: "Getting around", kind: "minutes", byDefault: true, width: 80 },
+    { key: "walk_hills", label: "Station walk hills", group: "Getting around", kind: "enum", width: 110,
+      options: { Flat: "Flat", Gentle: "Gentle", Rolling: "Rolling", Hilly: "Hilly", Steep: "Steep" } },
+    { key: "walk_climb_to", label: "Climb to station m", group: "Getting around", kind: "int", width: 95 },
+    { key: "walk_climb_home", label: "Climb home m", group: "Getting around", kind: "int", width: 85 },
+    { key: "walk_steepest", label: "Steepest on walk %", group: "Getting around", kind: "int", width: 95 },
+    { key: "walk_vs_benchmark", label: "Hills vs benchmark %", group: "Getting around", kind: "int", width: 100 },
   );
   const owner = (pl: OverviewPlace) => (pl.person_id ? persons.find((p) => p.id === pl.person_id)?.display_name : null);
   for (const pl of places) {

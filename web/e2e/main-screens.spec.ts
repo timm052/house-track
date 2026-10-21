@@ -161,3 +161,9 @@ test("Blocks: the map's panel, Settings → Blocks and the house's block card", 
   await page.getByRole("tab", { name: "Location" }).click();
   await expect(page.locator(".house-block").getByRole("heading", { name: "The block" })).toBeVisible();
 });
+
+test("Walk benchmarks: the settings section lists the starting benchmark", async ({ page }) => {
+  await open(page, "/settings#walks");
+  await expect(page.locator("#walks").getByRole("heading", { name: "Walk benchmarks" })).toBeVisible();
+  await expect(page.locator("#walks").getByText(/Example Street/).first()).toBeVisible();
+});

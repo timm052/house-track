@@ -1830,3 +1830,25 @@ a.plan-open:active { transform: scale(0.98); transition-duration: 0ms; }
   background: none; box-shadow: none; text-align: left; font-weight: 560; color: var(--text); }
 .bk-add-hits button:hover, .bk-add-hits button:focus-visible { background: var(--surface-2); }
 .bk-add-hits .muted { font-size: 0.82rem; font-weight: 500; }
+
+
+/* ─── the walk to the station: its hills (a house's Location tab, Settings) ─── */
+.walk-profile { width: 100%; height: auto; display: block; }
+.walk-profile .wp-ground { fill: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+.walk-profile .wp-line { stroke-width: 3; stroke-linecap: round; }
+.walk-profile .wp-grid { stroke: var(--border); stroke-dasharray: 3 4; }
+.walk-profile .wp-label { font-size: 11px; fill: var(--muted); }
+.walk-profile .wp-end { fill: var(--surface); stroke: var(--text); stroke-width: 2; }
+.walk-dirs { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.walk-dirs .wd { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
+.walk-bars { display: grid; gap: 6px; }
+.walk-bars .wb { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(60px, 1fr) auto; align-items: center; gap: 10px; }
+.walk-bars .wb-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.walk-bars .wb-bar { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+.walk-bars .wb-bar i { display: block; height: 100%; background: var(--muted); border-radius: 4px; }
+.walk-bars .wb.me .wb-bar i { background: var(--accent); }
+.walk-bars .wb.me .wb-name { font-weight: 650; }
+.walk-bars .wb-v { color: var(--muted); white-space: nowrap; }
+.bench-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.bench-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 0; border-top: 1px solid var(--border); }
+.bench-list li:first-child { border-top: 0; }

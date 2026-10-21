@@ -564,3 +564,13 @@ def test_ticking_already_inspected(client, people):
     assert len(client.get(f"/api/properties/{pid}").json()["inspected_by"]) == 2
     client.delete(f"/api/properties/{pid}/inspected", headers=a)
     assert client.get(f"/api/properties/{pid}").json()["inspected_by"] == []
+
+
+def test_address_parts_are_text_when_the_page_gives_numbers():
+    """Some pages (sold listings among them) give the street number and postcode as numbers; the Add form needs text."""
+    data = json.loads(NEXT_DATA)
+    props = data["props"]["pageProps"]["componentProps"]
+    props.update(streetNumber=14, postcode=3132, unitNumber=None)
+    got = extract(URL, HEAD, json.dumps(data))
+    assert got["address_parts"] == {"unit": None, "street_number": "14", "street": "Example Street", "suburb": "Mitcham",
+                                    "postcode": "3132"}

@@ -378,9 +378,10 @@ def extract(url: str, html: str = "", next_data: str | None = None, argonaut: st
     # Domain's component props carry the address in parts, which beats re-parsing a display string.
     props = next((n for _, n in _walk(tree) if "streetNumber" in n and "suburb" in n and "postcode" in n), None)
     if props:
-        out["address_parts"] = {"unit": props.get("unitNumber") or None, "street_number": props.get("streetNumber") or None,
-                                "street": props.get("street") or None, "suburb": props.get("suburb") or None,
-                                "postcode": props.get("postcode") or None}
+        # As text: some pages (sold listings among them) give the number or postcode as a number.
+        part = lambda k: str(props[k]).strip() or None if props.get(k) not in (None, "") else None  # noqa: E731
+        out["address_parts"] = {"unit": part("unitNumber"), "street_number": part("streetNumber"), "street": part("street"),
+                                "suburb": part("suburb"), "postcode": part("postcode")}
     if not props and (found := _address_parts(tree)):
         out["address_parts"] = found
     for field, keys in (("beds", ("beds", "bedrooms")), ("baths", ("baths", "bathrooms")),

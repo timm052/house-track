@@ -58,7 +58,8 @@ export default function QuickAdd() {
     setChoices(defaultChoices(p));
     if (p.existing_property_id) { setImportMsg(null); return; }
     const filled: string[] = [];
-    const parts = p.address_parts;
+    // Parts as text, whatever the page gave (a number for a street number or postcode would break the form).
+    const parts = p.address_parts && Object.fromEntries(Object.entries(p.address_parts).map(([k, v]) => [k, v == null ? null : String(v)])) as typeof p.address_parts;
     if (parts?.street && parts.suburb) {
       const next = { ...EMPTY, unit: parts.unit ?? "", street_number: parts.street_number ?? "", street: parts.street,
                      suburb: parts.suburb, postcode: parts.postcode ?? "" };
@@ -97,7 +98,7 @@ export default function QuickAdd() {
       const q = [a.unit && `${a.unit}/`, a.street_number, a.street, a.suburb].filter(Boolean).join(" ").replace("/ ", "/");
       const hits = await api<{ pid: string; unit: string | null; street_number: string | null; street: string; suburb: string }[]>(
         `/api/address/search?q=${encodeURIComponent(q)}`);
-      const same = (x: string | null | undefined, y: string | null | undefined) => (x ?? "").trim().toLowerCase() === (y ?? "").trim().toLowerCase();
+      const same = (x: unknown, y: unknown) => String(x ?? "").trim().toLowerCase() === String(y ?? "").trim().toLowerCase();
       return hits.find((h) => same(h.street_number, a.street_number) && same(h.street, a.street) && same(h.suburb, a.suburb) && same(h.unit, a.unit))?.pid ?? null;
     } catch { return null; }
   }

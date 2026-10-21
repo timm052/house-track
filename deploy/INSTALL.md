@@ -97,6 +97,11 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.18
+
+- Fixed "e.trim is not a function" when adding a house from a listing (sold listings among them) that gives the street number or postcode as a number.
+- No database changes.
+
 ### 0.4.17
 
 - **The hills on the walk to the station.** Each house's walk to its nearest station is measured from Vicmap's 1 m contours (10 m contours outside Melbourne and the towns, marked as rough): the climbing there and back, the steepest 100 m each way, and how it feels on the flat. Each way is rated like a running route: Flat, Gentle, Rolling, Hilly or Steep. A house's Location tab draws the walk's profile, coloured by how steep each stretch is; the map's house panel and the grid (Getting around) show the rating and the climbing.

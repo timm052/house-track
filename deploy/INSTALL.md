@@ -97,6 +97,11 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.23
+
+- **Floor plans:** the panda and bear are now **Bubu** (the panda) and **Dudu** (the bear), drawn round and chubby like the characters, with rosy cheeks, sitting down and seen from above.
+- No database changes.
+
 ### 0.4.22
 
 - **Floor plans: edit the pieces you place.** A selected piece has square handles to resize it on the plan (from its side, its front or its corner, in 5 cm steps; hold Alt for any size), its own colour (or back to its usual one), and **Mirror** (M) for pieces that aren't the same both ways. The options row under the tools shows these while a piece is selected; the panel has a colour picker too.

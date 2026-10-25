@@ -124,9 +124,9 @@ export const FURNITURE: FurnitureItem[] = [
   { key: "bbq", label: "BBQ", w: 1.4, h: 0.6, group: "Outside" },
   { key: "trampoline", label: "Trampoline", w: 3.0, h: 3.0, group: "Outside", round: true },
 
-  // Sitting down, seen from above, at life size (a giant panda sits about 0.9 m across; a brown bear a good deal more).
-  { key: "panda", label: "Panda (sitting)", w: 0.9, h: 1.0, tall: 1.0, group: "Animals" },
-  { key: "bear", label: "Brown bear (sitting)", w: 1.2, h: 1.35, tall: 1.4, group: "Animals" },
+  // Bubu (the panda) and Dudu (the brown bear), sitting down, seen from above.
+  { key: "panda", label: "Bubu (panda)", w: 0.9, h: 1.0, tall: 1.0, group: "Animals" },
+  { key: "bear", label: "Dudu (bear)", w: 1.0, h: 1.1, tall: 1.1, group: "Animals" },
 
   // Plan symbols. A door is as deep as it is wide (its swing); the wall is along its bottom edge.
   { key: "door", label: "Door (820)", w: 0.82, h: 0.82, group: "Doors & windows" },

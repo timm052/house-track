@@ -737,33 +737,39 @@ function bicycle(k: Kit) {
 }
 
 // ─── animals ───────────────────────────────────────────────────────────
-/** An animal sitting down, seen from above, facing the front (+y): its rump and back behind, its head up over its
- *  shoulders with the muzzle forward, the back feet out in front either side and the front paws between them. */
+/** Bubu and Dudu, sitting down, seen from above, facing the front (+y): drawn round and chubby as the characters are,
+ *  a big round head over a small round body, stubby feet and paws in front, dot eyes and rosy cheeks. */
 function sittingAnimal(c: { fur: string; dark: string; limbs: string; ears: string; muzzle: string; patches?: string }) {
   return (k: Kit) => {
-    const { w, h } = k, cx = w / 2, outline = { stroke: shade(c.dark, -0.2), sw: 1.2 };
-    // back feet, soles toward the front
+    const { w, h } = k, cx = w / 2, outline = { stroke: shade(c.dark, -0.25), sw: 1.4 };
+    // round feet out in front, with pink pads
     for (const s of [-1, 1]) {
-      ellipse(k, cx + s * w * 0.32, h * 0.78, w * 0.14, h * 0.17, { fill: c.limbs, ...outline });
-      ellipse(k, cx + s * w * 0.32, h * 0.84, w * 0.08, h * 0.08, { fill: shade(c.limbs, 0.25), stroke: "none" });
-      for (const t of [-1, 0, 1]) circle(k, cx + s * w * 0.32 + t * w * 0.05, h * 0.935, w * 0.022, { fill: shade(c.limbs, 0.25), stroke: "none" });
+      ellipse(k, cx + s * w * 0.27, h * 0.83, w * 0.15, h * 0.13, { fill: c.limbs, ...outline });
+      ellipse(k, cx + s * w * 0.27, h * 0.85, w * 0.07, h * 0.06, { fill: "#f4b6c2", stroke: "none" });
     }
-    // the rump and back, widest behind
-    ellipse(k, cx, h * 0.4, w * 0.47, h * 0.38, { fill: c.fur, ...outline, sw: 1.5 });
-    // shoulders and front legs reaching down to the paws
-    ellipse(k, cx, h * 0.5, w * 0.36, h * 0.17, { fill: c.limbs, ...outline });
+    // a small round body behind
+    ellipse(k, cx, h * 0.4, w * 0.42, h * 0.34, { fill: c.fur, ...outline, sw: 1.6 });
+    if (c.patches) ellipse(k, cx, h * 0.47, w * 0.42, h * 0.11, { fill: c.limbs, stroke: "none" });   // the panda's shoulder band
+    // stubby paws resting in front
+    for (const s of [-1, 1]) ellipse(k, cx + s * w * 0.13, h * 0.74, w * 0.1, h * 0.09, { fill: c.limbs, ...outline });
+    // the big round head, round ears
+    const hy = h * 0.5, r = w * 0.31;
     for (const s of [-1, 1]) {
-      ellipse(k, cx + s * w * 0.13, h * 0.7, w * 0.09, h * 0.15, { fill: c.limbs, ...outline });
-      for (const t of [-1, 0, 1]) circle(k, cx + s * w * 0.13 + t * w * 0.03, h * 0.83, w * 0.016, { fill: shade(c.limbs, -0.3), stroke: "none" });
+      circle(k, cx + s * r * 0.78, hy - r * 0.72, r * 0.34, { fill: c.ears, ...outline });
+      circle(k, cx + s * r * 0.78, hy - r * 0.72, r * 0.16, { fill: c.patches ? shade(c.ears, 0.25) : shade(c.ears, 0.3), stroke: "none" });
     }
-    // the head, ears and muzzle
-    const hy = h * 0.53, r = w * 0.21;
-    for (const s of [-1, 1]) circle(k, cx + s * r * 0.82, hy - r * 0.62, r * 0.36, { fill: c.ears, ...outline });
-    circle(k, cx, hy, r, { fill: c.fur, ...outline, sw: 1.4 });
-    if (c.patches) for (const s of [-1, 1]) ellipse(k, cx + s * r * 0.42, hy + r * 0.2, r * 0.26, r * 0.34, { fill: c.patches, stroke: "none" });
-    for (const s of [-1, 1]) circle(k, cx + s * r * 0.4, hy + r * 0.22, r * 0.09, { fill: c.patches ? WHITE : SCREEN, stroke: "none" });
-    ellipse(k, cx, hy + r * 0.82, r * 0.42, r * 0.36, { fill: c.muzzle, ...outline, sw: 1 });
-    ellipse(k, cx, hy + r * 1.0, r * 0.17, r * 0.12, { fill: SCREEN, stroke: "none" });
+    circle(k, cx, hy, r, { fill: c.fur, ...outline, sw: 1.6 });
+    // face: eye patches (Bubu), dot eyes with a shine, rosy cheeks, a little muzzle and nose
+    if (c.patches) for (const s of [-1, 1]) ellipse(k, cx + s * r * 0.36, hy + r * 0.12, r * 0.2, r * 0.25, { fill: c.patches, stroke: "none" });
+    for (const s of [-1, 1]) {
+      circle(k, cx + s * r * 0.36, hy + r * 0.14, r * 0.1, { fill: c.patches ? WHITE : SCREEN, stroke: "none" });
+      circle(k, cx + s * r * 0.36, hy + r * 0.14, r * 0.055, { fill: SCREEN, stroke: "none" });
+      circle(k, cx + s * r * 0.33, hy + r * 0.1, r * 0.025, { fill: WHITE, stroke: "none" });
+      ellipse(k, cx + s * r * 0.62, hy + r * 0.44, r * 0.16, r * 0.1, { fill: "#f4a3b4", stroke: "none" });
+    }
+    ellipse(k, cx, hy + r * 0.5, r * 0.26, r * 0.2, { fill: c.muzzle, ...outline, sw: 1 });
+    ellipse(k, cx, hy + r * 0.42, r * 0.09, r * 0.065, { fill: SCREEN, stroke: "none" });
+    path(k, `M${cx - r * 0.1} ${hy + r * 0.58} Q${cx} ${hy + r * 0.66} ${cx + r * 0.1} ${hy + r * 0.58}`, { stroke: SCREEN, sw: 1 });
   };
 }
 
@@ -833,7 +839,7 @@ const SYMBOLS: Record<string, (k: Kit) => void> = {
   "spray-booth": sprayBooth,
   "custom-box": plain, "custom-round": plainRound,
   panda: sittingAnimal({ fur: "#f7f5f0", dark: "#2b2b2b", limbs: "#2b2b2b", ears: "#2b2b2b", muzzle: "#f7f5f0", patches: "#2b2b2b" }),
-  bear: sittingAnimal({ fur: "#8a5a34", dark: "#5b3a20", limbs: "#6e4628", ears: "#6e4628", muzzle: "#c49a6c" }),
+  bear: sittingAnimal({ fur: "#a8744a", dark: "#6b4426", limbs: "#93613a", ears: "#93613a", muzzle: "#efd9bd" }),
   "car-hatch": car, "car-small": car, "car-cx30": car, "car-midsuv": car, "people-mover": car, van: car, ute, "ute-large": ute, trailer, motorbike, bicycle,
 };
 /** Pieces drawn with chairs around them, which reach past the table's own size. */

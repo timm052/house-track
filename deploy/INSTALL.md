@@ -97,6 +97,11 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.25
+
+- The same as 0.4.24, released from the cleaned-up history (0.4.24 itself didn't build). Walk benchmarks start empty: add your own in Settings; ones you already have are kept.
+- No database changes.
+
 ### 0.4.24
 
 - **Releases build for Intel and AMD servers (amd64) only.** The ARM images were built under emulation and used several times the GitHub Actions minutes; a release now uses a fraction of them and builds faster. To run House Track on an ARM machine (a Raspberry Pi, say), add `linux/arm64` back in `.github/workflows/images.yml`.

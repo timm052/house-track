@@ -773,14 +773,14 @@ const SYMBOLS: Record<string, (k: Kit) => void> = {
   "pottery-wheel": potteryWheel, "kiln-top": kiln(false), "kiln-front": kiln(true), "wedging-table": wedgingTable,
   "slab-roller": slabRoller, "glaze-station": glazeStation, "ware-rack": wareRack, "clay-sink": claySink, "pug-mill": pugMill,
   "spray-booth": sprayBooth,
-  "car-hatch": car, "car-small": car, "car-midsuv": car, "people-mover": car, van: car, ute, "ute-large": ute, trailer, motorbike, bicycle,
+  "car-hatch": car, "car-small": car, "car-cx30": car, "car-midsuv": car, "people-mover": car, van: car, ute, "ute-large": ute, trailer, motorbike, bicycle,
 };
 /** Pieces drawn with chairs around them, which reach past the table's own size. */
 const WITH_CHAIRS = new Set(["table-4", "table-6", "table-8", "round-table", "outdoor-table"]);
 
 /** Pieces drawn a little past their own size (a bench's vice handles, a car's mirrors, a sink's trap). */
 const REACHES_OUT = new Set(["workbench", "workbench-large", "woodwork-bench", "slab-roller", "clay-sink", "ute", "ute-large", "trailer", "car",
-  "suv", "car-hatch", "car-small", "car-midsuv", "people-mover", "van"]);
+  "suv", "car-hatch", "car-small", "car-cx30", "car-midsuv", "people-mover", "van"]);
 
 /** A piece of furniture w × h plan pixels, at ppm pixels per metre, centred on the origin. */
 export function FurnitureSymbol({ item, w, h, ppm, thin = 1 }: { item: string; w: number; h: number; ppm: number; thin?: number }) {

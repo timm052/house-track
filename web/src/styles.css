@@ -1884,3 +1884,42 @@ a.plan-open:active { transform: scale(0.98); transition-duration: 0ms; }
 .fp-wallchips { flex-wrap: wrap; overflow: visible; }
 .fp-wallchips .chip { font-size: 0.8rem; min-height: 30px; }
 .fp-check { display: flex; align-items: center; gap: 8px; }
+
+/* Floor plan editing, tidied: the tools in groups with a gap between, the undo/redo/snap/fit actions at the end, and a
+   slim options row under the bar with only what the tool in hand needs (wall thickness, the door, a colour). */
+.fp-toolgroups { gap: 0; flex: none; }
+.fp-toolgroup { display: flex; gap: 2px; padding: 0 6px; }
+.fp-toolgroup + .fp-toolgroup { border-left: 1px solid var(--border); }
+.fp-toolgroup:first-child { padding-left: 0; }
+.fp-actions { margin-left: auto; padding-left: 6px; border-left: 1px solid var(--border); }
+.fp-options { display: flex; align-items: center; gap: 6px 16px; flex-wrap: wrap; padding: 5px 10px; min-height: 42px;
+  border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 70%, var(--bg)); }
+.fp-opt { display: flex; align-items: center; gap: 6px; }
+.fp-opt-label { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.fp-opt-hint { margin-left: auto; }
+.fp-opt select { min-height: 32px; padding: 2px 8px; font-size: 0.85rem; width: auto; }
+.fp-seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; background: var(--surface-2); }
+.fp-page .fp-seg button { min-height: 28px; padding: 0 11px; border: 0; border-radius: 999px; background: none; box-shadow: none; font-size: 0.8rem;
+  font-weight: 600; color: var(--text); white-space: nowrap; }
+.fp-page .fp-seg button.on { background: var(--accent); color: var(--accent-text); }
+.fp-doorkinds { gap: 2px; }
+.fp-page .fp-doorkinds button { display: inline-flex; flex-direction: column; align-items: center; gap: 0; min-height: 0; padding: 2px 6px 3px;
+  border: 1px solid transparent; border-radius: 10px; background: none; box-shadow: none; color: var(--text); }
+.fp-doorkinds .fp-tool-label { font-size: 0.68rem; white-space: nowrap; }
+.fp-page .fp-doorkinds button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.fp-door-preview { display: block; }
+.fp-page .fp-optbtn { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 0 10px; border-radius: 999px;
+  border: 1px solid var(--border-strong); background: var(--surface); box-shadow: none; font-size: 0.8rem; }
+.fp-optbtn .lucide { width: 16px; height: 16px; }
+.fp-options .fp-colours { margin-left: 0; }
+.fp-find { position: relative; display: block; margin: 2px 0; }
+.fp-find .lucide { position: absolute; left: 10px; top: 50%; width: 16px; height: 16px; transform: translateY(-50%); color: var(--muted); }
+.fp-find input { width: 100%; padding-left: 32px; min-height: 36px; }
+@media (max-width: 799px) {
+  /* Phones: the options row scrolls sideways like the tools, and door kinds show as pictures only. */
+  .fp-options { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 4px 8px; min-height: 0; }
+  .fp-options::-webkit-scrollbar { display: none; }
+  .fp-opt-hint { display: none; }
+  .fp-toolgroup { padding: 0 3px; }
+  .fp-actions { margin-left: 0; }
+}

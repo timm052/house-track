@@ -103,6 +103,7 @@ export const FURNITURE: FurnitureItem[] = [
   { key: "car-hatch", label: "Small hatch (Mazda2)", w: 1.7, h: 4.1, group: "Cars" },
   { key: "car-small", label: "Small car (Corolla)", w: 1.79, h: 4.4, group: "Cars" },
   { key: "car", label: "Car", w: 1.85, h: 4.8, group: "Cars" },
+  { key: "car-cx30", label: "Small SUV (Mazda CX-30)", w: 1.8, h: 4.4, group: "Cars" },
   { key: "car-midsuv", label: "Mid SUV (RAV4)", w: 1.86, h: 4.6, group: "Cars" },
   { key: "suv", label: "Large SUV", w: 1.95, h: 5.0, group: "Cars" },
   { key: "people-mover", label: "People mover (Carnival)", w: 2.0, h: 5.16, group: "Cars" },

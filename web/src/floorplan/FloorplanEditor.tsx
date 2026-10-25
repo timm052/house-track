@@ -5,7 +5,7 @@
 // first page.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, BrickWall, ChevronDown, ChevronUp, Copy, DraftingCompass, Eraser, Hand, LayoutPanelTop, Magnet, Maximize, MousePointer2,
+  ArrowLeft, BrickWall, DoorOpen, FlipHorizontal2, FlipVertical2, Search, ChevronDown, ChevronUp, Copy, DraftingCompass, Eraser, Hand, LayoutPanelTop, Magnet, Maximize, MousePointer2,
   Pencil, Pentagon, Plus, Redo2, RotateCcw, RotateCw, Ruler, Save, Sofa, Square, Trash, Type, Undo2, X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -15,6 +15,7 @@ import ConfirmButton from "../ConfirmButton";
 import { usePeople } from "../people";
 import { FURNITURE, FURNITURE_BY_KEY, GROUP_COLOUR, GROUPS, type FurnitureItem } from "./furniture";
 import { FurniturePreview, FurnitureSymbol, shade } from "./symbols";
+import { DOOR_BY_KIND, DOOR_KINDS, DoorPreview, DoorSymbol, HANDED, hostFor, placed, SWINGS, type Door, type DoorKind } from "./doors";
 
 // ─── the saved shapes ─────────────────────────────────────────────────
 type Pt = [number, number];
@@ -27,10 +28,11 @@ type Shape =
   | { id: string; type: "pen"; points: Pt[]; colour: string }
   | { id: string; type: "measure"; a: Pt; b: Pt; colour: string }
   | { id: string; type: "text"; x: number; y: number; text: string; colour: string }
-  | { id: string; type: "furniture"; item: string; label: string; x: number; y: number; w: number; h: number; rotation: number };
+  | { id: string; type: "furniture"; item: string; label: string; x: number; y: number; w: number; h: number; rotation: number }
+  | Door;
 type Doc = { name: string; px_per_m: number | null; shapes: Shape[] };
 type Markup = Doc & { id: string; attachment_id: string; created_at: string; created_by: string; updated_at: string; updated_by: string };
-type Tool = "select" | "pan" | "scale" | "measure" | "line" | "room" | "area" | "rect" | "pen" | "text" | `furniture:${string}`;
+type Tool = "select" | "pan" | "scale" | "measure" | "line" | "room" | "door" | "area" | "rect" | "pen" | "text" | `furniture:${string}`;
 type Line = Extract<Shape, { type: "line" }>;
 
 /** Wall thicknesses to draw with (metres; 0 is a plain line). Typical Australian walls: a stud wall lined both sides,
@@ -39,6 +41,8 @@ const WALLS: [number, string][] = [[0, "Line"], [0.11, "Internal 110"], [0.25, "
 const wallName = (t: number | undefined) => WALLS.find(([v]) => Math.abs(v - (t ?? 0)) < 0.0005)?.[1] ?? `${Math.round((t ?? 0) * 1000)} mm`;
 
 const COLOURS = ["#d9480f", "#1f5a70", "#2b8a3e", "#6741d9", "#212529"];
+/** The door and window pieces from before the Door tool: still drawn on saved plans, no longer offered. */
+const OLD_DOORS = new Set(["door", "door-wide", "double-door", "sliding-door", "window"]);
 // Fingers need bigger targets than a mouse: thin lines and corners get a wider invisible hit area on touch screens.
 const COARSE = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
 const HIT = COARSE ? 30 : 16;
@@ -360,12 +364,19 @@ export default function FloorplanEditor() {
   const [temp, setTemp] = useState<Shape[]>([]);
   // On phones the side panel is a sheet over the bottom of the plan, closed until it's wanted.
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [find, setFind] = useState("");
   const [colour, setColour] = useState(COLOURS[0]);
   // The wall thickness new walls and rooms are drawn with (remembered on this device), and a length being typed while
   // drawing one, to place the next corner exactly that far along.
   const [wallT, setWallT] = useState(() => { try { const v = Number(localStorage.getItem("housetrack.fp.wall")); return Number.isFinite(v) && v >= 0 && v < 1 ? v : 0.11; } catch { return 0.11; } });
   useEffect(() => { try { localStorage.setItem("housetrack.fp.wall", String(wallT)); } catch { /* per-device nicety */ } }, [wallT]);
   const [lenText, setLenText] = useState("");
+  // The next door to place: its kind, width, hinge side and which way it swings.
+  const [doorSpec, setDoorSpec] = useState<{ kind: DoorKind; w: number; hinge: "left" | "right"; side: 1 | -1 }>(() => {
+    try { const v = JSON.parse(localStorage.getItem("housetrack.fp.door") ?? ""); if (DOOR_BY_KIND.has(v.kind) && v.w > 0) return v; } catch { /* none yet */ }
+    return { kind: "single", w: 0.82, hinge: "left", side: 1 };
+  });
+  useEffect(() => { try { localStorage.setItem("housetrack.fp.door", JSON.stringify(doorSpec)); } catch { /* per-device nicety */ } }, [doorSpec]);
   const lenInput = useRef<HTMLInputElement>(null);
   const [snap, setSnap] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
@@ -385,6 +396,14 @@ export default function FloorplanEditor() {
    *  any zoom. */
   const px = (n: number) => n / k;
   const SNAP_PX = COARSE ? 16 : 10;
+
+  const wallsOf = (shapes: Shape[]) => shapes.filter((x): x is Line => x.type === "line");
+  /** A door of width w dropped at p: into the nearest wall within reach (on its centre line, turned with it), else where it is. */
+  function doorAt(p: Pt, w: number, prefer?: string): { p: Pt; deg: number | null; host?: string } {
+    if (!scaled) return { p, deg: null };
+    const h = hostFor(p, w, wallsOf(doc.shapes), doc.px_per_m!, px(COARSE ? 28 : 18), prefer);
+    return h ? { p: h.p, deg: h.deg, host: h.id } : { p, deg: null };
+  }
 
   /** Snap `raw` onto another shape's corner or end (or one of `own`, the corners placed so far), else onto a square
    *  or 45° line from `from`. Off with the magnet switched off, or while Alt is held. */
@@ -541,6 +560,11 @@ export default function FloorplanEditor() {
         const r = (s.rotation * Math.PI) / 180, d = (s.h * doc.px_per_m!) / 2 + px(28);
         return [{ id: "rot", p: [s.x + Math.sin(r) * d, s.y - Math.cos(r) * d], rotate: true }];
       }
+      case "door": {
+        if (!scaled || s.host) return [];   // in a wall, it turns with the wall
+        const r = (s.rotation * Math.PI) / 180, d = (s.w * doc.px_per_m!) / 2 + px(28);
+        return [{ id: "rot", p: [s.x + Math.sin(r) * d, s.y - Math.cos(r) * d], rotate: true }];
+      }
       default: return [];
     }
   }
@@ -548,7 +572,7 @@ export default function FloorplanEditor() {
   /** `s` with its handle dragged to `p`: a corner or end moved (snapping as when drawing), a box resized from the
    *  opposite corner, a piece of furniture turned in 15° steps (Alt for any angle). */
   function applyHandle(s: Shape, handle: string, p: Pt, free: boolean): { shape: Shape; snap: Snap; note?: string } {
-    if (s.type === "furniture") {
+    if (s.type === "furniture" || s.type === "door") {
       let deg = (Math.atan2(p[1] - s.y, p[0] - s.x) * 180) / Math.PI + 90;
       if (!free) deg = Math.round(deg / 15) * 15;
       deg = ((deg % 360) + 360) % 360;
@@ -635,6 +659,15 @@ export default function FloorplanEditor() {
       return;
     }
     if (tool === "text") { setTextPrompt({ p }); return; }
+    if (tool === "door") {
+      if (!scaled) return;
+      const at = doorAt(p, doorSpec.w);
+      const d: Shape = { id: newId(), type: "door", kind: doorSpec.kind, x: at.p[0], y: at.p[1], w: doorSpec.w, rotation: at.deg ?? 0,
+                         hinge: doorSpec.hinge, side: doorSpec.side, ...(at.host ? { host: at.host } : {}) };
+      commit((x) => ({ ...x, shapes: [...x.shapes, d] }));
+      setSelected(d.id);   // the door tool stays on, for the next one
+      return;
+    }
     if (tool === "pen") { drag.current = { kind: "pen", points: [p] }; setDraft([p]); return; }
     if (tool === "rect" || tool === "room") {
       const a = snapPoint(p, null, [], undefined, e.altKey).p;
@@ -681,6 +714,14 @@ export default function FloorplanEditor() {
         if (!g.moved && Math.hypot(e.clientX - g.x, e.clientY - g.y) < slop) return;
         g.moved = true;
         const dx = p[0] - g.from[0], dy = p[1] - g.from[1];
+        if (g.orig.type === "door") {
+          const o = g.orig, start = scaled ? placed(o, wallsOf(doc.shapes), doc.px_per_m!) : { x: o.x, y: o.y, deg: o.rotation };
+          const at = e.altKey ? { p: [start.x + dx, start.y + dy] as Pt, deg: null } : doorAt([start.x + dx, start.y + dy], o.w, o.host);
+          const next: Shape = { ...o, x: at.p[0], y: at.p[1], rotation: at.deg ?? start.deg, host: at.host };
+          if (!at.host) delete (next as Door).host;
+          setDoc((d) => ({ ...d, shapes: d.shapes.map((s) => (s.id === g.id ? next : s)) }));
+          return;
+        }
         setDoc((d) => ({ ...d, shapes: d.shapes.map((s) => (s.id === g.id ? moved(g.orig, dx, dy) : s)) }));
         return;
       }
@@ -778,6 +819,13 @@ export default function FloorplanEditor() {
   }
 
   const selectedShape = doc.shapes.find((s) => s.id === selected) ?? null;
+  /** Flip the selected door (else the next one to place) to the other hinge, or to swing the other way. */
+  function flipDoor(what: "hinge" | "side") {
+    const flip = <T extends { hinge: "left" | "right"; side: 1 | -1 }>(d: T): T =>
+      what === "hinge" ? { ...d, hinge: d.hinge === "left" ? "right" : "left" } : { ...d, side: (d.side === 1 ? -1 : 1) as 1 | -1 };
+    if (selectedShape?.type === "door") update(selectedShape.id, (s) => (s.type === "door" ? flip(s) : s));
+    else setDoorSpec((d) => flip(d));
+  }
   const update = (id: string, change: (s: Shape) => Shape) => commit((d) => ({ ...d, shapes: d.shapes.map((s) => (s.id === id ? change(s) : s)) }));
   const remove = (id: string) => { commit((d) => ({ ...d, shapes: d.shapes.filter((s) => s.id !== id) })); setSelected(null); };
   const duplicate = (s: Shape) => {
@@ -830,6 +878,14 @@ export default function FloorplanEditor() {
         e.preventDefault();
         const [dx, dy] = NUDGE[e.key], step = px(e.shiftKey ? 10 : 1);
         update(selectedShape.id, (s) => moved(s, dx * step, dy * step));
+        return;
+      }
+      if (e.key.toLowerCase() === "f" && (selectedShape?.type === "door" || tool === "door")) {
+        flipDoor(e.shiftKey ? "side" : "hinge");
+        return;
+      }
+      if (e.key.toLowerCase() === "r" && selectedShape?.type === "door" && !selectedShape.host) {
+        update(selectedShape.id, (s) => (s.type === "door" ? { ...s, rotation: (s.rotation + (e.shiftKey ? 15 : 90)) % 360 } : s));
         return;
       }
       if (e.key.toLowerCase() === "r" && selectedShape?.type === "furniture") {
@@ -983,6 +1039,17 @@ export default function FloorplanEditor() {
               paintOrder="stroke">{s.text}</text>
           </g>
         );
+      case "door": {
+        if (!scaled) return null;
+        const at = placed(s, wallsOf(doc.shapes), doc.px_per_m!), W = s.w * doc.px_per_m!, reach = SWINGS.has(s.kind) ? W : at.depth;
+        return (
+          <g key={s.id} {...common} transform={`translate(${at.x} ${at.y}) rotate(${at.deg})`}>
+            <rect x={-W / 2 - px(4)} y={-reach - px(4)} width={W + px(8)} height={reach * 2 + px(8)} fill="transparent" />
+            <DoorSymbol kind={s.kind} W={W} T={at.depth} m={(n) => n * doc.px_per_m!} hinge={s.hinge} side={s.side} k={k} />
+            {isSel && <g transform={`rotate(${-at.deg})`}>{label(0, -at.depth / 2 - px(14), `${DOOR_BY_KIND.get(s.kind)?.label} · ${Math.round(s.w * 1000)} mm`, "#1c7ed6")}</g>}
+          </g>
+        );
+      }
       case "furniture": {
         if (!scaled) return null;
         const item = FURNITURE_BY_KEY.get(s.item);
@@ -1079,6 +1146,16 @@ export default function FloorplanEditor() {
         {guide?.kind === "vertex" && <circle cx={guide.p[0]} cy={guide.p[1]} r={px(9)} fill="none" stroke={accent} strokeWidth={2}
           vectorEffect="non-scaling-stroke" pointerEvents="none" />}
         {cursor && !cursor.touch && POINT_TOOLS.has(tool) && <circle cx={cursor.snap.p[0]} cy={cursor.snap.p[1]} r={px(3)} fill={accent} pointerEvents="none" />}
+        {tool === "door" && scaled && cursor && !cursor.touch && (() => {
+          const at = doorAt(cursor.snap.p, doorSpec.w), W = doorSpec.w * doc.px_per_m!;
+          const depth = at.host ? Math.max((wallsOf(doc.shapes).find((w) => w.id === at.host)?.thickness ?? 0) * doc.px_per_m!, 2) : 0.11 * doc.px_per_m!;
+          return (
+            <g transform={`translate(${at.p[0]} ${at.p[1]}) rotate(${at.deg ?? 0})`} opacity={0.6} pointerEvents="none">
+              {at.host && <rect x={-W / 2} y={-depth / 2} width={W} height={depth} fill="#fff" />}
+              <DoorSymbol kind={doorSpec.kind} W={W} T={depth} m={(n) => n * doc.px_per_m!} hinge={doorSpec.hinge} side={doorSpec.side} k={k} />
+            </g>
+          );
+        })()}
         {item && scaled && cursor && !cursor.touch && (
           <g transform={`translate(${cursor.snap.p[0]} ${cursor.snap.p[1]})`} opacity={0.55} pointerEvents="none">
             <FurnitureSymbol item={item.key} w={item.w * doc.px_per_m!} h={item.h * doc.px_per_m!} ppm={doc.px_per_m!} />
@@ -1086,7 +1163,7 @@ export default function FloorplanEditor() {
         )}
         {sel && handlesFor(sel).map((h) => (
           <g key={h.id} data-handle={h.id} className={`fp-handle ${h.rotate ? "rotate" : ""}`}>
-            {h.rotate && sel.type === "furniture" && <line x1={sel.x} y1={sel.y} x2={h.p[0]} y2={h.p[1]} stroke={accent} strokeWidth={1}
+            {h.rotate && (sel.type === "furniture" || sel.type === "door") && <line x1={sel.x} y1={sel.y} x2={h.p[0]} y2={h.p[1]} stroke={accent} strokeWidth={1}
               strokeDasharray="3 3" vectorEffect="non-scaling-stroke" pointerEvents="none" />}
             <circle cx={h.p[0]} cy={h.p[1]} r={px(COARSE ? 22 : 10)} fill="transparent" />
             <circle className="fp-handle-dot" cx={h.p[0]} cy={h.p[1]} r={px(h.rotate ? 6.5 : 5.5)} fill={h.rotate ? accent : "#fff"} stroke={accent}
@@ -1095,6 +1172,57 @@ export default function FloorplanEditor() {
         ))}
         {cursor?.note && label(cursor.snap.p[0], cursor.snap.p[1] - px(24), cursor.note, accent)}
       </g>
+    );
+  }
+
+  /** The row under the toolbar: just what the tool in hand (or the thing selected) needs. */
+  function toolOptions() {
+    const sel = tool === "select" ? selectedShape : null;
+    const walls = tool === "line" || tool === "room" || sel?.type === "line";
+    const doors = tool === "door" || sel?.type === "door";
+    const coloured = ["line", "room", "area", "rect", "pen", "text", "measure"].includes(tool) || (sel != null && "colour" in sel);
+    if (!walls && !doors && !coloured) return null;
+    const t = sel?.type === "line" ? sel.thickness ?? 0 : wallT;
+    const setT = (v: number) => (sel?.type === "line" ? update(sel.id, (x) => (x.type === "line" ? { ...x, thickness: v || undefined } : x)) : setWallT(v));
+    const d = sel?.type === "door" ? sel : doorSpec, spec = DOOR_BY_KIND.get(d.kind)!;
+    const setDoor = (patch: Partial<Door>) => (sel?.type === "door" ? update(sel.id, (x) => (x.type === "door" ? { ...x, ...patch } : x))
+      : setDoorSpec((v) => ({ ...v, ...patch } as typeof v)));
+    return (
+      <div className="fp-options" role="toolbar" aria-label="Options">
+        {walls && (
+          <div className="fp-opt">
+            <span className="fp-opt-label">Wall</span>
+            <div className="fp-seg">
+              {WALLS.map(([v, l]) => <button key={v} className={Math.abs(t - v) < 0.0005 ? "on" : ""} onClick={() => setT(v)}>{l}</button>)}
+              {!WALLS.some(([v]) => Math.abs(t - v) < 0.0005) && <button className="on">{wallName(t)}</button>}
+            </div>
+          </div>
+        )}
+        {doors && <>
+          <div className="fp-opt fp-doorkinds">
+            {DOOR_KINDS.map((k) => (
+              <button key={k.kind} className={d.kind === k.kind ? "on" : ""} title={k.label} aria-label={k.label} aria-pressed={d.kind === k.kind}
+                onClick={() => setDoor({ kind: k.kind, w: k.widths.includes(d.w) ? d.w : k.width })}>
+                <DoorPreview kind={k.kind} /><span className="fp-tool-label">{k.label.replace(/ \(.*\)/, "")}</span></button>
+            ))}
+          </div>
+          <div className="fp-opt">
+            <span className="fp-opt-label">Width</span>
+            <select value={d.w} onChange={(e) => setDoor({ w: Number(e.target.value) })} aria-label="Width">
+              {[...new Set([...spec.widths, d.w])].sort((a, b) => a - b).map((w) => <option key={w} value={w}>{Math.round(w * 1000)} mm</option>)}
+            </select>
+            {HANDED.has(d.kind) && <button className="fp-optbtn" onClick={() => flipDoor("hinge")} title="Flip the hinge (F)"><FlipHorizontal2 /><span className="fp-tool-label">Hinge</span></button>}
+            {SWINGS.has(d.kind) && <button className="fp-optbtn" onClick={() => flipDoor("side")} title="Swing the other way (Shift+F)"><FlipVertical2 /><span className="fp-tool-label">Swing</span></button>}
+          </div>
+        </>}
+        {coloured && !doors && (
+          <div className="fp-opt fp-colours" aria-label="Colour">
+            {COLOURS.map((c) => <button key={c} className={colour === c ? "on" : ""} style={{ background: c }} aria-label={`Colour ${c}`}
+              onClick={() => { setColour(c); if (sel && "colour" in sel) update(sel.id, (x) => ({ ...x, colour: c }) as Shape); }} />)}
+          </div>
+        )}
+        {tool === "door" && <span className="tiny muted fp-opt-hint">{scaled ? `${COARSE ? "Tap" : "Click"} a wall to put it in, or anywhere for one on its own` : "Set the scale first"}</span>}
+      </div>
     );
   }
 
@@ -1110,10 +1238,23 @@ export default function FloorplanEditor() {
         : <polyline key={key} points={pts} fill="none" stroke={stroke} strokeWidth={width} strokeLinejoin="miter" strokeMiterlimit={8} strokeLinecap="square" />;
     };
     const edge = 2.2 / k;   // the wall's outline, in screen pixels
+    const openings = scaled ? doc.shapes.filter((s): s is Door => s.type === "door" && !!s.host).map((d) => ({ d, at: placed(d, walls, doc.px_per_m!) }))
+      .filter((o) => o.at.hosted) : [];
     return [
       ...doc.shapes.filter(under).map(drawShape),
+      openings.length > 0 && (
+        <defs key="openings">
+          <mask id="fp-openings" maskUnits="userSpaceOnUse" x={-1e5} y={-1e5} width={2e5} height={2e5}>
+            <rect x={-1e5} y={-1e5} width={2e5} height={2e5} fill="#fff" />
+            {openings.map(({ d, at }) => (
+              <rect key={d.id} x={-(d.w * doc.px_per_m!) / 2} y={-at.depth / 2 - edge * 2} width={d.w * doc.px_per_m!} height={at.depth + edge * 4}
+                fill="#000" transform={`translate(${at.x} ${at.y}) rotate(${at.deg})`} />
+            ))}
+          </mask>
+        </defs>
+      ),
       walls.length > 0 && (
-        <g key="walls" className="fp-walls" pointerEvents="none">
+        <g key="walls" className="fp-walls" pointerEvents="none" mask={openings.length ? "url(#fp-openings)" : undefined}>
           {walls.map((s) => band(s, s.thickness! * doc.px_per_m! + edge * 2, s.colour, `o${s.id}`))}
           {walls.map((s) => band(s, s.thickness! * doc.px_per_m!, shade(s.colour, 0.78), `f${s.id}`))}
           {walls.map((s) => band(s, s.thickness! * doc.px_per_m!, "url(#fp-hatch)", `h${s.id}`))}
@@ -1150,6 +1291,7 @@ export default function FloorplanEditor() {
   if (property.isError) return <p className="error">Couldn't load the house.</p>;
   if (property.data && !attachment) return <p>This floor plan has been removed. <Link to={`/p/${propertyId}`}>Back to the house</Link></p>;
 
+  const TOOL_GROUPS: Tool[][] = [["select", "pan"], ["line", "room", "door"], ["area", "rect", "pen", "text"], ["scale", "measure"]];
   const TOOLS: { t: Tool; icon: React.ReactNode; label: string; title: string }[] = [
     { t: "select", icon: <MousePointer2 />, label: "Select", title: "Select and move things" },
     { t: "pan", icon: <Hand />, label: "Pan", title: "Move around the plan. Or hold Space with any tool." },
@@ -1157,6 +1299,7 @@ export default function FloorplanEditor() {
     { t: "measure", icon: <Ruler />, label: "Measure", title: "Click both ends, or drag from one to the other" },
     { t: "line", icon: <BrickWall />, label: "Wall", title: "Click each corner (type a length to place the next one exactly). Click the last corner again to finish, or the first to close a room." },
     { t: "room", icon: <LayoutPanelTop />, label: "Room", title: "Drag to draw a room: four walls, joined at the corners" },
+    { t: "door", icon: <DoorOpen />, label: "Door", title: "Click a wall to put a door or window in it, or anywhere to place one on its own. F flips the hinge." },
     { t: "area", icon: <Pentagon />, label: "Area", title: "Click each corner. Click the first one to close." },
     { t: "rect", icon: <Square />, label: "Box", title: "Drag to draw a box" },
     { t: "pen", icon: <Pencil />, label: "Pen", title: "Draw freehand" },
@@ -1192,41 +1335,26 @@ export default function FloorplanEditor() {
       )}
       {editing && <div className="fp-bar">
         <button className="link" onClick={stopEditing} title="Done editing"><ArrowLeft /><span className="fp-tool-label">Done</span></button>
-        <div className="fp-tools" role="toolbar" aria-label="Tools">
-          {TOOLS.map(({ t, icon, label: l, title }) => (
-            <button key={t} className={tool === t ? "on" : ""} aria-pressed={tool === t} title={title} onClick={() => chooseTool(t)}>
-              {icon}<span className="fp-tool-label">{l}</span></button>
+        <div className="fp-tools fp-toolgroups" role="toolbar" aria-label="Tools">
+          {TOOL_GROUPS.map((group) => (
+            <div key={group.join()} className="fp-toolgroup">
+              {group.map((t) => TOOLS.find((x) => x.t === t)!).map(({ t, icon, label: l, title }) => (
+                <button key={t} className={tool === t ? "on" : ""} aria-pressed={tool === t} title={title} onClick={() => chooseTool(t)}>
+                  {icon}<span className="fp-tool-label">{l}</span></button>
+              ))}
+            </div>
           ))}
         </div>
-        <div className="fp-tools">
-          <button className={snap ? "on" : ""} aria-pressed={snap} title="Snap to corners and 45° (hold Alt to override)"
-            onClick={() => setSnap(!snap)}><Magnet /></button>
+        <div className="fp-tools fp-actions">
           <button disabled={!past.length} title="Undo (Ctrl+Z)" onClick={undo}><Undo2 /></button>
           <button disabled={!future.length} title="Redo (Ctrl+Shift+Z)" onClick={redo}><Redo2 /></button>
+          <button className={snap ? "on" : ""} aria-pressed={snap} title="Snapping: corners, walls, square and 45° (hold Alt to override)"
+            onClick={() => setSnap(!snap)}><Magnet /></button>
           <button title="Fit to screen (0)" onClick={fit}><Maximize /></button>
         </div>
-        {(tool === "line" || tool === "room" || (selectedShape?.type === "line" && tool === "select")) && (
-          <label className="fp-wallpick" title="Wall thickness">
-            <BrickWall />
-            <select aria-label="Wall thickness" value={selectedShape?.type === "line" && tool === "select" ? (selectedShape.thickness ?? 0) : wallT}
-              onChange={(e) => {
-                const t = Number(e.target.value);
-                if (selectedShape?.type === "line" && tool === "select") update(selectedShape.id, (x) => (x.type === "line" ? { ...x, thickness: t || undefined } : x));
-                else setWallT(t);
-              }}>
-              {WALLS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              {!WALLS.some(([v]) => v === (selectedShape?.type === "line" && tool === "select" ? (selectedShape.thickness ?? 0) : wallT)) &&
-                <option value={selectedShape?.type === "line" && tool === "select" ? selectedShape.thickness : wallT}>
-                  {wallName(selectedShape?.type === "line" && tool === "select" ? selectedShape.thickness : wallT)}</option>}
-            </select>
-          </label>
-        )}
         {dirty && <button className="primary small-btn fp-quicksave" disabled={saving} onClick={() => save(false)} title="Save this version"><Save /> Save</button>}
-        <div className="fp-colours" aria-label="Colour">
-          {COLOURS.map((c) => <button key={c} className={colour === c ? "on" : ""} style={{ background: c }} aria-label={`Colour ${c}`}
-            onClick={() => { setColour(c); if (selectedShape && "colour" in selectedShape) update(selectedShape.id, (s) => ({ ...s, colour: c }) as Shape); }} />)}
-        </div>
       </div>}
+      {editing && toolOptions()}
 
       <div className="fp-main">
         <div ref={wrap} className={`fp-canvas tool-${tool.split(":")[0]} ${panning ? "panning" : ""} ${spaceDown ? "space" : ""}`}
@@ -1275,6 +1403,12 @@ export default function FloorplanEditor() {
           )}
           {selectedShape && tool === "select" && (
             <div className="fp-selbar" role="toolbar" aria-label="Selected item">
+              {selectedShape.type === "door" && <>
+                <span className="small fp-selname">{DOOR_BY_KIND.get(selectedShape.kind)?.label}</span>
+                {HANDED.has(selectedShape.kind) && <button title="Flip the hinge (F)" onClick={() => flipDoor("hinge")}><FlipHorizontal2 /></button>}
+                {SWINGS.has(selectedShape.kind) && <button title="Swing the other way (Shift+F)" onClick={() => flipDoor("side")}><FlipVertical2 /></button>}
+                {!selectedShape.host && <button title="Rotate 90°" onClick={() => update(selectedShape.id, (s) => (s.type === "door" ? { ...s, rotation: (s.rotation + 90) % 360 } : s))}><RotateCw /> 90°</button>}
+              </>}
               {selectedShape.type === "furniture" && <>
                 <span className="small fp-selname">{selectedShape.label}</span>
                 <button title="Rotate 90°" onClick={() => update(selectedShape.id, (s) => (s.type === "furniture" ? { ...s, rotation: (s.rotation + 90) % 360 } : s))}><RotateCw /> 90°</button>
@@ -1356,6 +1490,9 @@ export default function FloorplanEditor() {
                 <label className="small">Note<input value={selectedShape.text}
                   onChange={(e) => update(selectedShape.id, (s) => (s.type === "text" ? { ...s, text: e.target.value } : s))} /></label>
               )}
+              {selectedShape.type === "door" && (
+                <DoorEditor s={selectedShape} onChange={(s) => update(s.id, () => s)} onFlip={flipDoor} />
+              )}
               {selectedShape.type === "line" && (
                 <WallEditor s={selectedShape} scaled={scaled} pxPerM={doc.px_per_m} onChange={(s) => update(s.id, () => s)} />
               )}
@@ -1386,18 +1523,20 @@ export default function FloorplanEditor() {
           <section>
             <div className="section-title"><Sofa /> Furniture</div>
             {!scaled && <div className="tiny muted">Set the scale to add furniture.</div>}
-            <div className="tiny muted">Drag a piece onto the plan, or tap it then tap the plan.</div>
-            {GROUPS.map((g) => (
-              <details key={g} className="fp-group">
-                <summary className="small">{g}</summary>
+            <label className="fp-find"><Search /><input type="search" value={find} placeholder="Find a piece: kiln, ute, bed…" aria-label="Find a piece"
+              onChange={(e) => setFind(e.target.value)} /></label>
+            {GROUPS.map((g) => {
+              const q = find.trim().toLowerCase();
+              const items = FURNITURE.filter((f) => f.group === g && !OLD_DOORS.has(f.key) && (!q || f.label.toLowerCase().includes(q) || g.toLowerCase().includes(q)));
+              if (!items.length) return null;
+              return (
+              <details key={g} className="fp-group" open={q ? true : undefined}>
+                <summary className="small">{g === "Doors & windows" ? "Stairs" : g} <span className="muted">· {items.length}</span></summary>
                 {g === "Fridges" && (
                   <p className="tiny muted" style={{ margin: "2px 0 6px" }}>Typical sizes. Allow 20–50 mm each side for airflow.</p>
                 )}
-                {g === "Doors & windows" && (
-                  <p className="tiny muted" style={{ margin: "2px 0 6px" }}>The bottom edge goes against the wall.</p>
-                )}
                 <div className="fp-palette">
-                  {FURNITURE.filter((f) => f.group === g).map((f) => (
+                  {items.map((f) => (
                     <button key={f.key} disabled={!scaled} draggable={scaled} className={tool === `furniture:${f.key}` ? "on" : ""}
                       onDragStart={(e) => e.dataTransfer.setData("text/x-furniture", f.key)}
                       onClick={() => { chooseTool(`furniture:${f.key}`); setSheetOpen(false); }} style={{ borderLeftColor: GROUP_COLOUR[f.group] }}>
@@ -1408,7 +1547,9 @@ export default function FloorplanEditor() {
                   ))}
                 </div>
               </details>
-            ))}
+              );
+            })}
+            <p className="tiny muted" style={{ margin: 0 }}>Doors and windows: use the <button className="link" onClick={() => { chooseTool("door"); setSheetOpen(false); }}>Door tool</button>.</p>
           </section>
           <div className="tiny muted fp-keys">
             <p>Scroll or pinch to zoom. Drag or hold Space to pan. 0 fits the plan.</p>
@@ -1418,6 +1559,34 @@ export default function FloorplanEditor() {
           </div>
         </aside>}
       </div>
+    </div>
+  );
+}
+
+/** A door or window: its kind, width (a usual size or any in mm), hand and swing, and whether it's in a wall. */
+function DoorEditor({ s, onChange, onFlip }: { s: Door; onChange: (s: Door) => void; onFlip: (what: "hinge" | "side") => void }) {
+  const [mm, setMm] = useState(String(Math.round(s.w * 1000)));
+  useEffect(() => { setMm(String(Math.round(s.w * 1000))); }, [s.id, s.w]);
+  const apply = () => { const n = Number(mm.replace(/[^\d.]/g, "")); if (n >= 300 && n <= 8000) onChange({ ...s, w: n / 1000 }); };
+  const spec = DOOR_BY_KIND.get(s.kind)!;
+  return (
+    <div className="stack" style={{ gap: 6 }}>
+      <label className="small">Kind<select value={s.kind} onChange={(e) => {
+        const kind = e.target.value as DoorKind, next = DOOR_BY_KIND.get(kind)!;
+        onChange({ ...s, kind, w: next.widths.includes(s.w) ? s.w : next.width });
+      }}>{DOOR_KINDS.map((d) => <option key={d.kind} value={d.kind}>{d.label}</option>)}</select></label>
+      <div className="chips fp-wallchips">
+        {spec.widths.map((w) => <button key={w} className={`chip ${Math.abs(s.w - w) < 0.0005 ? "on" : ""}`} onClick={() => onChange({ ...s, w })}>{Math.round(w * 1000)}</button>)}
+      </div>
+      <label className="small">Width (mm)<input value={mm} inputMode="numeric" onChange={(e) => setMm(e.target.value)} onBlur={apply}
+        onKeyDown={(e) => e.key === "Enter" && apply()} /></label>
+      {(HANDED.has(s.kind) || SWINGS.has(s.kind)) && (
+        <div className="row">
+          {HANDED.has(s.kind) && <button className="small-btn" onClick={() => onFlip("hinge")} title="F">Flip hinge</button>}
+          {SWINGS.has(s.kind) && <button className="small-btn" onClick={() => onFlip("side")} title="Shift+F">Swing other way</button>}
+        </div>
+      )}
+      <div className="small muted">{s.host ? "In a wall: drag it along the wall, or away to free it." : "Standing on its own: drag it onto a wall to put it in."}</div>
     </div>
   );
 }

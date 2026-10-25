@@ -97,6 +97,13 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.21
+
+- **Floor plans: a Door tool.** Click a wall to put a door or window in it: it sits on the wall's centre line, turns with it, takes its thickness and cuts its opening, so the plan shows through. Drag it along the wall to move it, or away from the wall to free it; click anywhere off a wall for one on its own (with a handle to turn it). Kinds: hinged door, double doors, sliding door, cavity slider, barn door, bifold doors, garage door (with the space a panel-lift door swings up into), a plain opening, and a window, each in common widths or any width in mm. **F** flips the hinge, **Shift+F** the swing.
+- **Edit mode, tidied:** the tools in groups (Select · Walls, rooms and doors · Areas and notes · Scale and measure) with undo, redo, snapping and fit at the end, and a slim row under them with only what the tool in hand needs: wall thickness, the door's kind, width, hinge and swing, or a colour. The furniture list has a search box; the old fixed door and window pieces are gone from it (plans that use them still show them).
+- **Cars:** a small SUV (Mazda CX-30).
+- No database changes.
+
 ### 0.4.20
 
 - **Floor plans: walls with real thickness.** The **Wall** tool draws walls at a chosen thickness (Internal 110 mm, Brick veneer 250 mm, Double brick 270 mm, or a thin line as before), solid and hatched, with corners mitred and walls that meet joined cleanly. Click the first corner to close a room. While drawing, **type a length** (3.6 or 3600) and press Enter to place the next corner exactly that far, square to the last side or toward the pointer.

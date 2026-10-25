@@ -1,7 +1,7 @@
 -- 0022: the hills on the walk to the station. Each walking route (a house to its nearest station, or a benchmark walk)
 -- gets its ground profile from Vicmap's 1 m contours (block_elevation, 0021): heights every 10 m, the climbing each
 -- way, the steepest stretches, and a rating like a running route's. Benchmarks are walks the household knows, to
--- compare with ("12 Example Street to Testvale station").
+-- compare with (an address and its station), added in Settings.
 
 -- A route is known by its two ends, rounded to about a metre: a pin that moves gets a new profile.
 CREATE FUNCTION walk_key(o geometry, t geometry) RETURNS text LANGUAGE sql IMMUTABLE AS $$
@@ -38,10 +38,6 @@ CREATE TABLE walk_benchmark (
   position   int NOT NULL DEFAULT 0,            -- the first is the one houses are compared with
   created_at timestamptz NOT NULL DEFAULT now()
 );
-
-INSERT INTO walk_benchmark (name, origin, station, target, position) VALUES
-  ('12 Example Street, Testvale', ST_SetSRID(ST_MakePoint(145.00000000, -37.80000000), 4326), 'Testvale',
-   ST_SetSRID(ST_MakePoint(145.0000000, -37.8100000), 4326), 0);
 
 -- Each house's walk to its nearest station, profiled once the worker has got to it.
 CREATE VIEW property_station_walk AS

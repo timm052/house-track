@@ -82,9 +82,8 @@ def test_a_house_walk_is_profiled_and_compared(client, people, monkeypatch):
     assert len(w["points"]) == len(w["heights"]) and abs(w["points"][-1][1] - slat) < 1e-4
     assert w["alternatives"] == []   # the way round climbs the same hill
 
-    # Benchmarks: the seeded one (profiled on the same made-up ground here), and one added beside the house.
-    marks = got["benchmarks"]
-    assert marks[0]["name"].startswith("2 Example Street") and marks[0]["walk"]["climb_to"] > 0
+    # Benchmarks: none to start with; one added beside the house is profiled on the same made-up ground and compared.
+    assert got["benchmarks"] == []
     blon, blat = pt(5, 0)
     new = client.post("/api/walk-benchmarks", headers=a, json={"name": "Next door", "lon": blon, "lat": blat}).json()
     assert new["station"] == "Testvale"

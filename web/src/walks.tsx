@@ -208,6 +208,7 @@ export function WalkBenchmarkSettings() {
     <div className="card stack" id="walks">
       <h2>Walk benchmarks</h2>
       <p className="small muted">Walks to a station you know, to compare each house's walk with. Houses are compared with the first.</p>
+      {marks.data?.length === 0 && <p className="small" style={{ margin: 0 }}>None yet. Add a walk you know, from your own place or one you've lived at.</p>}
       <ul className="bench-list">
         {(marks.data ?? []).map((b, i) => {
           const w = b.walk;

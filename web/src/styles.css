@@ -1875,3 +1875,12 @@ a.plan-open:active { transform: scale(0.98); transition-duration: 0ms; }
   .walk-profile .wp-hover text { font-size: 21px; }
   .walk-map { height: 260px; }
 }
+/* Floor plan: the wall thickness picker in the bar, the length box while drawing a wall, and the wall presets. */
+.fp-wallpick { display: inline-flex; align-items: center; gap: 4px; margin: 0; }
+.fp-wallpick .lucide { width: 18px; height: 18px; color: var(--muted); }
+.fp-wallpick select { min-height: 34px; padding: 2px 8px; font-size: 0.85rem; width: auto; }
+.fp-len { display: inline-flex; align-items: center; gap: 4px; margin: 0; }
+.fp-len input { width: 84px; min-height: 30px; padding: 2px 10px; border-radius: 999px; font-size: 0.85rem; }
+.fp-wallchips { flex-wrap: wrap; overflow: visible; }
+.fp-wallchips .chip { font-size: 0.8rem; min-height: 30px; }
+.fp-check { display: flex; align-items: center; gap: 8px; }

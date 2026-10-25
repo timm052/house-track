@@ -3,8 +3,8 @@
 // plan can't show (a fridge has to fit its cavity under the cupboards).
 
 export type FurnitureItem = { key: string; label: string; w: number; h: number; group: Group; round?: boolean; tall?: number };
-export type Group = "Bedroom" | "Living" | "Dining" | "Kitchen & laundry" | "Fridges" | "Bathroom" | "Study" | "Outside"
-  | "Doors & windows";
+export type Group = "Bedroom" | "Living" | "Dining" | "Kitchen & laundry" | "Fridges" | "Bathroom" | "Study" | "Workshop"
+  | "3D printing & CNC" | "Pottery studio" | "Cars" | "Outside" | "Doors & windows";
 
 export const FURNITURE: FurnitureItem[] = [
   { key: "king", label: "King bed", w: 1.83, h: 2.03, group: "Bedroom" },
@@ -57,8 +57,62 @@ export const FURNITURE: FurnitureItem[] = [
   { key: "office-chair", label: "Office chair", w: 0.65, h: 0.65, group: "Study", round: true },
   { key: "filing", label: "Filing cabinet", w: 0.47, h: 0.62, group: "Study" },
 
-  { key: "car", label: "Car", w: 1.85, h: 4.8, group: "Outside" },
-  { key: "suv", label: "Large SUV", w: 1.95, h: 5.0, group: "Outside" },
+  // A workshop: benches and storage, then the bigger power tools at their footprint in use (a table saw with its rails,
+  // a mitre saw on a stand with its wings). Leave room to feed long boards in and out of the saws and the jointer.
+  { key: "workbench", label: "Workbench", w: 1.8, h: 0.75, tall: 0.9, group: "Workshop" },
+  { key: "workbench-large", label: "Large workbench", w: 2.4, h: 0.9, tall: 0.9, group: "Workshop" },
+  { key: "woodwork-bench", label: "Woodwork bench (vices)", w: 1.8, h: 0.6, tall: 0.88, group: "Workshop" },
+  { key: "assembly-table", label: "Assembly / outfeed table", w: 1.8, h: 1.2, tall: 0.86, group: "Workshop" },
+  { key: "tool-chest", label: "Tool chest", w: 1.05, h: 0.46, tall: 1.0, group: "Workshop" },
+  { key: "shelving", label: "Shelving", w: 1.8, h: 0.5, tall: 1.8, group: "Workshop" },
+  { key: "table-saw", label: "Table saw (with rails)", w: 1.4, h: 0.85, tall: 0.86, group: "Workshop" },
+  { key: "jobsite-saw", label: "Jobsite table saw", w: 0.65, h: 0.6, tall: 0.86, group: "Workshop" },
+  { key: "mitre-saw", label: "Mitre saw on stand", w: 2.4, h: 0.6, tall: 0.95, group: "Workshop" },
+  { key: "bandsaw", label: "Bandsaw", w: 0.65, h: 0.6, tall: 1.8, group: "Workshop" },
+  { key: "drill-press", label: "Drill press (floor)", w: 0.5, h: 0.7, tall: 1.65, group: "Workshop" },
+  { key: "jointer", label: "Jointer", w: 1.5, h: 0.5, tall: 0.82, group: "Workshop" },
+  { key: "planer", label: "Thicknesser", w: 0.6, h: 0.65, tall: 0.95, group: "Workshop" },
+  { key: "lathe", label: "Wood lathe", w: 1.8, h: 0.5, tall: 1.15, group: "Workshop" },
+  { key: "dust-extractor", label: "Dust extractor", w: 0.6, h: 0.6, tall: 1.9, round: true, group: "Workshop" },
+  { key: "compressor", label: "Air compressor", w: 0.75, h: 0.4, tall: 0.7, group: "Workshop" },
+
+  // Footprints with room for the bed or gantry to travel, which is more than the frame (a bed-slinger needs its
+  // bed's travel clear behind and in front).
+  { key: "printer-open", label: "3D printer (open frame)", w: 0.5, h: 0.6, tall: 0.6, group: "3D printing & CNC" },
+  { key: "printer-enclosed", label: "3D printer (enclosed)", w: 0.45, h: 0.5, tall: 0.6, group: "3D printing & CNC" },
+  { key: "printer-large", label: "Large 3D printer", w: 0.7, h: 0.7, tall: 0.8, group: "3D printing & CNC" },
+  { key: "resin-printer", label: "Resin printer + wash/cure", w: 0.6, h: 0.35, tall: 0.45, group: "3D printing & CNC" },
+  { key: "cnc-desktop", label: "Desktop CNC (enclosed)", w: 0.7, h: 0.7, tall: 0.65, group: "3D printing & CNC" },
+  { key: "cnc-open", label: "CNC router (open, 1 m)", w: 1.1, h: 1.0, tall: 0.5, group: "3D printing & CNC" },
+  { key: "laser-desktop", label: "Diode laser (enclosed)", w: 0.7, h: 0.65, tall: 0.35, group: "3D printing & CNC" },
+  { key: "laser-co2", label: "CO₂ laser cutter", w: 1.0, h: 0.6, tall: 0.45, group: "3D printing & CNC" },
+
+  // A pottery studio. Kilns need about 0.45 m clear on every side, and an extraction hood over them.
+  { key: "pottery-wheel", label: "Pottery wheel (with stool)", w: 0.65, h: 1.1, tall: 0.6, group: "Pottery studio" },
+  { key: "kiln-top", label: "Kiln (top loading)", w: 0.8, h: 0.8, tall: 1.0, round: true, group: "Pottery studio" },
+  { key: "kiln-front", label: "Kiln (front loading)", w: 0.9, h: 0.9, tall: 1.6, group: "Pottery studio" },
+  { key: "wedging-table", label: "Wedging table", w: 0.9, h: 0.6, tall: 0.8, group: "Pottery studio" },
+  { key: "slab-roller", label: "Slab roller", w: 1.5, h: 0.75, tall: 0.9, group: "Pottery studio" },
+  { key: "glaze-station", label: "Glaze buckets (6)", w: 1.0, h: 0.65, tall: 0.45, group: "Pottery studio" },
+  { key: "ware-rack", label: "Drying / ware rack", w: 0.9, h: 0.5, tall: 1.8, group: "Pottery studio" },
+  { key: "clay-sink", label: "Clay sink (with trap)", w: 0.7, h: 0.55, tall: 0.9, group: "Pottery studio" },
+  { key: "pug-mill", label: "Pug mill", w: 1.0, h: 0.45, tall: 0.9, group: "Pottery studio" },
+  { key: "spray-booth", label: "Glaze spray booth", w: 0.9, h: 0.65, tall: 1.6, group: "Pottery studio" },
+
+  // Common sizes (width without mirrors × length). A garage door needs about 0.6 m more than the car's width.
+  { key: "car-hatch", label: "Small hatch (Mazda2)", w: 1.7, h: 4.1, group: "Cars" },
+  { key: "car-small", label: "Small car (Corolla)", w: 1.79, h: 4.4, group: "Cars" },
+  { key: "car", label: "Car", w: 1.85, h: 4.8, group: "Cars" },
+  { key: "car-midsuv", label: "Mid SUV (RAV4)", w: 1.86, h: 4.6, group: "Cars" },
+  { key: "suv", label: "Large SUV", w: 1.95, h: 5.0, group: "Cars" },
+  { key: "people-mover", label: "People mover (Carnival)", w: 2.0, h: 5.16, group: "Cars" },
+  { key: "ute", label: "Ute (HiLux / Ranger)", w: 1.9, h: 5.35, group: "Cars" },
+  { key: "ute-large", label: "Full-size ute (RAM 1500)", w: 2.08, h: 5.92, group: "Cars" },
+  { key: "van", label: "Van (HiAce LWB)", w: 1.95, h: 5.27, group: "Cars" },
+  { key: "trailer", label: "Box trailer (7 × 5)", w: 1.6, h: 3.4, group: "Cars" },
+  { key: "motorbike", label: "Motorbike", w: 0.8, h: 2.15, group: "Cars" },
+  { key: "bicycle", label: "Bicycle", w: 0.6, h: 1.8, group: "Cars" },
+
   { key: "outdoor-table", label: "Outdoor table (6)", w: 1.8, h: 0.9, group: "Outside" },
   { key: "bbq", label: "BBQ", w: 1.4, h: 0.6, group: "Outside" },
   { key: "trampoline", label: "Trampoline", w: 3.0, h: 3.0, group: "Outside", round: true },
@@ -73,11 +127,12 @@ export const FURNITURE: FurnitureItem[] = [
 ];
 
 export const FURNITURE_BY_KEY = new Map(FURNITURE.map((f) => [f.key, f]));
-export const GROUPS: Group[] = ["Bedroom", "Living", "Dining", "Kitchen & laundry", "Fridges", "Bathroom", "Study", "Outside",
-  "Doors & windows"];
+export const GROUPS: Group[] = ["Bedroom", "Living", "Dining", "Kitchen & laundry", "Fridges", "Bathroom", "Study", "Workshop",
+  "3D printing & CNC", "Pottery studio", "Cars", "Outside", "Doors & windows"];
 
 /** Fill colour per room group, so a busy plan still reads at a glance. */
 export const GROUP_COLOUR: Record<Group, string> = {
   Bedroom: "#6d8fd6", Living: "#d98b5f", Dining: "#c9a24a", "Kitchen & laundry": "#5fa58f",
-  Fridges: "#7d97a8", Bathroom: "#62a8c9", Study: "#9a7fc9", Outside: "#7f9a6d", "Doors & windows": "#6f757a",
+  Fridges: "#7d97a8", Bathroom: "#62a8c9", Study: "#9a7fc9", Workshop: "#b0814f", "3D printing & CNC": "#5f87b0",
+  "Pottery studio": "#b86f58", Cars: "#7a8790", Outside: "#7f9a6d", "Doors & windows": "#6f757a",
 };

@@ -97,6 +97,19 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.20
+
+- **Floor plans: walls with real thickness.** The **Wall** tool draws walls at a chosen thickness (Internal 110 mm, Brick veneer 250 mm, Double brick 270 mm, or a thin line as before), solid and hatched, with corners mitred and walls that meet joined cleanly. Click the first corner to close a room. While drawing, **type a length** (3.6 or 3600) and press Enter to place the next corner exactly that far, square to the last side or toward the pointer.
+- **Room tool:** drag a box to draw four joined walls, with the outside and inside sizes shown as you drag.
+- **Better snapping** while drawing: onto existing walls and edges (not just their corners), onto the point where a square line meets a wall, and level with other corners across or down (with a guide to the corner it lined up with).
+- A selected wall can be made thicker or thinner (any size in mm), or closed or opened, from the panel; the thickness is in the top bar too while drawing. Older plain lines are unchanged.
+- **New furniture groups:**
+  - **Workshop:** workbenches, woodwork bench, assembly/outfeed table, tool chest, shelving, table saw with rails, jobsite saw, mitre saw station, bandsaw, drill press, jointer, thicknesser, lathe, dust extractor, compressor.
+  - **3D printing & CNC:** open-frame, enclosed and large 3D printers, resin printer with wash/cure, enclosed desktop CNC, 1 m open CNC router, diode and CO₂ lasers.
+  - **Pottery studio:** wheel with stool, top- and front-loading kilns, wedging table, slab roller, glaze buckets, ware rack, clay sink with trap, pug mill, spray booth.
+- **Cars:** a group of its own, with a small hatch, small car, mid SUV, people mover, ute, full-size ute, van, box trailer, motorbike and bicycle alongside the existing car and large SUV.
+- No database changes.
+
 ### 0.4.19
 
 - **The walk to the station on a street map**, coloured by its climbs and drops on the way there (warm for climbing, cool for dropping, darker for steeper), with the height profile above it. Pointing at either marks the same spot on the other, with the height and slope there.

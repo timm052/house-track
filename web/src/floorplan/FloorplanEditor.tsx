@@ -5,8 +5,8 @@
 // first page.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, ChevronDown, ChevronUp, Copy, DraftingCompass, Eraser, Hand, Magnet, Maximize, MousePointer2, Pencil, Pentagon, Plus,
-  Redo2, RotateCcw, RotateCw, Ruler, Save, Slash, Sofa, Square, Trash, Type, Undo2, X,
+  ArrowLeft, BrickWall, ChevronDown, ChevronUp, Copy, DraftingCompass, Eraser, Hand, LayoutPanelTop, Magnet, Maximize, MousePointer2,
+  Pencil, Pentagon, Plus, Redo2, RotateCcw, RotateCw, Ruler, Save, Sofa, Square, Trash, Type, Undo2, X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -14,12 +14,14 @@ import { api, type PropertyDetail } from "../api";
 import ConfirmButton from "../ConfirmButton";
 import { usePeople } from "../people";
 import { FURNITURE, FURNITURE_BY_KEY, GROUP_COLOUR, GROUPS, type FurnitureItem } from "./furniture";
-import { FurniturePreview, FurnitureSymbol } from "./symbols";
+import { FurniturePreview, FurnitureSymbol, shade } from "./symbols";
 
 // ─── the saved shapes ─────────────────────────────────────────────────
 type Pt = [number, number];
 type Shape =
-  | { id: string; type: "line"; points: Pt[]; colour: string }                 // walls and lines
+  // Walls and lines: a wall has a thickness (metres, drawn centred on its points); `closed` joins the last corner
+  // back to the first (a room). Without a thickness it's a plain line, as walls were before.
+  | { id: string; type: "line"; points: Pt[]; colour: string; thickness?: number; closed?: boolean }
   | { id: string; type: "area"; points: Pt[]; colour: string }                 // a room outline, with its area
   | { id: string; type: "rect"; x: number; y: number; w: number; h: number; colour: string }
   | { id: string; type: "pen"; points: Pt[]; colour: string }
@@ -28,7 +30,13 @@ type Shape =
   | { id: string; type: "furniture"; item: string; label: string; x: number; y: number; w: number; h: number; rotation: number };
 type Doc = { name: string; px_per_m: number | null; shapes: Shape[] };
 type Markup = Doc & { id: string; attachment_id: string; created_at: string; created_by: string; updated_at: string; updated_by: string };
-type Tool = "select" | "pan" | "scale" | "measure" | "line" | "area" | "rect" | "pen" | "text" | `furniture:${string}`;
+type Tool = "select" | "pan" | "scale" | "measure" | "line" | "room" | "area" | "rect" | "pen" | "text" | `furniture:${string}`;
+type Line = Extract<Shape, { type: "line" }>;
+
+/** Wall thicknesses to draw with (metres; 0 is a plain line). Typical Australian walls: a stud wall lined both sides,
+ *  brick veneer (brick, cavity, frame and lining), double brick. */
+const WALLS: [number, string][] = [[0, "Line"], [0.11, "Internal 110"], [0.25, "Brick veneer 250"], [0.27, "Double brick 270"]];
+const wallName = (t: number | undefined) => WALLS.find(([v]) => Math.abs(v - (t ?? 0)) < 0.0005)?.[1] ?? `${Math.round((t ?? 0) * 1000)} mm`;
 
 const COLOURS = ["#d9480f", "#1f5a70", "#2b8a3e", "#6741d9", "#212529"];
 // Fingers need bigger targets than a mouse: thin lines and corners get a wider invisible hit area on touch screens.
@@ -60,7 +68,7 @@ const centroid = (points: Pt[]): Pt => [points.reduce((s, p) => s + p[0], 0) / p
 // ─── interaction helpers ──────────────────────────────────────────────
 /** Where a point snapped to, if anywhere: onto another shape's corner or end ("vertex"), or onto a square or 45°
  *  line from the previous point ("axis", along `deg` through `from`). The guide for either is drawn while it holds. */
-type Snap = { p: Pt; kind: "vertex" | "axis" | null; from?: Pt; deg?: number };
+type Snap = { p: Pt; kind: "vertex" | "axis" | "edge" | "align" | null; from?: Pt; deg?: number; align?: Pt[] };
 /** The pointer as the canvas shows it: snapped point, screen position (for the magnifier), and any note to show. */
 type Cursor = { snap: Snap; sx: number; sy: number; touch: boolean; down: boolean; note?: string };
 type Drag =
@@ -86,6 +94,37 @@ function vertices(shapes: Shape[], skip?: string): Pt[] {
     else if (s.type === "rect") out.push([s.x, s.y], [s.x + s.w, s.y], [s.x + s.w, s.y + s.h], [s.x, s.y + s.h]);
   }
   return out;
+}
+
+/** Every straight edge the plan's shapes have (walls, areas, boxes, measurements), to snap onto. */
+function edges(shapes: Shape[], skip?: string): [Pt, Pt][] {
+  const out: [Pt, Pt][] = [];
+  const run = (pts: Pt[], closed: boolean) => {
+    for (let i = 1; i < pts.length; i++) out.push([pts[i - 1], pts[i]]);
+    if (closed && pts.length > 2) out.push([pts[pts.length - 1], pts[0]]);
+  };
+  for (const s of shapes) {
+    if (s.id === skip) continue;
+    if (s.type === "line") run(s.points, !!s.closed);
+    else if (s.type === "area") run(s.points, true);
+    else if (s.type === "measure") out.push([s.a, s.b]);
+    else if (s.type === "rect") run([[s.x, s.y], [s.x + s.w, s.y], [s.x + s.w, s.y + s.h], [s.x, s.y + s.h]], true);
+  }
+  return out;
+}
+/** The nearest point to p on the segment a–b. */
+function onSegment(p: Pt, a: Pt, b: Pt): Pt {
+  const l2 = (b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2;
+  const t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * (b[0] - a[0]) + (p[1] - a[1]) * (b[1] - a[1])) / l2)) : 0;
+  return [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
+}
+/** Where the line through `from` along unit (ux, uy) crosses the segment a–b, if it does. */
+function crossing(from: Pt, ux: number, uy: number, a: Pt, b: Pt): Pt | null {
+  const dx = b[0] - a[0], dy = b[1] - a[1], den = ux * dy - uy * dx;
+  if (Math.abs(den) < 1e-9) return null;
+  const s = ((a[0] - from[0]) * uy - (a[1] - from[1]) * ux) / den;
+  if (s < -1e-6 || s > 1 + 1e-6) return null;
+  return [a[0] + s * dx, a[1] + s * dy];
 }
 
 /** easing.standard, cubic-bezier(0.2, 0, 0, 1): x solved for t by Newton's method, then y. */
@@ -322,6 +361,12 @@ export default function FloorplanEditor() {
   // On phones the side panel is a sheet over the bottom of the plan, closed until it's wanted.
   const [sheetOpen, setSheetOpen] = useState(false);
   const [colour, setColour] = useState(COLOURS[0]);
+  // The wall thickness new walls and rooms are drawn with (remembered on this device), and a length being typed while
+  // drawing one, to place the next corner exactly that far along.
+  const [wallT, setWallT] = useState(() => { try { const v = Number(localStorage.getItem("housetrack.fp.wall")); return Number.isFinite(v) && v >= 0 && v < 1 ? v : 0.11; } catch { return 0.11; } });
+  useEffect(() => { try { localStorage.setItem("housetrack.fp.wall", String(wallT)); } catch { /* per-device nicety */ } }, [wallT]);
+  const [lenText, setLenText] = useState("");
+  const lenInput = useRef<HTMLInputElement>(null);
   const [snap, setSnap] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState<Pt[] | null>(null);   // points of the line, area, measure or scale being drawn
@@ -345,21 +390,56 @@ export default function FloorplanEditor() {
    *  or 45° line from `from`. Off with the magnet switched off, or while Alt is held. */
   function snapPoint(raw: Pt, from: Pt | null, own: Pt[] = [], skip?: string, free = false): Snap {
     if (free || !snap) return { p: raw, kind: null };
-    let best: Pt | null = null, bestD = px(SNAP_PX);
-    for (const v of [...own, ...vertices(editing ? doc.shapes : [...doc.shapes, ...temp], skip)]) {
+    const shapes = editing ? doc.shapes : [...doc.shapes, ...temp], tol = px(SNAP_PX);
+    // 1. onto a corner or end
+    let best: Pt | null = null, bestD = tol;
+    const corners = [...own, ...vertices(shapes, skip)];
+    for (const v of corners) {
       const d = dist(v, raw);
       if (d < bestD) { best = v; bestD = d; }
     }
     if (best) return { p: best, kind: "vertex" };
+    const sides = edges(shapes, skip);
+    if (own.length > 1) for (let i = 1; i < own.length; i++) sides.push([own[i - 1], own[i]]);
+    // 2. square or 45° from the last corner; where that line meets a wall near the pointer, onto the wall
+    let axis: Snap | null = null;
     if (from && dist(from, raw) > px(8)) {
       const deg = (Math.atan2(raw[1] - from[1], raw[0] - from[0]) * 180) / Math.PI, near = Math.round(deg / 45) * 45;
       if (Math.abs(deg - near) < 6) {
         const r = (near * Math.PI) / 180, ux = Math.cos(r), uy = Math.sin(r);
         const t = (raw[0] - from[0]) * ux + (raw[1] - from[1]) * uy;
-        return { p: [from[0] + ux * t, from[1] + uy * t], kind: "axis", from, deg: near };
+        const p: Pt = [from[0] + ux * t, from[1] + uy * t];
+        for (const [a, b] of sides) {
+          const x = crossing(from, ux, uy, a, b);
+          if (x && dist(x, p) < tol && dist(x, from) > px(2)) return { p: x, kind: "edge", from, deg: near };
+        }
+        axis = { p, kind: "axis", from, deg: near };
       }
     }
-    return { p: raw, kind: null };
+    // 3. onto a wall or edge
+    if (!axis) {
+      let edge: Pt | null = null, edgeD = tol;
+      for (const [a, b] of sides) {
+        const q = onSegment(raw, a, b), d = dist(q, raw);
+        if (d < edgeD) { edge = q; edgeD = d; }
+      }
+      if (edge) return { p: edge, kind: "edge" };
+    }
+    // 4. level with another corner: across and down when free, only across along a horizontal line (only down along a
+    // vertical one), not at all along a diagonal
+    const p: Pt = axis ? [axis.p[0], axis.p[1]] : [raw[0], raw[1]];
+    const lookX = !axis || axis.deg! % 180 === 0, lookY = !axis || Math.abs(axis.deg!) % 180 === 90;
+    let ax: Pt | null = null, ay: Pt | null = null;
+    for (const v of corners) {
+      if (from && v === from) continue;
+      if (lookX && Math.abs(v[0] - p[0]) < tol && (!ax || Math.abs(v[0] - p[0]) < Math.abs(ax[0] - p[0]))) ax = v;
+      if (lookY && Math.abs(v[1] - p[1]) < tol && (!ay || Math.abs(v[1] - p[1]) < Math.abs(ay[1] - p[1]))) ay = v;
+    }
+    const align: Pt[] = [];
+    if (ax) { p[0] = ax[0]; align.push(ax); }
+    if (ay) { p[1] = ay[1]; align.push(ay); }
+    if (align.length) return axis ? { ...axis, p, align } : { p, kind: "align", align };
+    return axis ?? { p: raw, kind: null };
   }
 
   /** Update the cursor for the current tool: snapped for point tools and boxes, as it is otherwise. */
@@ -367,7 +447,7 @@ export default function FloorplanEditor() {
     const p = toPlan(e.clientX, e.clientY), r = wrap.current!.getBoundingClientRect();
     const own = draft ?? [];
     const snapped = POINT_TOOLS.has(tool) ? snapPoint(p, own[own.length - 1] ?? null, own, undefined, e.altKey)
-      : tool === "rect" ? snapPoint(p, null, [], undefined, e.altKey) : { p, kind: null };
+      : tool === "rect" || tool === "room" ? snapPoint(p, null, [], undefined, e.altKey) : { p, kind: null };
     setCursor({ snap: snapped, sx: e.clientX - r.left, sy: e.clientY - r.top, touch: e.pointerType === "touch", down });
   }
 
@@ -383,14 +463,18 @@ export default function FloorplanEditor() {
   /** A change made by dragging, which updated the doc as it went: one undo step for the whole drag. */
   const remember = (before: Doc) => { setPast((p) => [...p.slice(-99), before]); setFuture([]); setDirty(true); };
 
-  const finishPath = (from: Pt[] | null = draft) => {
+  const finishPath = (from: Pt[] | null = draft, closed = false) => {
     if (!from) return;
     const pts = from.filter((p, i) => i === 0 || dist(p, from[i - 1]) > px(1));   // a double-click taps the last corner twice
-    if (tool === "line" && pts.length >= 2) commit((d) => ({ ...d, shapes: [...d.shapes, { id: newId(), type: "line", points: pts, colour }] }));
+    if (tool === "line" && pts.length >= 2) {
+      const wall: Shape = { id: newId(), type: "line", points: pts, colour, ...(wallT > 0 ? { thickness: wallT } : {}), ...(closed && pts.length >= 3 ? { closed: true } : {}) };
+      commit((d) => ({ ...d, shapes: [...d.shapes, wall] }));
+    }
+    setLenText("");
     if (tool === "area" && pts.length >= 3) commit((d) => ({ ...d, shapes: [...d.shapes, { id: newId(), type: "area", points: pts, colour }] }));
     setDraft(null);
   };
-  const chooseTool = (t: Tool) => { setDraft(null); setScalePrompt(null); setTextPrompt(null); setCursor(null); if (t !== "select") setSelected(null); setTool(t); };
+  const chooseTool = (t: Tool) => { setDraft(null); setLenText(""); setScalePrompt(null); setTextPrompt(null); setCursor(null); if (t !== "select") setSelected(null); setTool(t); };
   const homeTool: Tool = editing ? "select" : "pan";
   useEffect(() => {   // switching between viewing and editing starts from that mode's usual tool
     chooseTool(editing ? "select" : "pan");
@@ -408,6 +492,7 @@ export default function FloorplanEditor() {
       return cur;
     }
     if (tool === "area" && cur && cur.length >= 3 && dist(q, cur[0]) < tol) { finishPath(cur); return null; }
+    if (tool === "line" && cur && cur.length >= 3 && dist(q, cur[0]) < tol) { finishPath(cur, true); return null; }   // back to the start: a room
     const pts = [...(cur ?? []), q];
     if ((tool === "scale" || tool === "measure") && pts.length === 2) {
       if (tool === "scale") setScalePrompt({ a: pts[0], b: pts[1] });
@@ -418,6 +503,23 @@ export default function FloorplanEditor() {
       return null;
     }
     return pts;
+  }
+
+  /** The next corner of the wall or area being drawn, `metresAlong` from the last one: toward the pointer (square or
+   *  45° when it's near one, as when clicking), else on along the last side, else to the right. */
+  function placeAtLength(metresAlong: number) {
+    if (!draft?.length || !scaled) return;
+    const last = draft[draft.length - 1], aim = cursor?.snap.p;
+    let ux = 1, uy = 0;
+    if (aim && dist(aim, last) > px(2)) { ux = (aim[0] - last[0]) / dist(aim, last); uy = (aim[1] - last[1]) / dist(aim, last); }
+    else if (draft.length >= 2) { const b = draft[draft.length - 2], d = dist(b, last) || 1; ux = (last[0] - b[0]) / d; uy = (last[1] - b[1]) / d; }
+    if (snap) {
+      const deg = (Math.atan2(uy, ux) * 180) / Math.PI, near = Math.round(deg / 45) * 45;
+      if (Math.abs(deg - near) < 6) { ux = Math.cos((near * Math.PI) / 180); uy = Math.sin((near * Math.PI) / 180); }
+    }
+    const L = metresAlong * doc.px_per_m!;
+    setDraft([...draft, [last[0] + ux * L, last[1] + uy * L]]);
+    setLenText("");
   }
 
   function placeFurniture(item: FurnitureItem, at: Pt) {
@@ -458,7 +560,7 @@ export default function FloorplanEditor() {
     }
     if (s.type === "line" || s.type === "area") {
       const i = Number(handle.slice(1)), n = s.points.length;
-      const prev = i > 0 ? s.points[i - 1] : s.type === "area" ? s.points[n - 1] : s.points[1] ?? null;
+      const prev = i > 0 ? s.points[i - 1] : s.type === "area" || (s.type === "line" && s.closed) ? s.points[n - 1] : s.points[1] ?? null;
       const sn = snapPoint(p, prev, s.points.filter((_, j) => j !== i), s.id, free);
       return { shape: { ...s, points: s.points.map((q, j) => (j === i ? sn.p : q)) }, snap: sn };
     }
@@ -534,7 +636,7 @@ export default function FloorplanEditor() {
     }
     if (tool === "text") { setTextPrompt({ p }); return; }
     if (tool === "pen") { drag.current = { kind: "pen", points: [p] }; setDraft([p]); return; }
-    if (tool === "rect") {
+    if (tool === "rect" || tool === "room") {
       const a = snapPoint(p, null, [], undefined, e.altKey).p;
       drag.current = { kind: "rect", from: a };
       setDraft([a, a]);
@@ -634,8 +736,12 @@ export default function FloorplanEditor() {
       case "rect": {
         const [a, b] = draft ?? [g.from, g.from];
         if (!cancelled && Math.abs(b[0] - a[0]) > px(4) && Math.abs(b[1] - a[1]) > px(4)) {
-          commit((d) => ({ ...d, shapes: [...d.shapes, { id: newId(), type: "rect", x: Math.min(a[0], b[0]), y: Math.min(a[1], b[1]),
-            w: Math.abs(b[0] - a[0]), h: Math.abs(b[1] - a[1]), colour }] }));
+          const [x0, y0, x1, y1] = [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])];
+          // A room: four walls round the box, joined at the corners.
+          const shape: Shape = tool === "room"
+            ? { id: newId(), type: "line", points: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]], closed: true, colour, ...(wallT > 0 ? { thickness: wallT } : {}) }
+            : { id: newId(), type: "rect", x: x0, y: y0, w: x1 - x0, h: y1 - y0, colour };
+          commit((d) => ({ ...d, shapes: [...d.shapes, shape] }));
         }
         setDraft(null);
         if (e.pointerType === "touch") setCursor(null);
@@ -706,6 +812,12 @@ export default function FloorplanEditor() {
         if (draft) { setDraft(null); return; }
         if (tool !== homeTool) { chooseTool(homeTool); return; }
         setSelected(null);
+        return;
+      }
+      if (draft?.length && scaled && (tool === "line" || tool === "area") && /^[0-9.,]$/.test(e.key) && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();   // typing a length: it goes into the box, which takes the rest
+        setLenText((t) => t + e.key);
+        lenInput.current?.focus();
         return;
       }
       if (e.key === "Enter" && draft) { finishPath(); return; }
@@ -796,6 +908,22 @@ export default function FloorplanEditor() {
   function drawShape(s: Shape) {
     const isSel = s.id === selected;
     const common = { "data-shape": s.id, className: `fp-shape ${isSel ? "sel" : ""}` };
+    if (s.type === "line" && s.thickness && scaled) {
+      const t = s.thickness * doc.px_per_m!, pts = s.points.map((p) => p.join(",")).join(" ");
+      const run = s.closed ? [...s.points, s.points[0]] : s.points;
+      const Shape = s.closed ? "polygon" : "polyline";
+      return (
+        <g key={s.id} {...common}>
+          <Shape points={pts} fill="none" stroke="transparent" strokeWidth={t} strokeLinejoin="miter" />
+          <Shape points={pts} fill="none" stroke="transparent" strokeWidth={HIT} vectorEffect="non-scaling-stroke" />
+          {isSel && <Shape points={pts} fill="none" stroke="#1c7ed6" strokeWidth={1.5} strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />}
+          {run.slice(1).map((p, i) => {
+            const a = run[i], nx = -(p[1] - a[1]) / (dist(a, p) || 1), ny = (p[0] - a[0]) / (dist(a, p) || 1), off = t / 2 + px(11);
+            return <g key={i}>{label((a[0] + p[0]) / 2 - nx * off, (a[1] + p[1]) / 2 - ny * off, lengthOf(a, p), shade(s.colour, -0.25))}</g>;
+          })}
+        </g>
+      );
+    }
     switch (s.type) {
       case "line": case "pen": {
         const pts = s.points.map((p) => p.join(",")).join(" ");
@@ -880,7 +1008,22 @@ export default function FloorplanEditor() {
   function drawDraft() {
     if (!draft) return null;
     const aim = cursor?.snap.p;
-    const pts = tool === "rect" || tool === "pen" ? draft : aim ? [...draft, aim] : draft;
+    const pts = tool === "rect" || tool === "room" || tool === "pen" ? draft : aim ? [...draft, aim] : draft;
+    if (tool === "room" && pts.length === 2) {
+      const [a, b] = pts, t = scaled ? wallT * doc.px_per_m! : 0;
+      const [x0, y0, w, h] = [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])];
+      return (
+        <g pointerEvents="none">
+          <rect x={x0} y={y0} width={w} height={h} fill="none" stroke={colour} strokeOpacity={0.35} strokeWidth={Math.max(t, px(2))} strokeLinejoin="miter" />
+          <rect x={x0} y={y0} width={w} height={h} fill="none" stroke={colour} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+          {scaled && <>
+            {label(x0 + w / 2, y0 - t / 2 - px(12), metres(w / doc.px_per_m!), colour)}
+            {label(x0 - t / 2 - px(26), y0 + h / 2, metres(h / doc.px_per_m!), colour)}
+            {t > 0 && label(x0 + w / 2, y0 + h / 2, `inside ${metres(Math.max(0, w - t) / doc.px_per_m!)} × ${metres(Math.max(0, h - t) / doc.px_per_m!)}`, colour)}
+          </>}
+        </g>
+      );
+    }
     if (tool === "rect" && pts.length === 2) {
       const [a, b] = pts;
       const w = Math.abs(b[0] - a[0]), h = Math.abs(b[1] - a[1]);
@@ -902,6 +1045,9 @@ export default function FloorplanEditor() {
     const tint = tool === "scale" ? "#e8590c" : colour;
     return (
       <g pointerEvents="none">
+        {tool === "line" && scaled && wallT > 0 && pts.length >= 2 && (
+          <polyline points={line} fill="none" stroke={tint} strokeOpacity={0.3} strokeWidth={wallT * doc.px_per_m!} strokeLinejoin="miter" strokeLinecap="square" />
+        )}
         {tool === "area" && pts.length >= 3
           ? <polygon points={line} fill={tint} fillOpacity={0.1} stroke={tint} strokeWidth={stroke} strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />
           : <polyline points={line} fill="none" stroke={tint} strokeWidth={stroke} strokeDasharray={tool === "scale" ? "5 4" : undefined} vectorEffect="non-scaling-stroke" />}
@@ -924,6 +1070,12 @@ export default function FloorplanEditor() {
           return <line x1={fx - Math.cos(r) * L} y1={fy - Math.sin(r) * L} x2={fx + Math.cos(r) * L} y2={fy + Math.sin(r) * L}
             stroke={accent} strokeWidth={1} strokeDasharray="5 5" opacity={0.75} vectorEffect="non-scaling-stroke" pointerEvents="none" />;
         })()}
+        {guide?.align?.map((v, i) => (
+          <line key={i} x1={v[0]} y1={v[1]} x2={guide.p[0]} y2={guide.p[1]} stroke="#e8590c" strokeWidth={1} strokeDasharray="3 4"
+            vectorEffect="non-scaling-stroke" pointerEvents="none" />
+        ))}
+        {guide?.kind === "edge" && <rect x={guide.p[0] - px(6)} y={guide.p[1] - px(6)} width={px(12)} height={px(12)} fill="none" stroke={accent}
+          strokeWidth={2} vectorEffect="non-scaling-stroke" pointerEvents="none" />}
         {guide?.kind === "vertex" && <circle cx={guide.p[0]} cy={guide.p[1]} r={px(9)} fill="none" stroke={accent} strokeWidth={2}
           vectorEffect="non-scaling-stroke" pointerEvents="none" />}
         {cursor && !cursor.touch && POINT_TOOLS.has(tool) && <circle cx={cursor.snap.p[0]} cy={cursor.snap.p[1]} r={px(3)} fill={accent} pointerEvents="none" />}
@@ -948,8 +1100,28 @@ export default function FloorplanEditor() {
 
   // The shapes drawn once per change or zoom, not on every pan frame.
   // Room areas and boxes go underneath, so furniture and walls drawn in them stay visible.
-  const shapesLayer = useMemo(() => [...doc.shapes].sort((a, b) => Number(a.type !== "area" && a.type !== "rect") - Number(b.type !== "area" && b.type !== "rect"))
-    .map(drawShape), [doc.shapes, doc.px_per_m, k, selected]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const shapesLayer = useMemo(() => {
+    const under = (s: Shape) => s.type === "area" || s.type === "rect";
+    const walls = scaled ? doc.shapes.filter((s): s is Line => s.type === "line" && !!s.thickness) : [];
+    const band = (s: Line, width: number, stroke: string, key: string) => {
+      const pts = s.points.map((p) => p.join(",")).join(" ");
+      return s.closed
+        ? <polygon key={key} points={pts} fill="none" stroke={stroke} strokeWidth={width} strokeLinejoin="miter" strokeMiterlimit={8} />
+        : <polyline key={key} points={pts} fill="none" stroke={stroke} strokeWidth={width} strokeLinejoin="miter" strokeMiterlimit={8} strokeLinecap="square" />;
+    };
+    const edge = 2.2 / k;   // the wall's outline, in screen pixels
+    return [
+      ...doc.shapes.filter(under).map(drawShape),
+      walls.length > 0 && (
+        <g key="walls" className="fp-walls" pointerEvents="none">
+          {walls.map((s) => band(s, s.thickness! * doc.px_per_m! + edge * 2, s.colour, `o${s.id}`))}
+          {walls.map((s) => band(s, s.thickness! * doc.px_per_m!, shade(s.colour, 0.78), `f${s.id}`))}
+          {walls.map((s) => band(s, s.thickness! * doc.px_per_m!, "url(#fp-hatch)", `h${s.id}`))}
+        </g>
+      ),
+      ...doc.shapes.filter((s) => !under(s)).map(drawShape),
+    ];
+  }, [doc.shapes, doc.px_per_m, k, selected]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   /** On touch, a magnifier above the finger while aiming, since the finger hides the very spot being placed. */
   function drawLoupe() {
@@ -983,7 +1155,8 @@ export default function FloorplanEditor() {
     { t: "pan", icon: <Hand />, label: "Pan", title: "Move around the plan. Or hold Space with any tool." },
     { t: "scale", icon: <DraftingCompass />, label: "Scale", title: "Click both ends of a length you know" },
     { t: "measure", icon: <Ruler />, label: "Measure", title: "Click both ends, or drag from one to the other" },
-    { t: "line", icon: <Slash />, label: "Wall", title: "Click each corner. Click the last one again to finish." },
+    { t: "line", icon: <BrickWall />, label: "Wall", title: "Click each corner (type a length to place the next one exactly). Click the last corner again to finish, or the first to close a room." },
+    { t: "room", icon: <LayoutPanelTop />, label: "Room", title: "Drag to draw a room: four walls, joined at the corners" },
     { t: "area", icon: <Pentagon />, label: "Area", title: "Click each corner. Click the first one to close." },
     { t: "rect", icon: <Square />, label: "Box", title: "Drag to draw a box" },
     { t: "pen", icon: <Pencil />, label: "Pen", title: "Draw freehand" },
@@ -1032,6 +1205,22 @@ export default function FloorplanEditor() {
           <button disabled={!future.length} title="Redo (Ctrl+Shift+Z)" onClick={redo}><Redo2 /></button>
           <button title="Fit to screen (0)" onClick={fit}><Maximize /></button>
         </div>
+        {(tool === "line" || tool === "room" || (selectedShape?.type === "line" && tool === "select")) && (
+          <label className="fp-wallpick" title="Wall thickness">
+            <BrickWall />
+            <select aria-label="Wall thickness" value={selectedShape?.type === "line" && tool === "select" ? (selectedShape.thickness ?? 0) : wallT}
+              onChange={(e) => {
+                const t = Number(e.target.value);
+                if (selectedShape?.type === "line" && tool === "select") update(selectedShape.id, (x) => (x.type === "line" ? { ...x, thickness: t || undefined } : x));
+                else setWallT(t);
+              }}>
+              {WALLS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              {!WALLS.some(([v]) => v === (selectedShape?.type === "line" && tool === "select" ? (selectedShape.thickness ?? 0) : wallT)) &&
+                <option value={selectedShape?.type === "line" && tool === "select" ? selectedShape.thickness : wallT}>
+                  {wallName(selectedShape?.type === "line" && tool === "select" ? selectedShape.thickness : wallT)}</option>}
+            </select>
+          </label>
+        )}
         {dirty && <button className="primary small-btn fp-quicksave" disabled={saving} onClick={() => save(false)} title="Save this version"><Save /> Save</button>}
         <div className="fp-colours" aria-label="Colour">
           {COLOURS.map((c) => <button key={c} className={colour === c ? "on" : ""} style={{ background: c }} aria-label={`Colour ${c}`}
@@ -1048,6 +1237,11 @@ export default function FloorplanEditor() {
             <svg width="100%" height="100%" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
               onPointerCancel={onPointerUp} onPointerLeave={(e) => { if (!drag.current && e.pointerType !== "touch") setCursor(null); }}
               onDoubleClick={() => finishPath()} style={{ touchAction: "none" }}>
+              <defs>
+                <pattern id="fp-hatch" width={6 / k} height={6 / k} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                  <line x1={0} y1={0} x2={0} y2={6 / k} stroke="rgba(0,0,0,0.22)" strokeWidth={1 / k} />
+                </pattern>
+              </defs>
               <g transform={`translate(${view.tx} ${view.ty}) scale(${k})`}>
                 <image href={bg.url} width={bg.w} height={bg.h} />
                 {shapesLayer}
@@ -1093,7 +1287,15 @@ export default function FloorplanEditor() {
           )}
           {draft && (tool === "line" || tool === "area") && (
             <div className="fp-float">
-              <span className="small fp-float-hint">{COARSE ? "Tap" : "Click"} the last corner again, or</span>
+              {scaled && (
+                <form className="fp-len" onSubmit={(e) => { e.preventDefault(); const m = parseLength(lenText); if (m) placeAtLength(m); }}>
+                  <input ref={lenInput} value={lenText} inputMode="decimal" placeholder="Length" aria-label="Length of the next side, e.g. 3.6 or 3600"
+                    onChange={(e) => setLenText(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Escape") { setLenText(""); e.currentTarget.blur(); } }} />
+                  {lenText && parseLength(lenText) && <button className="small-btn" type="submit">Place {metres(parseLength(lenText)!)}</button>}
+                </form>
+              )}
+              <span className="small fp-float-hint">{COARSE ? "Tap" : "Click"} the last corner again{tool === "line" ? ", or the first to close" : ""}, or</span>
               <button className="primary small-btn" onClick={() => finishPath()}>Finish</button>
               <button className="small-btn" onClick={() => setDraft(null)}>Cancel</button>
             </div>
@@ -1154,6 +1356,9 @@ export default function FloorplanEditor() {
                 <label className="small">Note<input value={selectedShape.text}
                   onChange={(e) => update(selectedShape.id, (s) => (s.type === "text" ? { ...s, text: e.target.value } : s))} /></label>
               )}
+              {selectedShape.type === "line" && (
+                <WallEditor s={selectedShape} scaled={scaled} pxPerM={doc.px_per_m} onChange={(s) => update(s.id, () => s)} />
+              )}
               {selectedShape.type === "rect" && scaled && (
                 <div className="small">{metres(selectedShape.w / doc.px_per_m!)} × {metres(selectedShape.h / doc.px_per_m!)}</div>
               )}
@@ -1163,6 +1368,20 @@ export default function FloorplanEditor() {
               </div>
             </section>
           )}
+
+          <section>
+            <div className="section-title"><BrickWall /> Walls</div>
+            <div className="chips fp-wallchips">
+              {WALLS.map(([v, l]) => (
+                <button key={v} className={`chip ${Math.abs(wallT - v) < 0.0005 ? "on" : ""}`} onClick={() => setWallT(v)}>{l}</button>
+              ))}
+            </div>
+            <div className="tiny muted">New walls and rooms are drawn this thick, centred on the corners you place.</div>
+            <div className="row">
+              <button className="small-btn" onClick={() => { chooseTool("line"); setSheetOpen(false); }}><BrickWall /> Draw walls</button>
+              <button className="small-btn" onClick={() => { chooseTool("room"); setSheetOpen(false); }}><LayoutPanelTop /> Draw a room</button>
+            </div>
+          </section>
 
           <section>
             <div className="section-title"><Sofa /> Furniture</div>
@@ -1194,10 +1413,39 @@ export default function FloorplanEditor() {
           <div className="tiny muted fp-keys">
             <p>Scroll or pinch to zoom. Drag or hold Space to pan. 0 fits the plan.</p>
             <p>Drag handles to resize, the round handle to rotate. Alt turns off snapping.</p>
+            <p>Walls snap to corners, onto other walls, and level with other corners. While drawing one, type a length (3.6 or 3600) and press Enter to place the next corner exactly.</p>
             <p>Arrows nudge · R rotates 90° · Delete removes · Ctrl+Z undoes · Esc cancels</p>
           </div>
         </aside>}
       </div>
+    </div>
+  );
+}
+
+/** A wall or line: its thickness (a preset or any mm), open or closed into a room, and its sides' lengths. */
+function WallEditor({ s, scaled, pxPerM, onChange }: { s: Line; scaled: boolean; pxPerM: number | null; onChange: (s: Line) => void }) {
+  const [mm, setMm] = useState(String(Math.round((s.thickness ?? 0) * 1000)));
+  useEffect(() => { setMm(String(Math.round((s.thickness ?? 0) * 1000))); }, [s.id, s.thickness]);
+  const apply = () => {
+    const n = Number(mm.replace(/[^\d.]/g, ""));
+    if (Number.isFinite(n) && n >= 0 && n <= 800) onChange({ ...s, thickness: n > 0 ? n / 1000 : undefined });
+  };
+  const run = s.closed ? [...s.points, s.points[0]] : s.points;
+  const total = scaled && pxPerM ? run.slice(1).reduce((t, p, i) => t + dist(run[i], p), 0) / pxPerM : null;
+  return (
+    <div className="stack" style={{ gap: 6 }}>
+      <div className="chips fp-wallchips">
+        {WALLS.map(([v, l]) => (
+          <button key={v} className={`chip ${Math.abs((s.thickness ?? 0) - v) < 0.0005 ? "on" : ""}`} onClick={() => onChange({ ...s, thickness: v || undefined })}>{l}</button>
+        ))}
+      </div>
+      <label className="small">Thickness (mm)<input value={mm} inputMode="numeric" onChange={(e) => setMm(e.target.value)} onBlur={apply}
+        onKeyDown={(e) => e.key === "Enter" && apply()} /></label>
+      {s.points.length >= 3 && (
+        <label className="small fp-check"><input type="checkbox" checked={!!s.closed} onChange={(e) => onChange({ ...s, closed: e.target.checked || undefined })} />
+          Closed (the last corner joins the first)</label>
+      )}
+      {total != null && <div className="small muted">{run.length - 1} {run.length - 1 === 1 ? "side" : "sides"}, {metres(total)} along the centre line</div>}
     </div>
   );
 }

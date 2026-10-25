@@ -1923,3 +1923,8 @@ a.plan-open:active { transform: scale(0.98); transition-duration: 0ms; }
   .fp-toolgroup { padding: 0 3px; }
   .fp-actions { margin-left: 0; }
 }
+/* A selected piece: its usual colour (a split swatch) beside the others, and the colour picker in the panel. */
+.fp-page .fp-colours .fp-default { background: linear-gradient(135deg, #fff 0 50%, #c9cdd0 50% 100%); }
+.fp-colourpick { display: inline-flex; align-items: center; gap: 6px; }
+.fp-colourpick input { width: 40px; height: 30px; padding: 2px; }
+.fp-page .fp-optbtn.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }

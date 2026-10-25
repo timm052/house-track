@@ -57,6 +57,11 @@ function plain(k: Kit) {
   rect(k, 0, 0, k.w, k.h, { rx: k.m(0.03), fill: k.body, sw: 1.5 });
 }
 
+function plainRound(k: Kit) {
+  ellipse(k, k.w / 2, k.h / 2, k.w / 2, k.h / 2, { fill: k.body, sw: 1.5 });
+  ellipse(k, k.w / 2, k.h / 2, k.w * 0.38, k.h * 0.38, { stroke: k.accent, sw: 0.8 });
+}
+
 function bed(k: Kit) {
   const { w, h, m } = k;
   rect(k, 0, 0, w, h, { rx: m(0.05), fill: k.body, sw: 1.5 });
@@ -487,6 +492,28 @@ function lathe(k: Kit) {
   line(k, w * 0.22, h / 2, w * 0.82, h / 2, { stroke: TIMBER, sw: 3 });   // a spindle turning
 }
 
+/** A metal-working lathe: the bed and chip tray, the headstock and chuck on the left, the carriage and cross slide with
+ *  its tool post, and the tailstock on the right. */
+function metalLathe(k: Kit) {
+  const { w, h, m } = k;
+  rect(k, 0, h * 0.08, w, h * 0.84, { rx: m(0.03), fill: "#cfd5d8", sw: 1.5 });   // chip tray
+  rect(k, w * 0.04, h * 0.32, w * 0.92, h * 0.28, { fill: STEEL, sw: 1.2 });   // bed and ways
+  line(k, w * 0.04, h * 0.42, w * 0.96, h * 0.42, { sw: 0.5 });
+  line(k, w * 0.04, h * 0.5, w * 0.96, h * 0.5, { sw: 0.5 });
+  rect(k, 0, 0, w * 0.26, h * 0.62, { rx: m(0.03), fill: k.dark, sw: 1.5 });   // headstock
+  circle(k, w * 0.29, h * 0.36, Math.min(m(0.1), h * 0.2), { fill: "#b8c0c4", sw: 1.2 });   // chuck
+  for (const a of [0, 120, 240]) {
+    const t = (a * Math.PI) / 180, r = Math.min(m(0.1), h * 0.2);
+    line(k, w * 0.29, h * 0.36, w * 0.29 + Math.cos(t) * r, h * 0.36 + Math.sin(t) * r, { sw: 1 });
+  }
+  line(k, w * 0.33, h * 0.36, w * 0.82, h * 0.36, { stroke: TIMBER, sw: 2.5 });   // the work between centres
+  rect(k, w * 0.48, h * 0.24, w * 0.14, h * 0.62, { rx: m(0.02), fill: k.accent, sw: 1.2 });   // carriage and apron
+  rect(k, w * 0.51, h * 0.4, w * 0.08, h * 0.14, { fill: k.dark, sw: 0.8 });   // tool post
+  circle(k, w * 0.55, h * 0.82, m(0.05), { fill: SCREEN, stroke: "none" });   // handwheel
+  rect(k, w * 0.82, h * 0.26, w * 0.12, h * 0.32, { rx: m(0.02), fill: k.accent, sw: 1.2 });   // tailstock
+  circle(k, w * 0.97, h * 0.42, m(0.035), { fill: SCREEN, stroke: "none" });
+}
+
 function dustExtractor(k: Kit) {
   const { w, h, m } = k, cx = w / 2, cy = h / 2, r = Math.min(w, h) / 2;
   circle(k, cx, cy, r, { fill: k.accent, sw: 1.5 });
@@ -709,6 +736,37 @@ function bicycle(k: Kit) {
   ellipse(k, cx, h * 0.62, m(0.05), m(0.12), { fill: k.dark, sw: 0.8 });   // saddle
 }
 
+// ─── animals ───────────────────────────────────────────────────────────
+/** An animal sitting down, seen from above, facing the front (+y): its rump and back behind, its head up over its
+ *  shoulders with the muzzle forward, the back feet out in front either side and the front paws between them. */
+function sittingAnimal(c: { fur: string; dark: string; limbs: string; ears: string; muzzle: string; patches?: string }) {
+  return (k: Kit) => {
+    const { w, h } = k, cx = w / 2, outline = { stroke: shade(c.dark, -0.2), sw: 1.2 };
+    // back feet, soles toward the front
+    for (const s of [-1, 1]) {
+      ellipse(k, cx + s * w * 0.32, h * 0.78, w * 0.14, h * 0.17, { fill: c.limbs, ...outline });
+      ellipse(k, cx + s * w * 0.32, h * 0.84, w * 0.08, h * 0.08, { fill: shade(c.limbs, 0.25), stroke: "none" });
+      for (const t of [-1, 0, 1]) circle(k, cx + s * w * 0.32 + t * w * 0.05, h * 0.935, w * 0.022, { fill: shade(c.limbs, 0.25), stroke: "none" });
+    }
+    // the rump and back, widest behind
+    ellipse(k, cx, h * 0.4, w * 0.47, h * 0.38, { fill: c.fur, ...outline, sw: 1.5 });
+    // shoulders and front legs reaching down to the paws
+    ellipse(k, cx, h * 0.5, w * 0.36, h * 0.17, { fill: c.limbs, ...outline });
+    for (const s of [-1, 1]) {
+      ellipse(k, cx + s * w * 0.13, h * 0.7, w * 0.09, h * 0.15, { fill: c.limbs, ...outline });
+      for (const t of [-1, 0, 1]) circle(k, cx + s * w * 0.13 + t * w * 0.03, h * 0.83, w * 0.016, { fill: shade(c.limbs, -0.3), stroke: "none" });
+    }
+    // the head, ears and muzzle
+    const hy = h * 0.53, r = w * 0.21;
+    for (const s of [-1, 1]) circle(k, cx + s * r * 0.82, hy - r * 0.62, r * 0.36, { fill: c.ears, ...outline });
+    circle(k, cx, hy, r, { fill: c.fur, ...outline, sw: 1.4 });
+    if (c.patches) for (const s of [-1, 1]) ellipse(k, cx + s * r * 0.42, hy + r * 0.2, r * 0.26, r * 0.34, { fill: c.patches, stroke: "none" });
+    for (const s of [-1, 1]) circle(k, cx + s * r * 0.4, hy + r * 0.22, r * 0.09, { fill: c.patches ? WHITE : SCREEN, stroke: "none" });
+    ellipse(k, cx, hy + r * 0.82, r * 0.42, r * 0.36, { fill: c.muzzle, ...outline, sw: 1 });
+    ellipse(k, cx, hy + r * 1.0, r * 0.17, r * 0.12, { fill: SCREEN, stroke: "none" });
+  };
+}
+
 // ─── plan symbols: doors, windows, stairs ──────────────────────────────
 /** A door open at 90°, hinged at the bottom corner(s), with its swing: the wall runs along the bottom edge. */
 function door(leaves: 1 | 2) {
@@ -767,12 +825,15 @@ const SYMBOLS: Record<string, (k: Kit) => void> = {
   door: door(1), "door-wide": door(1), "double-door": door(2), "sliding-door": slidingDoor, window: windowSymbol, stairs,
   workbench: workbench(1), "workbench-large": workbench(1), "woodwork-bench": workbench(2, true), "assembly-table": assemblyTable,
   "tool-chest": toolChest, shelving, "table-saw": tableSaw(true), "jobsite-saw": tableSaw(false), "mitre-saw": mitreSaw, bandsaw,
-  "drill-press": drillPress, jointer, planer, lathe, "dust-extractor": dustExtractor, compressor,
+  "drill-press": drillPress, jointer, planer, lathe, "metal-lathe": metalLathe, "mini-lathe": metalLathe, "dust-extractor": dustExtractor, compressor,
   "printer-open": printerOpen, "printer-enclosed": printerEnclosed, "printer-large": printerEnclosed, "resin-printer": resinPrinter,
   "cnc-desktop": cnc(true), "cnc-open": cnc(false), "laser-desktop": laser(false), "laser-co2": laser(true),
   "pottery-wheel": potteryWheel, "kiln-top": kiln(false), "kiln-front": kiln(true), "wedging-table": wedgingTable,
   "slab-roller": slabRoller, "glaze-station": glazeStation, "ware-rack": wareRack, "clay-sink": claySink, "pug-mill": pugMill,
   "spray-booth": sprayBooth,
+  "custom-box": plain, "custom-round": plainRound,
+  panda: sittingAnimal({ fur: "#f7f5f0", dark: "#2b2b2b", limbs: "#2b2b2b", ears: "#2b2b2b", muzzle: "#f7f5f0", patches: "#2b2b2b" }),
+  bear: sittingAnimal({ fur: "#8a5a34", dark: "#5b3a20", limbs: "#6e4628", ears: "#6e4628", muzzle: "#c49a6c" }),
   "car-hatch": car, "car-small": car, "car-cx30": car, "car-midsuv": car, "people-mover": car, van: car, ute, "ute-large": ute, trailer, motorbike, bicycle,
 };
 /** Pieces drawn with chairs around them, which reach past the table's own size. */
@@ -782,16 +843,18 @@ const WITH_CHAIRS = new Set(["table-4", "table-6", "table-8", "round-table", "ou
 const REACHES_OUT = new Set(["workbench", "workbench-large", "woodwork-bench", "slab-roller", "clay-sink", "ute", "ute-large", "trailer", "car",
   "suv", "car-hatch", "car-small", "car-cx30", "car-midsuv", "people-mover", "van"]);
 
-/** A piece of furniture w × h plan pixels, at ppm pixels per metre, centred on the origin. */
-export function FurnitureSymbol({ item, w, h, ppm, thin = 1 }: { item: string; w: number; h: number; ppm: number; thin?: number }) {
+/** A piece of furniture w × h plan pixels, at ppm pixels per metre, centred on the origin: in its room group's colour,
+ *  or `colour` if it's been given one, and mirrored left to right with `flip`. */
+export function FurnitureSymbol({ item, w, h, ppm, thin = 1, colour, flip = false }: { item: string; w: number; h: number; ppm: number; thin?: number;
+                                                                                    colour?: string; flip?: boolean }) {
   const f = FURNITURE_BY_KEY.get(item);
-  const base = f ? GROUP_COLOUR[f.group] : "#8a8f93";
+  const base = colour ?? (f ? GROUP_COLOUR[f.group] : "#8a8f93");
   const k: Kit = {
     w, h, m: (metres) => metres * ppm, thin, out: [],
     body: shade(base, 0.78), accent: shade(base, 0.45), dark: shade(base, 0.05), line: shade(base, -0.5),
   };
   (SYMBOLS[item] ?? plain)(k);
-  return <g transform={`translate(${-w / 2} ${-h / 2})`}>{k.out}</g>;
+  return <g transform={`${flip ? "scale(-1 1) " : ""}translate(${-w / 2} ${-h / 2})`}>{k.out}</g>;
 }
 
 /** The piece drawn small for the furniture list, fitted to the box. */

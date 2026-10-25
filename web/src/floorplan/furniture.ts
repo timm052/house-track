@@ -3,10 +3,14 @@
 // plan can't show (a fridge has to fit its cavity under the cupboards).
 
 export type FurnitureItem = { key: string; label: string; w: number; h: number; group: Group; round?: boolean; tall?: number };
-export type Group = "Bedroom" | "Living" | "Dining" | "Kitchen & laundry" | "Fridges" | "Bathroom" | "Study" | "Workshop"
-  | "3D printing & CNC" | "Pottery studio" | "Cars" | "Outside" | "Doors & windows";
+export type Group = "Custom" | "Bedroom" | "Living" | "Dining" | "Kitchen & laundry" | "Fridges" | "Bathroom" | "Study" | "Workshop"
+  | "3D printing & CNC" | "Pottery studio" | "Cars" | "Outside" | "Animals" | "Doors & windows";
 
 export const FURNITURE: FurnitureItem[] = [
+  // Anything that isn't in the list: name it and size it once it's on the plan.
+  { key: "custom-box", label: "Custom item", w: 1.0, h: 0.6, group: "Custom" },
+  { key: "custom-round", label: "Custom round item", w: 0.8, h: 0.8, round: true, group: "Custom" },
+
   { key: "king", label: "King bed", w: 1.83, h: 2.03, group: "Bedroom" },
   { key: "queen", label: "Queen bed", w: 1.53, h: 2.03, group: "Bedroom" },
   { key: "double", label: "Double bed", w: 1.38, h: 1.88, group: "Bedroom" },
@@ -73,6 +77,8 @@ export const FURNITURE: FurnitureItem[] = [
   { key: "jointer", label: "Jointer", w: 1.5, h: 0.5, tall: 0.82, group: "Workshop" },
   { key: "planer", label: "Thicknesser", w: 0.6, h: 0.65, tall: 0.95, group: "Workshop" },
   { key: "lathe", label: "Wood lathe", w: 1.8, h: 0.5, tall: 1.15, group: "Workshop" },
+  { key: "metal-lathe", label: "Metal lathe", w: 1.6, h: 0.7, tall: 1.4, group: "Workshop" },
+  { key: "mini-lathe", label: "Mini lathe (benchtop)", w: 0.9, h: 0.4, tall: 0.4, group: "Workshop" },
   { key: "dust-extractor", label: "Dust extractor", w: 0.6, h: 0.6, tall: 1.9, round: true, group: "Workshop" },
   { key: "compressor", label: "Air compressor", w: 0.75, h: 0.4, tall: 0.7, group: "Workshop" },
 
@@ -118,6 +124,10 @@ export const FURNITURE: FurnitureItem[] = [
   { key: "bbq", label: "BBQ", w: 1.4, h: 0.6, group: "Outside" },
   { key: "trampoline", label: "Trampoline", w: 3.0, h: 3.0, group: "Outside", round: true },
 
+  // Sitting down, seen from above, at life size (a giant panda sits about 0.9 m across; a brown bear a good deal more).
+  { key: "panda", label: "Panda (sitting)", w: 0.9, h: 1.0, tall: 1.0, group: "Animals" },
+  { key: "bear", label: "Brown bear (sitting)", w: 1.2, h: 1.35, tall: 1.4, group: "Animals" },
+
   // Plan symbols. A door is as deep as it is wide (its swing); the wall is along its bottom edge.
   { key: "door", label: "Door (820)", w: 0.82, h: 0.82, group: "Doors & windows" },
   { key: "door-wide", label: "Wide door (920)", w: 0.92, h: 0.92, group: "Doors & windows" },
@@ -128,12 +138,13 @@ export const FURNITURE: FurnitureItem[] = [
 ];
 
 export const FURNITURE_BY_KEY = new Map(FURNITURE.map((f) => [f.key, f]));
-export const GROUPS: Group[] = ["Bedroom", "Living", "Dining", "Kitchen & laundry", "Fridges", "Bathroom", "Study", "Workshop",
-  "3D printing & CNC", "Pottery studio", "Cars", "Outside", "Doors & windows"];
+export const GROUPS: Group[] = ["Custom", "Bedroom", "Living", "Dining", "Kitchen & laundry", "Fridges", "Bathroom", "Study", "Workshop",
+  "3D printing & CNC", "Pottery studio", "Cars", "Outside", "Animals", "Doors & windows"];
 
 /** Fill colour per room group, so a busy plan still reads at a glance. */
 export const GROUP_COLOUR: Record<Group, string> = {
+  Custom: "#6f8fa6",
   Bedroom: "#6d8fd6", Living: "#d98b5f", Dining: "#c9a24a", "Kitchen & laundry": "#5fa58f",
   Fridges: "#7d97a8", Bathroom: "#62a8c9", Study: "#9a7fc9", Workshop: "#b0814f", "3D printing & CNC": "#5f87b0",
-  "Pottery studio": "#b86f58", Cars: "#7a8790", Outside: "#7f9a6d", "Doors & windows": "#6f757a",
+  "Pottery studio": "#b86f58", Cars: "#7a8790", Outside: "#7f9a6d", Animals: "#8a6a4f", "Doors & windows": "#6f757a",
 };

@@ -97,6 +97,13 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.22
+
+- **Floor plans: edit the pieces you place.** A selected piece has square handles to resize it on the plan (from its side, its front or its corner, in 5 cm steps; hold Alt for any size), its own colour (or back to its usual one), and **Mirror** (M) for pieces that aren't the same both ways. The options row under the tools shows these while a piece is selected; the panel has a colour picker too.
+- **Custom pieces:** a box and a round item at the top of the list, to name and size as anything that isn't in it (they always show their name).
+- **New pieces:** a metal lathe and a benchtop mini lathe (Workshop), and an **Animals** group with a giant panda and a brown bear, sitting down, seen from above at life size.
+- No database changes.
+
 ### 0.4.21
 
 - **Floor plans: a Door tool.** Click a wall to put a door or window in it: it sits on the wall's centre line, turns with it, takes its thickness and cuts its opening, so the plan shows through. Drag it along the wall to move it, or away from the wall to free it; click anywhere off a wall for one on its own (with a handle to turn it). Kinds: hinged door, double doors, sliding door, cavity slider, barn door, bifold doors, garage door (with the space a panel-lift door swings up into), a plain opening, and a window, each in common widths or any width in mm. **F** flips the hinge, **Shift+F** the swing.

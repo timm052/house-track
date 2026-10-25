@@ -28,7 +28,8 @@ type Shape =
   | { id: string; type: "pen"; points: Pt[]; colour: string }
   | { id: string; type: "measure"; a: Pt; b: Pt; colour: string }
   | { id: string; type: "text"; x: number; y: number; text: string; colour: string }
-  | { id: string; type: "furniture"; item: string; label: string; x: number; y: number; w: number; h: number; rotation: number }
+  // A piece of furniture: its size in metres, turned by `rotation`; `colour` if it's been given its own, `flip` mirrored.
+  | { id: string; type: "furniture"; item: string; label: string; x: number; y: number; w: number; h: number; rotation: number; colour?: string; flip?: boolean }
   | Door;
 type Doc = { name: string; px_per_m: number | null; shapes: Shape[] };
 type Markup = Doc & { id: string; attachment_id: string; created_at: string; created_by: string; updated_at: string; updated_by: string };
@@ -41,6 +42,9 @@ const WALLS: [number, string][] = [[0, "Line"], [0.11, "Internal 110"], [0.25, "
 const wallName = (t: number | undefined) => WALLS.find(([v]) => Math.abs(v - (t ?? 0)) < 0.0005)?.[1] ?? `${Math.round((t ?? 0) * 1000)} mm`;
 
 const COLOURS = ["#d9480f", "#1f5a70", "#2b8a3e", "#6741d9", "#212529"];
+/** Colours a piece of furniture can be given, besides its room group's own. */
+const PIECE_COLOURS = ["#6d8fd6", "#d98b5f", "#c9a24a", "#5fa58f", "#9a7fc9", "#d16b8f", "#7a8790", "#3b3f42"];
+type Piece = Extract<Shape, { type: "furniture" }>;
 /** The door and window pieces from before the Door tool: still drawn on saved plans, no longer offered. */
 const OLD_DOORS = new Set(["door", "door-wide", "double-door", "sliding-door", "window"]);
 // Fingers need bigger targets than a mouse: thin lines and corners get a wider invisible hit area on touch screens.
@@ -558,7 +562,10 @@ export default function FloorplanEditor() {
       case "furniture": {
         if (!scaled) return [];
         const r = (s.rotation * Math.PI) / 180, d = (s.h * doc.px_per_m!) / 2 + px(28);
-        return [{ id: "rot", p: [s.x + Math.sin(r) * d, s.y - Math.cos(r) * d], rotate: true }];
+        const hw = (s.w * doc.px_per_m!) / 2, hh = (s.h * doc.px_per_m!) / 2;
+        const at = (lx: number, ly: number): Pt => [s.x + lx * Math.cos(r) - ly * Math.sin(r), s.y + lx * Math.sin(r) + ly * Math.cos(r)];
+        return [{ id: "rot", p: [s.x + Math.sin(r) * d, s.y - Math.cos(r) * d], rotate: true },
+                { id: "e", p: at(hw, 0) }, { id: "s", p: at(0, hh) }, { id: "se", p: at(hw, hh) }];
       }
       case "door": {
         if (!scaled || s.host) return [];   // in a wall, it turns with the wall
@@ -572,6 +579,14 @@ export default function FloorplanEditor() {
   /** `s` with its handle dragged to `p`: a corner or end moved (snapping as when drawing), a box resized from the
    *  opposite corner, a piece of furniture turned in 15° steps (Alt for any angle). */
   function applyHandle(s: Shape, handle: string, p: Pt, free: boolean): { shape: Shape; snap: Snap; note?: string } {
+    if (s.type === "furniture" && handle !== "rot") {
+      // Resize about the centre, in the piece's own turned frame, to the centimetre (5 cm unless Alt is held).
+      const r = (-s.rotation * Math.PI) / 180, dx = p[0] - s.x, dy = p[1] - s.y;
+      const lx = dx * Math.cos(r) - dy * Math.sin(r), ly = dx * Math.sin(r) + dy * Math.cos(r);
+      const step = free ? 0.01 : 0.05, round = (n: number) => Number(Math.max(0.1, Math.round(n / step) * step).toFixed(2));
+      const w = handle === "s" ? s.w : round((2 * Math.abs(lx)) / doc.px_per_m!), h = handle === "e" ? s.h : round((2 * Math.abs(ly)) / doc.px_per_m!);
+      return { shape: { ...s, w, h }, snap: { p, kind: null }, note: `${w.toFixed(2)} × ${h.toFixed(2)} m` };
+    }
     if (s.type === "furniture" || s.type === "door") {
       let deg = (Math.atan2(p[1] - s.y, p[0] - s.x) * 180) / Math.PI + 90;
       if (!free) deg = Math.round(deg / 15) * 15;
@@ -888,6 +903,10 @@ export default function FloorplanEditor() {
         update(selectedShape.id, (s) => (s.type === "door" ? { ...s, rotation: (s.rotation + (e.shiftKey ? 15 : 90)) % 360 } : s));
         return;
       }
+      if (e.key.toLowerCase() === "m" && selectedShape?.type === "furniture") {
+        update(selectedShape.id, (s) => (s.type === "furniture" ? { ...s, flip: !s.flip || undefined } : s));
+        return;
+      }
       if (e.key.toLowerCase() === "r" && selectedShape?.type === "furniture") {
         update(selectedShape.id, (s) => (s.type === "furniture" ? { ...s, rotation: (s.rotation + (e.shiftKey ? 15 : 90)) % 360 } : s));
       }
@@ -1055,11 +1074,11 @@ export default function FloorplanEditor() {
         const item = FURNITURE_BY_KEY.get(s.item);
         const ppm = doc.px_per_m!, w = s.w * ppm, h = s.h * ppm;
         // The drawing says what it is; the name and size show when it's selected, or when it's been renamed.
-        const showText = isSel || !item || s.label !== item.label;
+        const showText = isSel || !item || s.label !== item.label || item.group === "Custom";
         return (
           <g key={s.id} {...common} transform={`translate(${s.x} ${s.y}) rotate(${s.rotation})`}>
             <rect x={-w / 2} y={-h / 2} width={w} height={h} fill="transparent" />
-            <FurnitureSymbol item={s.item} w={w} h={h} ppm={ppm} />
+            <FurnitureSymbol item={s.item} w={w} h={h} ppm={ppm} colour={s.colour} flip={s.flip} />
             {showText && (
               <g transform={`rotate(${-s.rotation})`}>
                 {label(0, -fontSize * 0.6, s.label)}
@@ -1166,8 +1185,11 @@ export default function FloorplanEditor() {
             {h.rotate && (sel.type === "furniture" || sel.type === "door") && <line x1={sel.x} y1={sel.y} x2={h.p[0]} y2={h.p[1]} stroke={accent} strokeWidth={1}
               strokeDasharray="3 3" vectorEffect="non-scaling-stroke" pointerEvents="none" />}
             <circle cx={h.p[0]} cy={h.p[1]} r={px(COARSE ? 22 : 10)} fill="transparent" />
-            <circle className="fp-handle-dot" cx={h.p[0]} cy={h.p[1]} r={px(h.rotate ? 6.5 : 5.5)} fill={h.rotate ? accent : "#fff"} stroke={accent}
-              strokeWidth={2} vectorEffect="non-scaling-stroke" />
+            {sel.type === "furniture" && !h.rotate
+              ? <rect className="fp-handle-dot" x={h.p[0] - px(5.5)} y={h.p[1] - px(5.5)} width={px(11)} height={px(11)} rx={px(2)} fill="#fff" stroke={accent}
+                  strokeWidth={2} vectorEffect="non-scaling-stroke" />
+              : <circle className="fp-handle-dot" cx={h.p[0]} cy={h.p[1]} r={px(h.rotate ? 6.5 : 5.5)} fill={h.rotate ? accent : "#fff"} stroke={accent}
+                  strokeWidth={2} vectorEffect="non-scaling-stroke" />}
           </g>
         ))}
         {cursor?.note && label(cursor.snap.p[0], cursor.snap.p[1] - px(24), cursor.note, accent)}
@@ -1180,7 +1202,26 @@ export default function FloorplanEditor() {
     const sel = tool === "select" ? selectedShape : null;
     const walls = tool === "line" || tool === "room" || sel?.type === "line";
     const doors = tool === "door" || sel?.type === "door";
-    const coloured = ["line", "room", "area", "rect", "pen", "text", "measure"].includes(tool) || (sel != null && "colour" in sel);
+    const piece = sel?.type === "furniture" ? sel : null;
+    const coloured = !piece && (["line", "room", "area", "rect", "pen", "text", "measure"].includes(tool) || (sel != null && "colour" in sel));
+    if (piece) {
+      const set = (patch: Partial<Piece>) => update(piece.id, (x) => (x.type === "furniture" ? { ...x, ...patch } : x));
+      return (
+        <div className="fp-options" role="toolbar" aria-label="Options">
+          <div className="fp-opt fp-colours" aria-label="Colour">
+            <span className="fp-opt-label">Colour</span>
+            <button className={`fp-default ${!piece.colour ? "on" : ""}`} title="Its usual colour" aria-label="Its usual colour" onClick={() => set({ colour: undefined })} />
+            {PIECE_COLOURS.map((c) => <button key={c} className={piece.colour === c ? "on" : ""} style={{ background: c }} aria-label={`Colour ${c}`} onClick={() => set({ colour: c })} />)}
+          </div>
+          <div className="fp-opt">
+            <button className={`fp-optbtn ${piece.flip ? "on" : ""}`} aria-pressed={!!piece.flip} onClick={() => set({ flip: !piece.flip || undefined })} title="Mirror left to right (M)">
+              <FlipHorizontal2 /><span className="fp-tool-label">Mirror</span></button>
+            <button className="fp-optbtn" onClick={() => set({ rotation: (piece.rotation + 90) % 360 })} title="Turn 90° (R)"><RotateCw /><span className="fp-tool-label">90°</span></button>
+          </div>
+          <span className="tiny muted fp-opt-hint">Drag the square handles to resize, the round one to turn</span>
+        </div>
+      );
+    }
     if (!walls && !doors && !coloured) return null;
     const t = sel?.type === "line" ? sel.thickness ?? 0 : wallT;
     const setT = (v: number) => (sel?.type === "line" ? update(sel.id, (x) => (x.type === "line" ? { ...x, thickness: v || undefined } : x)) : setWallT(v));
@@ -1553,7 +1594,7 @@ export default function FloorplanEditor() {
           </section>
           <div className="tiny muted fp-keys">
             <p>Scroll or pinch to zoom. Drag or hold Space to pan. 0 fits the plan.</p>
-            <p>Drag handles to resize, the round handle to rotate. Alt turns off snapping.</p>
+            <p>Drag the square handles to resize, the round handle to rotate (Alt for any size or angle). M mirrors a piece.</p>
             <p>Walls snap to corners, onto other walls, and level with other corners. While drawing one, type a length (3.6 or 3600) and press Enter to place the next corner exactly.</p>
             <p>Arrows nudge · R rotates 90° · Delete removes · Ctrl+Z undoes · Esc cancels</p>
           </div>
@@ -1634,6 +1675,12 @@ function FurnitureEditor({ s, onChange }: { s: Extract<Shape, { type: "furniture
           onKeyDown={(e) => e.key === "Enter" && apply()} /></label>
         <label className="small">Depth (m)<input value={h} inputMode="decimal" onChange={(e) => setH(e.target.value)} onBlur={apply}
           onKeyDown={(e) => e.key === "Enter" && apply()} /></label>
+      </div>
+      <div className="row">
+        <label className="small fp-colourpick">Colour<input type="color" value={s.colour ?? GROUP_COLOUR[FURNITURE_BY_KEY.get(s.item)?.group ?? "Custom"]}
+          onChange={(e) => onChange({ ...s, colour: e.target.value })} /></label>
+        {s.colour && <button className="link small" onClick={() => onChange({ ...s, colour: undefined })}>Usual colour</button>}
+        <label className="small fp-check"><input type="checkbox" checked={!!s.flip} onChange={(e) => onChange({ ...s, flip: e.target.checked || undefined })} /> Mirror</label>
       </div>
       <div className="row">
         <button className="small-btn" title="Rotate left 15°" onClick={() => onChange({ ...s, rotation: (s.rotation + 345) % 360 })}><RotateCcw /> 15°</button>

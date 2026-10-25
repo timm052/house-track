@@ -97,6 +97,11 @@ If the token expires, make a new one (`read:packages`), put it in `/mnt/user/app
 
 ## Release notes
 
+### 0.4.24
+
+- **Releases build for Intel and AMD servers (amd64) only.** The ARM images were built under emulation and used several times the GitHub Actions minutes; a release now uses a fraction of them and builds faster. To run House Track on an ARM machine (a Raspberry Pi, say), add `linux/arm64` back in `.github/workflows/images.yml`.
+- Otherwise the same as 0.4.23. No database changes.
+
 ### 0.4.23
 
 - **Floor plans:** the panda and bear are now **Bubu** (the panda) and **Dudu** (the bear), drawn round and chubby like the characters, with rosy cheeks, sitting down and seen from above.
